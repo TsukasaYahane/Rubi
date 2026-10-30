@@ -210,6 +210,16 @@ impl RubiCore {
         Ok(FfiVideoCard::of(&self.card(&bvid).await?, None))
     }
 
+    /// Full details for the player page (always fresh from `view`, plus tags).
+    pub async fn video_detail(&self, bvid: String) -> Res<FfiVideoDetail> {
+        let detail = self.app.video.view(&bvid).await?;
+        let mut card = detail.card;
+        card.tags = self.app.video.tags(&bvid).await.unwrap_or_default();
+        card.cid = card.cid.or(Some(detail.cid)).filter(|&c| c > 0);
+        self.remember(std::slice::from_ref(&card));
+        Ok(FfiVideoDetail::of(&card, detail.pages.len().max(1) as u32))
+    }
+
     /// The BV id to open for a video pointer (av numbers are looked up).
     pub async fn resolve_video(&self, video: FfiVideoRef) -> Res<String> {
         match video {

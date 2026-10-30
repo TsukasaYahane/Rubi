@@ -81,6 +81,18 @@ object PlayerHolder {
         bindService(context)
     }
 
+    /**
+     * Stops and empties the player, so nothing of the previous video keeps playing or stays
+     * on screen while the next one loads. The view then shows its black shutter.
+     */
+    fun clear() {
+        current = null
+        player?.run {
+            stop()
+            clearMediaItems()
+        }
+    }
+
     fun release() = synchronized(this) {
         player?.release()
         player = null

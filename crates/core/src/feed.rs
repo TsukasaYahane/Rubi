@@ -42,6 +42,8 @@ pub struct Settings {
     /// A source is not asked again within this interval (risk-control courtesy).
     pub min_source_interval_s: u64,
     pub danmaku_display: DanmakuDisplay,
+    /// Keep playing when the app goes to the background. Off: pause instead.
+    pub background_play: bool,
 }
 
 /// How danmaku are drawn (the filters themselves live in the rule table).
@@ -89,6 +91,7 @@ impl Default for Settings {
             candidate_ttl_s: 6 * 3600,
             min_source_interval_s: 30,
             danmaku_display: DanmakuDisplay::default(),
+            background_play: false,
         }
     }
 }

@@ -3,7 +3,10 @@ package dev.rubi.app.ui
 import android.os.SystemClock
 import android.util.Log
 import android.view.LayoutInflater
+import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.background
+import androidx.compose.foundation.lazy.rememberLazyListState
+import dev.rubi.core.FfiVideoDetail
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -19,6 +22,7 @@ import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateListOf
@@ -40,7 +44,11 @@ import androidx.compose.ui.viewinterop.AndroidView
 import androidx.media3.ui.PlayerView
 import dev.rubi.app.R
 import dev.rubi.app.RubiApp
+import androidx.lifecycle.Lifecycle
+import androidx.lifecycle.LifecycleEventObserver
+import androidx.lifecycle.compose.LocalLifecycleOwner
 import dev.rubi.app.data.DanmakuDisplay
+import dev.rubi.app.data.PlaybackPrefs
 import dev.rubi.app.playback.PlayerHolder
 import dev.rubi.app.ui.theme.LocalMetro
 import dev.rubi.app.ui.theme.MetroType
@@ -55,6 +63,10 @@ import kotlinx.coroutines.withContext
 
 private const val TAG = "RubiPlayer"
 
+/** Index of the sticky 推荐 / 评论 bar in the player's list (after head and detail). */
+private const val TABS_INDEX = 2
+
+@OptIn(ExperimentalFoundationApi::class)
 @Composable
 fun PlayerScreen(app: RubiApp, nav: Nav, bvid: String, title: String) {
     val c = LocalMetro.current
@@ -66,11 +78,33 @@ fun PlayerScreen(app: RubiApp, nav: Nav, bvid: String, title: String) {
     var display by remember { mutableStateOf(DanmakuDisplay.load(app.core)) }
     var dmStatus by remember { mutableStateOf("弹幕加载中…") }
     var dmSheet by remember { mutableStateOf(false) }
+    var detail by remember { mutableStateOf<FfiVideoDetail?>(null) }
+    var detailOpen by remember { mutableStateOf(false) }
+    val listState = rememberLazyListState()
+    val scope = rememberCoroutineScope()
+
+    LaunchedEffect(bvid) { detail = runCatching { app.core.videoDetail(bvid) }.getOrNull() }
 
     // Recording the click is bookkeeping; never let it delay playback.
     LaunchedEffect(bvid) { runCatching { app.core.record(bvid, FfiSignal.Click) } }
 
+    // Leaving the page stops playback. Going to the background does not dispose the page;
+    // there playback pauses unless 后台播放 is on (read each time, so the toggle applies at once).
+    DisposableEffect(Unit) { onDispose { PlayerHolder.clear() } }
+    val lifecycle = LocalLifecycleOwner.current.lifecycle
+    DisposableEffect(lifecycle) {
+        val observer = LifecycleEventObserver { _, event ->
+            if (event == Lifecycle.Event.ON_STOP && !PlaybackPrefs.backgroundPlay(app.core)) {
+                PlayerHolder.get(ctx).pause()
+            }
+        }
+        lifecycle.addObserver(observer)
+        onDispose { lifecycle.removeObserver(observer) }
+    }
+
     LaunchedEffect(bvid) {
+        // Drop the previous video before fetching the next one.
+        PlayerHolder.clear()
         runCatching {
             val t0 = SystemClock.elapsedRealtime()
             val playback = app.core.playback(bvid, 80u)
@@ -140,21 +174,41 @@ fun PlayerScreen(app: RubiApp, nav: Nav, bvid: String, title: String) {
                 }
             }
         }
-        LazyColumn(Modifier.weight(1f)) {
-            item {
-                Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+        LazyColumn(Modifier.weight(1f), state = listState) {
+            item(key = "head") {
+                Column(Modifier.padding(start = 16.dp, end = 16.dp, top = 16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
                     Text(video?.title ?: title, style = MetroType.title, color = c.fg)
                     video?.let { Meta("${formatCount(it.views)} 播放 · ${formatAge(it.pubdate)} · ${it.zone ?: ""}") }
                     video?.let { Text(it.upName, fontSize = 15.sp, fontWeight = FontWeight.SemiBold, color = c.fg) }
+                }
+            }
+            item(key = "detail") {
+                Column(Modifier.padding(horizontal = 16.dp, vertical = 8.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                    detail?.let { VideoDetailBlock(it, detailOpen) { detailOpen = !detailOpen } }
                     error?.let { Text(it, color = c.fg2, fontSize = 13.sp) }
                     danmaku?.removed?.takeIf { it.isNotEmpty() }?.let { Meta("已过滤 · " + it.joinToString(" · ")) }
                 }
-                Pivot(listOf("推荐", "评论"), tab, { tab = it }, MetroType.section)
+            }
+            // Pinned under the player while scrolling. Tapping the active tab returns to the top;
+            // tapping the other one switches and keeps the bar where it is.
+            stickyHeader(key = "tabs") {
+                Box(Modifier.fillMaxWidth().background(c.bg)) {
+                    Pivot(listOf("推荐", "评论"), tab, { picked ->
+                        scope.launch {
+                            if (picked == tab) {
+                                listState.animateScrollToItem(0)
+                            } else {
+                                tab = picked
+                                if (listState.firstVisibleItemIndex >= TABS_INDEX) listState.scrollToItem(TABS_INDEX)
+                            }
+                        }
+                    }, MetroType.section)
+                }
             }
             if (tab == 0) {
-                item { RelatedList(app, nav, bvid) }
+                item(key = "related") { RelatedList(app, nav, bvid) }
             } else {
-                video?.let { v -> item { CommentSection(app, v.aid) } }
+                video?.let { v -> item(key = "comments") { CommentSection(app, v.aid) } }
             }
         }
     }

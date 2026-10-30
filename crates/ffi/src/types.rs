@@ -67,6 +67,52 @@ fn reason_label(s: &ScoreBreakdown) -> String {
         .unwrap_or_default()
 }
 
+/// Everything the player page's 视频详情 block shows.
+#[derive(Debug, Clone, uniffi::Record)]
+pub struct FfiVideoDetail {
+    pub bvid: String,
+    pub aid: u64,
+    pub title: String,
+    pub desc: String,
+    pub up_name: String,
+    pub up_mid: u64,
+    pub zone: Option<String>,
+    pub tags: Vec<String>,
+    pub pubdate: i64,
+    pub duration_s: u32,
+    pub pages: u32,
+    pub views: u64,
+    pub danmaku: u64,
+    pub replies: u64,
+    pub likes: u64,
+    pub coins: u64,
+    pub favorites: u64,
+}
+
+impl FfiVideoDetail {
+    pub fn of(c: &VideoCard, pages: u32) -> Self {
+        Self {
+            bvid: c.bvid.clone(),
+            aid: c.aid,
+            title: c.title.clone(),
+            desc: c.desc.clone(),
+            up_name: c.owner.name.clone(),
+            up_mid: c.owner.mid,
+            zone: c.zone.as_ref().map(|z| z.name.clone()),
+            tags: c.tags.clone(),
+            pubdate: c.pubdate,
+            duration_s: c.duration_s,
+            pages,
+            views: c.stats.view,
+            danmaku: c.stats.danmaku,
+            replies: c.stats.reply,
+            likes: c.stats.like,
+            coins: c.stats.coin,
+            favorites: c.stats.favorite,
+        }
+    }
+}
+
 #[derive(Debug, Clone, uniffi::Record)]
 pub struct FfiScorePart {
     pub factor: String,

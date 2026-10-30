@@ -76,6 +76,13 @@ fun SettingsScreen(app: RubiApp, nav: Nav) {
         if (note.isNotEmpty()) Meta(note, Modifier.padding(horizontal = 16.dp))
         // `version` forces recomposition after in-place JSON edits.
         LazyColumn(Modifier.weight(1f)) {
+            item(key = "playback-$version") {
+                SectionTitle("播放")
+                ToggleRow("后台播放", "切到后台后继续播放；关闭时自动暂停", settings.optBoolean("background_play", false)) {
+                    settings.put("background_play", it)
+                    save()
+                }
+            }
             item(key = "filters-$version") {
                 SectionTitle("内容过滤")
                 FILTER_TOGGLES.forEach { (key, title, desc) ->

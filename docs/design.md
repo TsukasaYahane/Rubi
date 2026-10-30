@@ -204,7 +204,7 @@
 
 ## 8. 播放与弹幕渲染
 
-- Media3 / ExoPlayer，运行于 `MediaSessionService`：MVP 起支持后台播放、锁屏/通知栏控制、耳机按键。
+- Media3 / ExoPlayer，运行于 `MediaSessionService`：锁屏/通知栏控制、耳机按键。后台播放为设置项「后台播放」，默认关闭（切到后台暂停）；离开播放页即停止。
 - 纯音频（听视频）模式：预留仅拉音频流的接口，暂不做 UI。
 - 画质：遵循账号权限（720P60 / 1080P 需登录；更高需大会员，不绕过）。
 - 弹幕渲染（自研）：Rust 解析 protobuf 弹幕、过滤、轨道与碰撞布局；Kotlin 在透明 SurfaceView/TextureView 上按时间轴绘制。**兼容性与适配性优先**，性能与表现后续优化。
