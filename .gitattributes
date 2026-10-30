@@ -1,1 +1,6 @@
 * text=auto eol=lf
+# Windows batch files misparse labels with LF line endings.
+*.bat text eol=crlf
+*.cmd text eol=crlf
+# Binary wrapper jar must never be touched.
+*.jar binary
