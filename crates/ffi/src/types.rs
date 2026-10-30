@@ -251,6 +251,15 @@ pub struct FfiCommentRow {
     pub likes: u64,
     pub is_up: bool,
     pub ctime: i64,
+    /// Emotes this comment uses that may be missing from the global set.
+    pub emotes: Vec<FfiEmote>,
+}
+
+#[derive(Debug, Clone, uniffi::Record)]
+pub struct FfiEmote {
+    /// The token as it appears in text, e.g. `[doge]`.
+    pub text: String,
+    pub url: String,
 }
 
 impl FfiCommentRow {
@@ -265,6 +274,7 @@ impl FfiCommentRow {
             likes: c.likes,
             is_up: c.is_up,
             ctime: c.ctime,
+            emotes: c.emotes.iter().map(|(text, url)| FfiEmote { text: text.clone(), url: url.clone() }).collect(),
         }
     }
 }

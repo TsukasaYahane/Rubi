@@ -2,13 +2,14 @@ use std::path::Path;
 use std::sync::Arc;
 
 use rubi_api::{
-    ActionApi, AuthApi, ChatApi, CommentApi, CommentSort, DanmakuApi, FeedApi, HotWord, HttpClient, LibraryApi,
-    NoticeApi, SearchApi, SearchOrder, Session, VideoApi, WebAccount, WebAuth, WebComment, WebDanmaku, WebFeed,
-    WebMessages, WebSearch, WebVideo,
+    ActionApi, AuthApi, ChatApi, CommentApi, CommentSort, DEFAULT_PACKAGES, DanmakuApi, Emote, EmoteApi, FeedApi,
+    HotWord, HttpClient, LibraryApi, NoticeApi, SearchApi, SearchOrder, Session, VideoApi, WebAccount, WebAuth,
+    WebComment, WebDanmaku, WebEmote, WebFeed, WebMessages, WebSearch, WebVideo,
 };
 use rubi_model::{ChatSession, Comment, FeedbackEvent, ItemRef, Signal, VideoCard, now_secs};
 use rubi_recommend::Source;
 use rubi_store::SqliteStore;
+use tokio::sync::Mutex as AsyncMutex;
 
 use crate::error::Result;
 use crate::feed::{FeedService, Seeded};
@@ -33,7 +34,9 @@ pub struct App {
     pub chat: Arc<dyn ChatApi>,
     pub actions: Arc<dyn ActionApi>,
     pub library: Arc<dyn LibraryApi>,
+    pub emote: Arc<dyn EmoteApi>,
     pub feed: FeedService<SqliteStore>,
+    emotes: AsyncMutex<Option<Arc<Vec<Emote>>>>,
 }
 
 impl App {
@@ -65,10 +68,40 @@ impl App {
             chat: messages,
             actions: account.clone(),
             library: account,
+            emote: Arc::new(WebEmote::new(http.clone())),
             feed_api,
             http,
             feed,
+            emotes: AsyncMutex::new(None),
         })
+    }
+
+    /// The default emote set (`[doge]` → image url), fetched once per process.
+    pub async fn emotes(&self) -> Result<Arc<Vec<Emote>>> {
+        let mut cached = self.emotes.lock().await;
+        if let Some(e) = cached.as_ref() {
+            return Ok(e.clone());
+        }
+        let list = Arc::new(self.emote.packages(DEFAULT_PACKAGES).await?);
+        *cached = Some(list.clone());
+        Ok(list)
+    }
+
+    /// 热门 list with ads and blocked items removed.
+    pub async fn popular(&self, pn: u32) -> Result<Vec<VideoCard>> {
+        let cards = self.feed_api.popular(pn.max(1), 20).await?;
+        self.filter_list(cards)
+    }
+
+    /// 排行 list with ads and blocked items removed.
+    pub async fn ranking(&self) -> Result<Vec<VideoCard>> {
+        let cards = self.feed_api.ranking(0).await?;
+        self.filter_list(cards)
+    }
+
+    fn filter_list(&self, cards: Vec<VideoCard>) -> Result<Vec<VideoCard>> {
+        let pipeline = self.feed.settings().rules.card_pipeline(None, now_secs)?;
+        Ok(cards.into_iter().filter(|c| !pipeline.judge(c).is_blocked()).collect())
     }
 
     fn signal(&self, card: &VideoCard, signal: Signal) -> Result<()> {

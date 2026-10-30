@@ -16,6 +16,9 @@ pub struct Comment {
     pub reply_count: u32,
     /// Pinned by the UP or the platform.
     pub pinned: bool,
+    /// Emote image urls used in `text`, keyed by their token (e.g. `[doge]`).
+    #[serde(default)]
+    pub emotes: std::collections::BTreeMap<String, String>,
     /// The reply exactly as the API returned it; the pinned-comment rules match against this.
     #[serde(default)]
     pub raw: serde_json::Value,

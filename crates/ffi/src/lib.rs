@@ -324,6 +324,25 @@ impl RubiCore {
         Ok(FfiHotWords { words: words.into_iter().map(|w| w.keyword).collect(), hidden: hidden as u32 })
     }
 
+    /// The default emote set, for rendering `[doge]`-style tokens as images.
+    pub async fn emotes(&self) -> Res<Vec<FfiEmote>> {
+        Ok(self.app.emotes().await?.iter().map(|e| FfiEmote { text: e.text.clone(), url: e.url.clone() }).collect())
+    }
+
+    // ----- home lists -----
+
+    pub async fn popular(&self, page: u32) -> Res<Vec<FfiVideoCard>> {
+        let cards = self.app.popular(page).await?;
+        self.remember(&cards);
+        Ok(cards.iter().map(|c| FfiVideoCard::of(c, None)).collect())
+    }
+
+    pub async fn ranking(&self) -> Res<Vec<FfiVideoCard>> {
+        let cards = self.app.ranking().await?;
+        self.remember(&cards);
+        Ok(cards.iter().map(|c| FfiVideoCard::of(c, None)).collect())
+    }
+
     // ----- message center -----
 
     pub async fn unread(&self) -> Res<FfiUnread> {

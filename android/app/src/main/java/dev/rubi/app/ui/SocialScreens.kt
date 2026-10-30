@@ -148,8 +148,8 @@ fun InboxScreen(app: RubiApp, nav: Nav) {
                 items(notices, key = { it.id.toString() }) { n ->
                     Column(Modifier.padding(horizontal = 16.dp, vertical = 12.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
                         Text(n.from, fontSize = 15.sp, fontWeight = FontWeight.SemiBold, color = c.fg)
-                        Text(n.text, fontSize = 15.sp, lineHeight = 22.sp, color = c.fg)
-                        Text(n.context, fontSize = 12.sp, color = c.fg2)
+                        EmoteText(n.text, color = c.fg, fontSize = 15.sp, lineHeight = 22.sp)
+                        EmoteText(n.context, color = c.fg2, fontSize = 12.sp)
                         Meta(formatAge(n.at))
                     }
                 }
@@ -161,7 +161,7 @@ fun InboxScreen(app: RubiApp, nav: Nav) {
                     ) {
                         Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(4.dp)) {
                             Text(s.name, fontSize = 20.sp, fontWeight = if (s.unread > 0u) FontWeight.SemiBold else FontWeight.Light, color = c.fg)
-                            Text((if (s.lastFromMe) "我：" else "") + s.lastText, fontSize = 14.sp, color = c.fg2, maxLines = 1)
+                            EmoteText((if (s.lastFromMe) "我：" else "") + s.lastText, color = c.fg2, fontSize = 14.sp, maxLines = 1)
                         }
                         Column(horizontalAlignment = Alignment.End, verticalArrangement = Arrangement.spacedBy(6.dp)) {
                             Meta(formatAge(s.lastAt))
@@ -201,7 +201,7 @@ fun ChatScreen(app: RubiApp, nav: Nav, mid: ULong, name: String) {
         LazyColumn(Modifier.weight(1f).padding(horizontal = 16.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
             items(messages, key = { it.seqno.toString() }) { m ->
                 Box(Modifier.fillMaxWidth(), contentAlignment = if (m.fromMe) Alignment.CenterEnd else Alignment.CenterStart) {
-                    Text(
+                    EmoteText(
                         m.text,
                         fontSize = 15.sp,
                         lineHeight = 22.sp,

@@ -19,6 +19,7 @@ import androidx.compose.foundation.lazy.grid.GridCells
 import androidx.compose.foundation.lazy.grid.GridItemSpan
 import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
 import androidx.compose.foundation.lazy.grid.items
+import androidx.compose.foundation.lazy.grid.itemsIndexed
 import androidx.compose.foundation.lazy.grid.rememberLazyGridState
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.ModalBottomSheet
@@ -63,6 +64,7 @@ fun HomeScreen(app: RubiApp, nav: Nav) {
     var refreshing by remember { mutableStateOf(false) }
     var dual by remember { mutableStateOf(true) }
     var why by remember { mutableStateOf<FfiVideoCard?>(null) }
+    var pivot by remember { mutableStateOf(0) }
     val grid = rememberLazyGridState()
 
     suspend fun load(reset: Boolean) {
@@ -84,13 +86,17 @@ fun HomeScreen(app: RubiApp, nav: Nav) {
 
     Column(Modifier.fillMaxSize()) {
         Row(verticalAlignment = Alignment.CenterVertically) {
-            Box(Modifier.weight(1f)) { Pivot(listOf("推荐"), 0, {}) }
+            Box(Modifier.weight(1f)) { Pivot(listOf("推荐", "热门", "排行"), pivot, { pivot = it }) }
             Text(
                 if (dual) "▦ 双列" else "▭ 单列",
                 style = MetroType.meta.copy(fontSize = 12.sp),
                 color = c.fg,
                 modifier = Modifier.padding(end = 16.dp).clickable { dual = !dual },
             )
+        }
+        if (pivot != 0) {
+            HotRankList(app, nav, ranking = pivot == 2, dual = dual)
+            return@Column
         }
         Row(Modifier.fillMaxWidth().height(44.dp).padding(horizontal = 16.dp), verticalAlignment = Alignment.CenterVertically) {
             Meta(status, Modifier.weight(1f))
@@ -120,6 +126,71 @@ fun HomeScreen(app: RubiApp, nav: Nav) {
             cards.removeAll { it.bvid == card.bvid }
             why = null
         })
+    }
+}
+
+/** 热门 (paged grid) and 排行 (numbered list); both already filtered by the rule table. */
+@Composable
+private fun HotRankList(app: RubiApp, nav: Nav, ranking: Boolean, dual: Boolean) {
+    val c = LocalMetro.current
+    val cards = remember(ranking) { mutableStateListOf<FfiVideoCard>() }
+    var page by remember(ranking) { mutableStateOf(1u) }
+    var loading by remember(ranking) { mutableStateOf(false) }
+    var error by remember(ranking) { mutableStateOf<String?>(null) }
+    val grid = rememberLazyGridState()
+
+    suspend fun more() {
+        if (loading) return
+        loading = true
+        runCatching { if (ranking) app.core.ranking() else app.core.popular(page) }
+            .onSuccess { list ->
+                cards.addAll(list.filter { n -> cards.none { it.bvid == n.bvid } })
+                page++
+            }
+            .onFailure { error = it.message }
+        loading = false
+    }
+
+    LaunchedEffect(ranking) { more() }
+    if (!ranking) {
+        val nearEnd by remember { derivedStateOf { (grid.layoutInfo.visibleItemsInfo.lastOrNull()?.index ?: 0) >= cards.size - 4 } }
+        LaunchedEffect(nearEnd) { if (nearEnd && cards.isNotEmpty() && page <= 10u) more() }
+    }
+
+    LazyVerticalGrid(
+        columns = GridCells.Fixed(if (dual && !ranking) 2 else 1),
+        state = grid,
+        contentPadding = PaddingValues(start = 16.dp, end = 16.dp, top = 8.dp, bottom = 28.dp),
+        horizontalArrangement = Arrangement.spacedBy(12.dp),
+        verticalArrangement = Arrangement.spacedBy(if (ranking) 4.dp else 22.dp),
+        modifier = Modifier.fillMaxSize(),
+    ) {
+        error?.let { e -> item(span = { GridItemSpan(maxLineSpan) }) { Text("加载失败：$e", color = c.fg2, fontSize = 13.sp) } }
+        if (ranking) {
+            itemsIndexed(cards, key = { _, it -> it.bvid }) { i, card ->
+                Row(
+                    Modifier.fillMaxWidth().clickable { nav.push(Screen.Player(card.bvid, card.title)) }.padding(vertical = 10.dp),
+                    horizontalArrangement = Arrangement.spacedBy(14.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    Text(
+                        "%02d".format(i + 1),
+                        style = MetroType.meta.copy(fontSize = 28.sp),
+                        color = if (i < 3) c.fg else c.fg2,
+                        fontWeight = if (i < 3) androidx.compose.ui.text.font.FontWeight.SemiBold else androidx.compose.ui.text.font.FontWeight.Light,
+                        modifier = Modifier.width(48.dp),
+                    )
+                    Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                        Text(card.title, fontSize = 15.sp, color = c.fg, maxLines = 2, overflow = TextOverflow.Ellipsis)
+                        Meta("${card.upName} · ${formatCount(card.views)}")
+                    }
+                }
+            }
+        } else {
+            items(cards, key = { it.bvid }) { card ->
+                VideoCardView(card, big = !dual, onOpen = { nav.push(Screen.Player(card.bvid, card.title)) })
+            }
+        }
     }
 }
 

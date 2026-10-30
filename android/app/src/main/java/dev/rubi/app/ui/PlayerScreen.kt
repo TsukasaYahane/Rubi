@@ -11,6 +11,7 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.wrapContentSize
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.material3.Text
@@ -58,6 +59,7 @@ fun PlayerScreen(app: RubiApp, nav: Nav, bvid: String, title: String) {
     var danmaku by remember { mutableStateOf<FfiDanmakuSet?>(null) }
     var error by remember { mutableStateOf<String?>(null) }
     var tab by remember { mutableStateOf(0) }
+    var showDanmaku by remember { mutableStateOf(true) }
 
     LaunchedEffect(bvid) {
         runCatching {
@@ -73,11 +75,21 @@ fun PlayerScreen(app: RubiApp, nav: Nav, bvid: String, title: String) {
         Row(Modifier.fillMaxWidth().padding(start = 4.dp, end = 16.dp), verticalAlignment = Alignment.CenterVertically) {
             Box(Modifier.size(44.dp).clickable { nav.pop() }, contentAlignment = Alignment.Center) { GlyphIcon(Glyph.Back) }
             Meta(danmaku?.let { "弹幕 ${it.items.size} · 空降点 ${it.jumpMarks.size}" } ?: "", Modifier.weight(1f))
+            Text(
+                if (showDanmaku) "弹 开" else "弹 关",
+                style = MetroType.meta.copy(fontSize = 12.sp),
+                color = if (showDanmaku) c.fg else c.fg2,
+                modifier = Modifier.size(56.dp, 44.dp).wrapContentSize(Alignment.CenterEnd).clickable { showDanmaku = !showDanmaku },
+            )
         }
-        AndroidView(
-            factory = { PlayerView(it).apply { player = PlayerHolder.get(it) } },
-            modifier = Modifier.fillMaxWidth().aspectRatio(16f / 9f).background(Color.Black),
-        )
+        Box(Modifier.fillMaxWidth().aspectRatio(16f / 9f).background(Color.Black)) {
+            AndroidView(
+                factory = { PlayerView(it).apply { player = PlayerHolder.get(it) } },
+                modifier = Modifier.fillMaxSize(),
+            )
+            val set = danmaku
+            if (showDanmaku && set != null) DanmakuLayer(app.core, set, Modifier.fillMaxSize())
+        }
         danmaku?.jumpMarks?.takeIf { it.isNotEmpty() }?.let { marks ->
             Row(Modifier.padding(horizontal = 16.dp, vertical = 4.dp), horizontalArrangement = Arrangement.spacedBy(16.dp)) {
                 Meta("空降点")
@@ -223,11 +235,12 @@ private fun CommentRow(row: FfiCommentRow, open: BooleanArray, pinnedLabel: Bool
             if (row.isUp) Tag("UP")
             Meta(formatAge(row.ctime))
         }
-        Text(
+        EmoteText(
             (row.replyTo?.let { "回复 @$it：" } ?: "") + row.text,
+            color = c.fg,
             fontSize = 14.sp,
             lineHeight = 21.sp,
-            color = c.fg,
+            extra = row.emotes,
         )
         Meta("赞 ${row.likes}")
     }

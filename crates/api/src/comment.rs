@@ -68,6 +68,10 @@ pub(crate) fn comment_of(v: &Value, up_mid: u64) -> Comment {
         is_up: up_mid != 0 && mid == up_mid,
         reply_count: u64_of(&v["rcount"]) as u32,
         pinned: false,
+        emotes: v["content"]["emote"]
+            .as_object()
+            .map(|m| m.iter().map(|(k, e)| (k.clone(), str_of(&e["url"]))).filter(|(_, u)| !u.is_empty()).collect())
+            .unwrap_or_default(),
         raw: v.clone(),
     }
 }
@@ -140,7 +144,7 @@ mod tests {
             "top_replies": [],
             "replies": [{
                 "rpid": 2, "root": 0, "parent": 0, "mid": 5, "like": 3, "rcount": 4, "ctime": 100,
-                "member": {"uname": "a"}, "content": {"message": "hi"},
+                "member": {"uname": "a"}, "content": {"message": "hi[doge]", "emote": {"[doge]": {"url": "https://e/doge.png"}}},
                 "replies": [{"rpid": 3, "root": 2, "parent": 2, "mid": 9, "member": {"uname": "up"}, "content": {"message": "yo"}}]
             }],
             "cursor": {"is_end": false, "pagination_reply": {"next_offset": "abc"}}
@@ -149,6 +153,7 @@ mod tests {
         assert_eq!(p.pinned.len(), 1);
         assert!(p.pinned[0].pinned && p.pinned[0].is_up);
         assert_eq!(p.threads[0].total_replies, 4);
+        assert_eq!(p.threads[0].root.emotes["[doge]"], "https://e/doge.png");
         assert!(p.threads[0].preview[0].is_up);
         assert_eq!(p.threads[0].preview[0].parent, 2);
         assert_eq!(p.next_offset.as_deref(), Some("abc"));

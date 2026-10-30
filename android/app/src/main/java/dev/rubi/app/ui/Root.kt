@@ -16,6 +16,7 @@ import androidx.compose.foundation.layout.safeDrawingPadding
 import androidx.compose.foundation.layout.size
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateListOf
@@ -39,6 +40,7 @@ sealed interface Screen {
     data class Chat(val mid: ULong, val name: String) : Screen
     data object Login : Screen
     data object Filtered : Screen
+    data object Settings : Screen
 }
 
 enum class Tab(val label: String) { Home("首页"), Follow("关注"), Me("我的") }
@@ -56,13 +58,16 @@ fun RubiRoot(app: RubiApp) {
     val c = LocalMetro.current
     val nav = remember { Nav() }
     var unread by remember { mutableStateOf(0u) }
+    var emotes by remember { mutableStateOf(emptyMap<String, String>()) }
 
     LaunchedEffect(Unit) {
         runCatching { app.core.ensureDeviceIds(); app.saveSession() }
+        emotes = runCatching { app.core.emotes().associate { it.text to it.url } }.getOrDefault(emptyMap())
         unread = runCatching { app.core.unread().let { it.reply + it.at + it.like + it.chat } }.getOrDefault(0u)
     }
     BackHandler(enabled = nav.stack.isNotEmpty()) { nav.pop() }
 
+    CompositionLocalProvider(LocalEmotes provides emotes) {
     Box(Modifier.fillMaxSize().background(c.bg).safeDrawingPadding()) {
         when (val top = nav.stack.lastOrNull()) {
             null -> Column(Modifier.fillMaxSize()) {
@@ -82,7 +87,9 @@ fun RubiRoot(app: RubiApp) {
             is Screen.Chat -> ChatScreen(app, nav, top.mid, top.name)
             Screen.Login -> LoginScreen(app, nav)
             Screen.Filtered -> FilteredScreen(app, nav)
+            Screen.Settings -> SettingsScreen(app, nav)
         }
+    }
     }
 }
 

@@ -67,6 +67,7 @@ fun MeScreen(app: RubiApp, nav: Nav) {
         }
         val rows = listOf<Pair<String, () -> Unit>>(
             "被过滤内容" to { nav.push(Screen.Filtered) },
+            "设置" to { nav.push(Screen.Settings) },
             "导出配置" to {
                 val dir = app.getExternalFilesDir(null) ?: app.filesDir
                 val path = java.io.File(dir, "rubi-export.zip").absolutePath
