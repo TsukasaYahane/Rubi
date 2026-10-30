@@ -1,5 +1,7 @@
 package dev.rubi.app.ui
 
+import android.util.Log
+import android.view.LayoutInflater
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
@@ -35,7 +37,9 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.viewinterop.AndroidView
 import androidx.media3.ui.PlayerView
+import dev.rubi.app.R
 import dev.rubi.app.RubiApp
+import dev.rubi.app.data.DanmakuDisplay
 import dev.rubi.app.playback.PlayerHolder
 import dev.rubi.app.ui.theme.LocalMetro
 import dev.rubi.app.ui.theme.MetroType
@@ -48,8 +52,7 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 
-/** Replies shown per thread before "再看 5 条". */
-private const val THREAD_PREVIEW = 3u
+private const val TAG = "RubiPlayer"
 
 @Composable
 fun PlayerScreen(app: RubiApp, nav: Nav, bvid: String, title: String) {
@@ -59,7 +62,9 @@ fun PlayerScreen(app: RubiApp, nav: Nav, bvid: String, title: String) {
     var danmaku by remember { mutableStateOf<FfiDanmakuSet?>(null) }
     var error by remember { mutableStateOf<String?>(null) }
     var tab by remember { mutableStateOf(0) }
-    var showDanmaku by remember { mutableStateOf(true) }
+    var display by remember { mutableStateOf(DanmakuDisplay.load(app.core)) }
+    var dmStatus by remember { mutableStateOf("弹幕加载中…") }
+    var dmSheet by remember { mutableStateOf(false) }
 
     LaunchedEffect(bvid) {
         runCatching {
@@ -67,28 +72,49 @@ fun PlayerScreen(app: RubiApp, nav: Nav, bvid: String, title: String) {
             val v = app.core.video(bvid).also { video = it }
             val playback = app.core.playback(bvid, 80u)
             PlayerHolder.play(ctx, playback, v.title)
-            danmaku = runCatching { app.core.danmaku(playback.cid, v.durationS * 1000u) }.getOrNull()
+            val durationMs = maxOf(v.durationS.toULong() * 1000u, playback.durationMs).toUInt()
+            runCatching { app.core.danmaku(playback.cid, durationMs) }
+                .onSuccess { set ->
+                    danmaku = set
+                    dmStatus = "弹幕 ${set.items.size} · 空降点 ${set.jumpMarks.size}"
+                    Log.i(TAG, "danmaku loaded: ${set.items.size} items, removed ${set.removed}")
+                }
+                .onFailure { e ->
+                    dmStatus = "弹幕加载失败：${e.message}"
+                    Log.w(TAG, "danmaku load failed", e)
+                }
         }.onFailure { error = it.message }
     }
 
     Column(Modifier.fillMaxSize()) {
         Row(Modifier.fillMaxWidth().padding(start = 4.dp, end = 16.dp), verticalAlignment = Alignment.CenterVertically) {
             Box(Modifier.size(44.dp).clickable { nav.pop() }, contentAlignment = Alignment.Center) { GlyphIcon(Glyph.Back) }
-            Meta(danmaku?.let { "弹幕 ${it.items.size} · 空降点 ${it.jumpMarks.size}" } ?: "", Modifier.weight(1f))
+            Meta(dmStatus, Modifier.weight(1f))
             Text(
-                if (showDanmaku) "弹 开" else "弹 关",
+                if (display.enabled) "弹 开" else "弹 关",
                 style = MetroType.meta.copy(fontSize = 12.sp),
-                color = if (showDanmaku) c.fg else c.fg2,
-                modifier = Modifier.size(56.dp, 44.dp).wrapContentSize(Alignment.CenterEnd).clickable { showDanmaku = !showDanmaku },
+                color = if (display.enabled) c.fg else c.fg2,
+                modifier = Modifier.size(52.dp, 44.dp).wrapContentSize(Alignment.CenterEnd).clickable {
+                    display = display.copy(enabled = !display.enabled)
+                    runCatching { DanmakuDisplay.save(app.core, display) }
+                },
+            )
+            Text(
+                "设置",
+                style = MetroType.meta.copy(fontSize = 12.sp),
+                color = c.fg,
+                modifier = Modifier.size(44.dp, 44.dp).wrapContentSize(Alignment.CenterEnd).clickable { dmSheet = true },
             )
         }
         Box(Modifier.fillMaxWidth().aspectRatio(16f / 9f).background(Color.Black)) {
             AndroidView(
-                factory = { PlayerView(it).apply { player = PlayerHolder.get(it) } },
+                factory = {
+                    (LayoutInflater.from(it).inflate(R.layout.player_view, null) as PlayerView).apply { player = PlayerHolder.get(it) }
+                },
                 modifier = Modifier.fillMaxSize(),
             )
             val set = danmaku
-            if (showDanmaku && set != null) DanmakuLayer(app.core, set, Modifier.fillMaxSize())
+            if (display.enabled && set != null) DanmakuLayer(app.core, set, display, Modifier.fillMaxSize())
         }
         danmaku?.jumpMarks?.takeIf { it.isNotEmpty() }?.let { marks ->
             Row(Modifier.padding(horizontal = 16.dp, vertical = 4.dp), horizontalArrangement = Arrangement.spacedBy(16.dp)) {
@@ -117,6 +143,17 @@ fun PlayerScreen(app: RubiApp, nav: Nav, bvid: String, title: String) {
                 video?.let { v -> item { CommentSection(app, v.aid) } }
             }
         }
+    }
+
+    if (dmSheet) {
+        DanmakuSettingsSheet(
+            display = display,
+            onChange = {
+                display = it
+                runCatching { DanmakuDisplay.save(app.core, it) }
+            },
+            onDismiss = { dmSheet = false },
+        )
     }
 }
 

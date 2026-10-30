@@ -17,6 +17,7 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.grid.GridCells
 import androidx.compose.foundation.lazy.grid.GridItemSpan
+import androidx.compose.foundation.lazy.grid.LazyGridState
 import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
 import androidx.compose.foundation.lazy.grid.items
 import androidx.compose.foundation.lazy.grid.itemsIndexed
@@ -54,52 +55,85 @@ import kotlinx.coroutines.withContext
 
 private const val PAGE = 20u
 
+/** One list (推荐 / 热门 / 排行) that keeps its cards and scroll position. */
+class FeedList {
+    val cards = mutableStateListOf<FfiVideoCard>()
+    val grid = LazyGridState()
+    var page by mutableStateOf(1u)
+    var loading by mutableStateOf(false)
+    var error by mutableStateOf<String?>(null)
+}
+
+/**
+ * Home-tab state hoisted above the screen: it survives opening a video, switching tabs
+ * and coming back, so the feed only changes when the user pulls to refresh.
+ */
+class HomeState {
+    val recommend = FeedList()
+    val hot = FeedList()
+    val rank = FeedList()
+    var status by mutableStateOf("")
+    var dual by mutableStateOf(true)
+    var pivot by mutableStateOf(0)
+}
+
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-fun HomeScreen(app: RubiApp, nav: Nav) {
+fun HomeScreen(app: RubiApp, nav: Nav, home: HomeState) {
     val c = LocalMetro.current
     val scope = rememberCoroutineScope()
-    val cards = remember { mutableStateListOf<FfiVideoCard>() }
-    var status by remember { mutableStateOf("") }
-    var refreshing by remember { mutableStateOf(false) }
-    var dual by remember { mutableStateOf(true) }
+    val feed = home.recommend
+    val cards = feed.cards
+    val grid = feed.grid
     var why by remember { mutableStateOf<FfiVideoCard?>(null) }
-    var pivot by remember { mutableStateOf(0) }
-    val grid = rememberLazyGridState()
 
+    /** `reset` = user pulled to refresh; otherwise append the next page from the pool. */
     suspend fun load(reset: Boolean) {
-        refreshing = true
-        val report = runCatching { app.core.refreshFeed(20u) }
-        val page = withContext(Dispatchers.IO) { runCatching { app.core.nextPage(PAGE) }.getOrDefault(emptyList()) }
+        if (feed.loading) return
+        feed.loading = true
+        var report = if (reset || cards.isEmpty()) runCatching { app.core.refreshFeed(20u) } else null
+        suspend fun next() = withContext(Dispatchers.IO) { runCatching { app.core.nextPage(PAGE) }.getOrDefault(emptyList()) }
+        var page = next()
+        if (page.isEmpty() && report == null) {
+            // Pool used up while scrolling: fetch more candidates and append, never replace.
+            report = runCatching { app.core.refreshFeed(20u) }
+            page = next()
+        }
         if (reset) cards.clear()
         cards.addAll(page.filter { p -> cards.none { it.bvid == p.bvid } })
-        status = report.fold(
-            { r -> "↻ 本次保留 ${r.kept} · 过滤 ${r.blocked}" + if (r.errors.isNotEmpty()) " · ${r.errors.size} 个来源失败" else "" },
-            { e -> "刷新失败：${e.message}" },
-        )
-        refreshing = false
+        report?.let {
+            home.status = it.fold(
+                { r -> "↻ 本次保留 ${r.kept} · 过滤 ${r.blocked}" + if (r.errors.isNotEmpty()) " · ${r.errors.size} 个来源失败" else "" },
+                { e -> "刷新失败：${e.message}" },
+            )
+        }
+        feed.loading = false
     }
 
-    LaunchedEffect(Unit) { if (cards.isEmpty()) load(reset = true) }
-    val nearEnd by remember { derivedStateOf { grid.layoutInfo.visibleItemsInfo.lastOrNull()?.index ?: 0 >= cards.size - 4 } }
-    LaunchedEffect(nearEnd) { if (nearEnd && cards.isNotEmpty() && !refreshing) load(reset = false) }
+    // First visit only: an existing list is kept as is when returning to this screen.
+    LaunchedEffect(Unit) { if (cards.isEmpty()) load(reset = false) }
+    val nearEnd by remember { derivedStateOf { (grid.layoutInfo.visibleItemsInfo.lastOrNull()?.index ?: 0) >= cards.size - 4 } }
+    LaunchedEffect(nearEnd) { if (nearEnd && cards.isNotEmpty()) load(reset = false) }
+    val refreshing = feed.loading
+    val dual = home.dual
+    val pivot = home.pivot
 
     Column(Modifier.fillMaxSize()) {
         Row(verticalAlignment = Alignment.CenterVertically) {
-            Box(Modifier.weight(1f)) { Pivot(listOf("推荐", "热门", "排行"), pivot, { pivot = it }) }
+            Box(Modifier.weight(1f)) { Pivot(listOf("推荐", "热门", "排行"), pivot, { home.pivot = it }) }
             Text(
                 if (dual) "▦ 双列" else "▭ 单列",
                 style = MetroType.meta.copy(fontSize = 12.sp),
                 color = c.fg,
-                modifier = Modifier.padding(end = 16.dp).clickable { dual = !dual },
+                modifier = Modifier.padding(end = 16.dp).clickable { home.dual = !home.dual },
             )
         }
         if (pivot != 0) {
-            HotRankList(app, nav, ranking = pivot == 2, dual = dual)
+            HotRankList(app, nav, if (pivot == 2) home.rank else home.hot, ranking = pivot == 2, dual = dual)
             return@Column
         }
         Row(Modifier.fillMaxWidth().height(44.dp).padding(horizontal = 16.dp), verticalAlignment = Alignment.CenterVertically) {
-            Meta(status, Modifier.weight(1f))
+            Meta(home.status, Modifier.weight(1f))
             Text("被过滤内容 →", style = MetroType.meta, color = c.fg, modifier = Modifier.clickable { nav.push(Screen.Filtered) })
         }
         PullToRefreshBox(isRefreshing = refreshing, onRefresh = { scope.launch { load(reset = true) } }) {
@@ -131,30 +165,29 @@ fun HomeScreen(app: RubiApp, nav: Nav) {
 
 /** 热门 (paged grid) and 排行 (numbered list); both already filtered by the rule table. */
 @Composable
-private fun HotRankList(app: RubiApp, nav: Nav, ranking: Boolean, dual: Boolean) {
+private fun HotRankList(app: RubiApp, nav: Nav, list: FeedList, ranking: Boolean, dual: Boolean) {
     val c = LocalMetro.current
-    val cards = remember(ranking) { mutableStateListOf<FfiVideoCard>() }
-    var page by remember(ranking) { mutableStateOf(1u) }
-    var loading by remember(ranking) { mutableStateOf(false) }
-    var error by remember(ranking) { mutableStateOf<String?>(null) }
-    val grid = rememberLazyGridState()
+    val cards = list.cards
+    val grid = list.grid
+    val error = list.error
 
     suspend fun more() {
-        if (loading) return
-        loading = true
-        runCatching { if (ranking) app.core.ranking() else app.core.popular(page) }
-            .onSuccess { list ->
-                cards.addAll(list.filter { n -> cards.none { it.bvid == n.bvid } })
-                page++
+        if (list.loading) return
+        list.loading = true
+        runCatching { if (ranking) app.core.ranking() else app.core.popular(list.page) }
+            .onSuccess { got ->
+                cards.addAll(got.filter { n -> cards.none { it.bvid == n.bvid } })
+                list.page++
+                list.error = null
             }
-            .onFailure { error = it.message }
-        loading = false
+            .onFailure { list.error = it.message }
+        list.loading = false
     }
 
-    LaunchedEffect(ranking) { more() }
+    LaunchedEffect(list) { if (cards.isEmpty()) more() }
     if (!ranking) {
-        val nearEnd by remember { derivedStateOf { (grid.layoutInfo.visibleItemsInfo.lastOrNull()?.index ?: 0) >= cards.size - 4 } }
-        LaunchedEffect(nearEnd) { if (nearEnd && cards.isNotEmpty() && page <= 10u) more() }
+        val nearEnd by remember(list) { derivedStateOf { (grid.layoutInfo.visibleItemsInfo.lastOrNull()?.index ?: 0) >= cards.size - 4 } }
+        LaunchedEffect(nearEnd) { if (nearEnd && cards.isNotEmpty() && list.page <= 10u) more() }
     }
 
     LazyVerticalGrid(

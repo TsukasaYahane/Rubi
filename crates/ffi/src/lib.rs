@@ -230,12 +230,15 @@ impl RubiCore {
     }
 
     /// Track layout for a batch of danmaku (font-free width estimate for now).
+    /// `scroll_ms` is how long a scrolling danmaku takes to cross the screen; the
+    /// renderer must use the same value.
     pub fn layout_danmaku(
         &self,
         items: Vec<FfiDanmaku>,
         viewport_w: f32,
         font_size: f32,
         tracks: u32,
+        scroll_ms: u32,
     ) -> Vec<FfiPlacement> {
         let dms: Vec<Danmaku> = items
             .into_iter()
@@ -247,7 +250,13 @@ impl RubiCore {
                 ..Default::default()
             })
             .collect();
-        let cfg = LayoutConfig { viewport_w, font_size, tracks: tracks as usize, ..LayoutConfig::default() };
+        let cfg = LayoutConfig {
+            viewport_w,
+            font_size,
+            tracks: tracks.max(1) as usize,
+            scroll_ms: scroll_ms.max(1000),
+            ..LayoutConfig::default()
+        };
         layout(&dms, &cfg, &EstimateMeasurer)
             .into_iter()
             .map(|p| FfiPlacement {

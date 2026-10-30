@@ -57,6 +57,7 @@ class Nav {
 fun RubiRoot(app: RubiApp) {
     val c = LocalMetro.current
     val nav = remember { Nav() }
+    val home = remember { HomeState() }
     var unread by remember { mutableStateOf(0u) }
     var emotes by remember { mutableStateOf(emptyMap<String, String>()) }
 
@@ -74,7 +75,7 @@ fun RubiRoot(app: RubiApp) {
                 TopBar(nav, unread)
                 Box(Modifier.weight(1f)) {
                     when (nav.tab) {
-                        Tab.Home -> HomeScreen(app, nav)
+                        Tab.Home -> HomeScreen(app, nav, home)
                         Tab.Follow -> FollowScreen(app)
                         Tab.Me -> MeScreen(app, nav)
                     }

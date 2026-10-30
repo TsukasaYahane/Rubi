@@ -34,6 +34,8 @@ struct SettingsFile {
     source_weights: rubi_recommend::SourceWeights,
     candidate_ttl_s: i64,
     min_source_interval_s: u64,
+    #[serde(default)]
+    danmaku_display: crate::feed::DanmakuDisplay,
 }
 
 pub fn export_bundle<W: Write + Seek>(
@@ -60,6 +62,7 @@ pub fn export_bundle<W: Write + Seek>(
         source_weights: settings.source_weights.clone(),
         candidate_ttl_s: settings.candidate_ttl_s,
         min_source_interval_s: settings.min_source_interval_s,
+        danmaku_display: settings.danmaku_display.clone(),
     };
     zip.start_file("settings.json", o)?;
     zip.write_all(&serde_json::to_vec_pretty(&sf)?)?;
@@ -109,6 +112,7 @@ pub fn import_bundle<R: Read + Seek>(input: R) -> Result<Imported> {
         settings.source_weights = sf.source_weights;
         settings.candidate_ttl_s = sf.candidate_ttl_s;
         settings.min_source_interval_s = sf.min_source_interval_s;
+        settings.danmaku_display = sf.danmaku_display;
     }
     let profile = read("profile.json")?.map(|p| serde_json::from_str(&p)).transpose()?.unwrap_or_default();
     let history = read("history.jsonl")?

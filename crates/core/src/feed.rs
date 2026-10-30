@@ -41,6 +41,43 @@ pub struct Settings {
     pub candidate_ttl_s: i64,
     /// A source is not asked again within this interval (risk-control courtesy).
     pub min_source_interval_s: u64,
+    pub danmaku_display: DanmakuDisplay,
+}
+
+/// How danmaku are drawn (the filters themselves live in the rule table).
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(default)]
+pub struct DanmakuDisplay {
+    pub enabled: bool,
+    /// Share of the video height danmaku may use: 0.25, 0.5, 0.75 or 1.0.
+    pub area: f32,
+    /// Multiplies the base 14 sp size; 0.5–2.0.
+    pub font_scale: f32,
+    /// 0.2–1.0.
+    pub opacity: f32,
+    /// Scroll speed multiplier; 0.5–2.0 (base: 8 s across the screen).
+    pub speed: f32,
+    pub show_scroll: bool,
+    pub show_top: bool,
+    pub show_bottom: bool,
+    /// When false, only white danmaku are shown.
+    pub show_colored: bool,
+}
+
+impl Default for DanmakuDisplay {
+    fn default() -> Self {
+        Self {
+            enabled: true,
+            area: 0.75,
+            font_scale: 1.0,
+            opacity: 0.9,
+            speed: 1.0,
+            show_scroll: true,
+            show_top: true,
+            show_bottom: true,
+            show_colored: true,
+        }
+    }
 }
 
 impl Default for Settings {
@@ -51,6 +88,7 @@ impl Default for Settings {
             source_weights: SourceWeights::default(),
             candidate_ttl_s: 6 * 3600,
             min_source_interval_s: 30,
+            danmaku_display: DanmakuDisplay::default(),
         }
     }
 }
