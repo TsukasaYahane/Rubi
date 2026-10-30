@@ -1,5 +1,6 @@
 package dev.rubi.app.ui
 
+import android.os.SystemClock
 import android.util.Log
 import android.view.LayoutInflater
 import androidx.compose.foundation.background
@@ -66,12 +67,16 @@ fun PlayerScreen(app: RubiApp, nav: Nav, bvid: String, title: String) {
     var dmStatus by remember { mutableStateOf("弹幕加载中…") }
     var dmSheet by remember { mutableStateOf(false) }
 
+    // Recording the click is bookkeeping; never let it delay playback.
+    LaunchedEffect(bvid) { runCatching { app.core.record(bvid, FfiSignal.Click) } }
+
     LaunchedEffect(bvid) {
         runCatching {
-            app.core.record(bvid, FfiSignal.Click)
-            val v = app.core.video(bvid).also { video = it }
+            val t0 = SystemClock.elapsedRealtime()
             val playback = app.core.playback(bvid, 80u)
-            PlayerHolder.play(ctx, playback, v.title)
+            Log.i(TAG, "playurl ready in ${SystemClock.elapsedRealtime() - t0} ms")
+            PlayerHolder.play(ctx, playback, title)
+            val v = app.core.video(bvid).also { video = it }
             val durationMs = maxOf(v.durationS.toULong() * 1000u, playback.durationMs).toUInt()
             runCatching {
                 val session = app.core.danmakuSession(playback.cid, durationMs)
@@ -168,12 +173,21 @@ fun PlayerScreen(app: RubiApp, nav: Nav, bvid: String, title: String) {
 
 @Composable
 private fun RelatedList(app: RubiApp, nav: Nav, current: String) {
+    val c = LocalMetro.current
     val cards = remember { mutableStateListOf<FfiVideoCard>() }
+    var note by remember { mutableStateOf("") }
     LaunchedEffect(current) {
-        val page = withContext(Dispatchers.IO) { runCatching { app.core.nextPage(6u) }.getOrDefault(emptyList()) }
-        cards.addAll(page.filter { it.bvid != current })
+        runCatching { app.core.related(current) }
+            .onSuccess { list -> cards.addAll(list.filter { it.bvid != current }) }
+            .onFailure { e ->
+                // Fall back to the local pool so the tab is never empty.
+                note = "相关推荐加载失败，显示本地推荐：${e.message}"
+                val page = withContext(Dispatchers.IO) { runCatching { app.core.nextPage(6u) }.getOrDefault(emptyList()) }
+                cards.addAll(page.filter { it.bvid != current })
+            }
     }
     Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(24.dp)) {
+        if (note.isNotEmpty()) Text(note, color = c.fg2, fontSize = 12.sp)
         cards.forEach { card -> VideoCardView(card, big = false, onOpen = { nav.push(Screen.Player(card.bvid, card.title)) }) }
     }
 }

@@ -220,9 +220,14 @@ impl RubiCore {
 
     /// Stream URLs for `qn` (the server caps it to what the account may play).
     pub async fn playback(&self, bvid: String, qn: u32) -> Res<FfiPlayback> {
-        let detail = self.app.video.view(&bvid).await?;
-        let p = self.app.video.playurl(&bvid, detail.cid, qn).await?;
-        Ok(FfiPlayback::of(detail.cid, p, self.app.video.stream_headers()))
+        // Feed cards usually carry the cid already; only look it up when they do not.
+        let cached = self.cards.lock().unwrap_or_else(|e| e.into_inner()).get(&bvid).and_then(|c| c.cid);
+        let cid = match cached {
+            Some(cid) => cid,
+            None => self.app.video.view(&bvid).await?.cid,
+        };
+        let p = self.app.video.playurl(&bvid, cid, qn).await?;
+        Ok(FfiPlayback::of(cid, p, self.app.video.stream_headers()))
     }
 
     /// All danmaku at once. Prefer [`danmaku_session`](Self::danmaku_session) for playback.
@@ -350,6 +355,12 @@ impl RubiCore {
 
     pub async fn popular(&self, page: u32) -> Res<Vec<FfiVideoCard>> {
         let cards = self.app.popular(page).await?;
+        self.remember(&cards);
+        Ok(cards.iter().map(|c| FfiVideoCard::of(c, None)).collect())
+    }
+
+    pub async fn related(&self, bvid: String) -> Res<Vec<FfiVideoCard>> {
+        let cards = self.app.related(&bvid).await?;
         self.remember(&cards);
         Ok(cards.iter().map(|c| FfiVideoCard::of(c, None)).collect())
     }

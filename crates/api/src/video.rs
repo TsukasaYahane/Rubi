@@ -72,17 +72,37 @@ impl WebVideo {
     }
 }
 
+/// Lower is better. Official upos nodes start fastest; PCDN / mcdn nodes (peer caches on
+/// odd ports or third-party hosts) often stall on the first bytes.
+fn cdn_rank(url: &str) -> u8 {
+    let host = url.split("://").nth(1).and_then(|r| r.split('/').next()).unwrap_or_default();
+    let peer = host.contains("mcdn.")
+        || host.contains("szbdyd.com")
+        || host.contains(':')
+        || host.split('.').all(|p| p.chars().all(|c| c.is_ascii_digit()));
+    match () {
+        _ if peer => 3,
+        _ if host.starts_with("upos-") && host.ends_with(".bilivideo.com") => 0,
+        _ if host.ends_with(".bilivideo.com") || host.ends_with(".bilivideo.cn") => 1,
+        _ => 2,
+    }
+}
+
 fn stream_of(v: &Value) -> Stream {
-    let url = [&v["baseUrl"], &v["base_url"]].into_iter().map(str_of).find(|s| !s.is_empty()).unwrap_or_default();
-    let backup = [&v["backupUrl"], &v["backup_url"]]
+    let base = [&v["baseUrl"], &v["base_url"]].into_iter().map(str_of).find(|s| !s.is_empty());
+    let backups = [&v["backupUrl"], &v["backup_url"]]
         .into_iter()
         .find_map(Value::as_array)
-        .map(|a| a.iter().map(str_of).collect())
+        .map(|a| a.iter().map(str_of).filter(|s| !s.is_empty()).collect::<Vec<_>>())
         .unwrap_or_default();
+    // Stable sort: equally ranked urls keep the server's order.
+    let mut urls: Vec<String> = base.into_iter().chain(backups).collect();
+    urls.sort_by_key(|u| cdn_rank(u));
+    let mut urls = urls.into_iter();
     Stream {
         id: u64_of(&v["id"]) as u32,
-        url,
-        backup_urls: backup,
+        url: urls.next().unwrap_or_default(),
+        backup_urls: urls.collect(),
         bandwidth: u64_of(&v["bandwidth"]),
         codecs: str_of(&v["codecs"]),
         width: u64_of(&v["width"]) as u32,
@@ -154,5 +174,35 @@ impl VideoApi for WebVideo {
 
     fn stream_headers(&self) -> Vec<(String, String)> {
         self.http.stream_headers()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use serde_json::json;
+
+    #[test]
+    fn prefers_official_cdn_over_peer_nodes() {
+        let v = json!({
+            "id": 32,
+            "baseUrl": "https://xy1x2x3x4xy.mcdn.bilivideo.cn:4483/upgcxcode/a.m4s",
+            "backupUrl": [
+                "https://cn-gddg-ct-01-01.bilivideo.com/upgcxcode/a.m4s",
+                "https://upos-sz-mirrorali.bilivideo.com/upgcxcode/a.m4s"
+            ]
+        });
+        let s = stream_of(&v);
+        assert_eq!(s.url, "https://upos-sz-mirrorali.bilivideo.com/upgcxcode/a.m4s");
+        assert_eq!(s.backup_urls[0], "https://cn-gddg-ct-01-01.bilivideo.com/upgcxcode/a.m4s");
+        assert!(s.backup_urls[1].contains("mcdn"), "peer node kept as last resort");
+    }
+
+    #[test]
+    fn ranks_hosts() {
+        assert_eq!(cdn_rank("https://upos-sz-estgoss.bilivideo.com/x"), 0);
+        assert_eq!(cdn_rank("https://cn-hk-eq-01-13.bilivideo.com/x"), 1);
+        assert_eq!(cdn_rank("https://123.45.67.89/x"), 3);
+        assert_eq!(cdn_rank("https://abc.szbdyd.com:8082/x"), 3);
     }
 }

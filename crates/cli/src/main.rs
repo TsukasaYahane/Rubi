@@ -237,7 +237,18 @@ async fn play(app: &App, bvid: &str) -> Res<()> {
     let p = app.video.playurl(bvid, detail.cid, 80).await?;
     println!("{} · 当前画质 {} · 可选 {:?}", detail.card.title, p.quality, p.accept);
     for v in &p.video {
-        println!("  视频 {} {}x{} {} {}kbps", v.id, v.width, v.height, v.codecs, v.bandwidth / 1000);
+        let host = |u: &str| u.split('/').nth(2).unwrap_or_default().to_owned();
+        let backups: Vec<String> = v.backup_urls.iter().map(|u| host(u)).collect();
+        println!(
+            "  视频 {} {}x{} {} {}kbps  {} ← {:?}",
+            v.id,
+            v.width,
+            v.height,
+            v.codecs,
+            v.bandwidth / 1000,
+            host(&v.url),
+            backups
+        );
     }
     for a in &p.audio {
         println!("  音频 {} {} {}kbps", a.id, a.codecs, a.bandwidth / 1000);

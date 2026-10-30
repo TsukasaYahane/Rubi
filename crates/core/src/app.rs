@@ -99,6 +99,12 @@ impl App {
         self.filter_list(cards)
     }
 
+    /// Videos related to `bvid`, filtered by the rule table (ads, blocked UPs, keywords…).
+    pub async fn related(&self, bvid: &str) -> Result<Vec<VideoCard>> {
+        let cards = self.feed_api.related(bvid).await?;
+        self.filter_list(cards)
+    }
+
     fn filter_list(&self, cards: Vec<VideoCard>) -> Result<Vec<VideoCard>> {
         let pipeline = self.feed.settings().rules.card_pipeline(None, now_secs)?;
         Ok(cards.into_iter().filter(|c| !pipeline.judge(c).is_blocked()).collect())
