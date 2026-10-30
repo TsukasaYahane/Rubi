@@ -16,7 +16,9 @@ $ErrorActionPreference = 'Stop'
 $repo = Split-Path $PSScriptRoot -Parent
 $cache = 'D:\rubi-cache'
 $work = "D:\rubi-build-$(Get-Date -Format yyyyMMdd-HHmmss)"
-$sdk = if ($env:ANDROID_HOME) { $env:ANDROID_HOME } else { "$env:LOCALAPPDATA\Android\Sdk" }
+# Not under AppData: packaged apps (e.g. the Claude desktop app) get AppData redirected
+# to a private folder, which hides the SDK from everything else.
+$sdk = if ($env:ANDROID_HOME) { $env:ANDROID_HOME } else { "$env:USERPROFILE\Android\Sdk" }
 $ndk = Get-ChildItem "$sdk\ndk" -Directory | Sort-Object Name | Select-Object -Last 1
 $gradle = "$cache\gradle-dist\gradle-8.14.3\bin\gradle.bat"
 $task = 'assemble' + $Variant.Substring(0, 1).ToUpper() + $Variant.Substring(1)

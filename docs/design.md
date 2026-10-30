@@ -266,7 +266,7 @@
 
 运行 `powershell -File scripts\build-apk.ps1 [-Variant release]`，产物在 `dist\`（不入库）。
 
-工具链与镜像（本机，2026-10-30）：Android SDK 在 `%LOCALAPPDATA%\Android\Sdk`（platform 36、build-tools 36.1.0、NDK r29），由腾讯云镜像下载；Gradle 8.14.3 在 `D:\rubi-cache\gradle-dist`；Maven 依赖经 `D:\rubi-cache\gradle\init.d` 的阿里云镜像，crates 经 `D:\rubi-cache\cargo\config.toml` 的 USTC 镜像。镜像配置只在本机缓存目录，不入库。
+工具链与镜像（本机，2026-10-30）：Android SDK 在 `%USERPROFILE%\Android\Sdk`（platform 36、build-tools 36.1.0、NDK r29；不放 AppData，打包应用会把 AppData 重定向到私有目录），由腾讯云镜像下载；adb 在其 `platform-tools` 下；Gradle 8.14.3 在 `D:\rubi-cache\gradle-dist`；Maven 依赖经 `D:\rubi-cache\gradle\init.d` 的阿里云镜像，crates 经 `D:\rubi-cache\cargo\config.toml` 的 USTC 镜像。镜像配置只在本机缓存目录，不入库。
 
 
 - 每次测试构建在 `D:\` 下新建唯一临时目录（如 `D:\rubi-build-<时间戳>`），复制源码后构建。
