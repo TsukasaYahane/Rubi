@@ -1,0 +1,21 @@
+[package]
+name = "rubi-api"
+description = "Bilibili web API client: session, WBI signing, rate limiting and per-domain API traits."
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+publish.workspace = true
+
+[dependencies]
+rubi-model.workspace = true
+async-trait.workspace = true
+md-5.workspace = true
+prost.workspace = true
+reqwest.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+thiserror.workspace = true
+tokio.workspace = true
+
+[dev-dependencies]
+tokio = { workspace = true, features = ["rt", "macros"] }

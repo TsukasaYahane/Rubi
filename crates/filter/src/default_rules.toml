@@ -1,0 +1,98 @@
+# Rubi 内置过滤规则表。
+# verified = false 的规则基于推测字段，需抓包确认后改为 true（见 docs/design.md §12）。
+# 用户的规则表以此为底，新版内置规则按 id 合并进去。
+
+version = 1
+source = "builtin"
+
+[toggles]
+promotion = true
+ad = true
+banner = true
+goods = true
+pinned_comment = true
+commercial_penalty = false
+non_video = true
+watched = true
+command_danmaku = true
+show_advanced_danmaku = true
+merge_jump = true
+jump_marks = true
+notice = true
+
+# ---------- 推荐流 / 列表卡片 ----------
+
+[[field_rules]]
+id = "ad.goto"
+name = "广告卡片 · goto"
+category = "ad"
+when = { op = "in", path = "goto", values = ["ad", "ad_av", "ad_web", "ad_web_s", "ad_player", "ad_inline_av"] }
+
+[[field_rules]]
+id = "ad.business_info"
+name = "广告卡片 · business_info"
+category = "ad"
+when = { op = "exists", path = "business_info" }
+
+[[field_rules]]
+id = "ad.app_card_goto"
+name = "广告卡片 · card_goto"
+category = "ad"
+when = { op = "any", of = [{ op = "contains", path = "card_goto", text = "ad" }, { op = "contains", path = "card_type", text = "cm" }] }
+
+[[field_rules]]
+id = "promotion.bihuo"
+name = "必火推广"
+category = "promotion"
+when = { op = "any", of = [{ op = "eq", path = "is_ad", value = true }, { op = "exists", path = "ad_info" }, { op = "exists", path = "creative_id" }, { op = "contains", path = "rcmd_reason.content", text = "推广" }] }
+
+[[field_rules]]
+id = "promotion.goto_misc"
+name = "推广卡片 · 游戏 / 直播 / 番剧"
+category = "promotion"
+when = { op = "in", path = "goto", values = ["game", "live", "bangumi", "pgc", "ogv"] }
+
+[[field_rules]]
+id = "commercial.flag"
+name = "商业合作稿件"
+category = "commercial"
+action = { kind = "penalize", factor = 0.85 }
+when = { op = "any", of = [{ op = "exists", path = "is_commercial" }, { op = "contains", path = "rcmd_reason.content", text = "商业合作" }] }
+
+# ---------- 首页横幅与活动页：开关打开时全部隐藏 ----------
+
+[[field_rules]]
+id = "banner.all"
+name = "首页横幅 / 活动页"
+category = "banner"
+target = "banner"
+when = { op = "all", of = [] }
+verified = true
+
+# ---------- 视频页商品卡片：开关打开时全部隐藏 ----------
+
+[[field_rules]]
+id = "goods.all"
+name = "视频页商品卡片"
+category = "goods"
+target = "goods"
+when = { op = "all", of = [] }
+verified = true
+
+# ---------- 置顶评论：仅对置顶评论生效 ----------
+
+[[field_rules]]
+id = "comment.pinned_goods"
+name = "置顶带货评论"
+category = "pinned_comment"
+target = "comment"
+when = { op = "any", of = [{ op = "exists", path = "content.jump_url" }, { op = "contains", path = "content.message", text = "淘宝" }, { op = "contains", path = "content.message", text = "京东" }, { op = "contains", path = "content.message", text = "拼多多" }, { op = "contains", path = "content.message", text = "购买链接" }] }
+
+# ---------- 消息中心 ----------
+
+[[field_rules]]
+id = "notice.official_promo"
+name = "系统推广通知"
+category = "ad"
+target = "notice"
+when = { op = "eq", path = "msg_type", value = 10 }

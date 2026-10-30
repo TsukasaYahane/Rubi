@@ -1,0 +1,250 @@
+//! `rubi` — a terminal window into the Rust core, for tuning filters and the algorithm
+//! before the Android UI exists. Data lives in `./.rubi-dev/` (git-ignored).
+
+use std::fs;
+use std::path::{Path, PathBuf};
+
+use rubi_api::{QrState, Session};
+use rubi_core::{App, ExportOptions, export_bundle, import_bundle, load_danmaku};
+use rubi_model::{DislikeReason, FeedbackEvent, ItemRef, Signal, now_secs};
+
+type Res<T> = Result<T, Box<dyn std::error::Error>>;
+
+const USAGE: &str = "\
+用法: rubi <命令> [参数]
+
+  feed [n]                 刷新候选池并输出推荐流前 n 条（默认 20）
+  why <bvid>               某条视频的打分明细
+  log [n]                  最近 n 条被过滤内容（默认 30）
+  signal <bvid> <信号>     模拟反馈: click like coin fav follow rewatch quick-exit
+                           done:<0-1> dislike-up dislike-zone dislike-title
+  dm <bvid>                拉取弹幕并显示过滤 / 空降合并结果
+  play <bvid>              显示可用画质与音视频流
+  login                    终端扫码登录（凭证明文存于 .rubi-dev，仅供开发）
+  whoami                   当前登录状态
+  export <file.zip> [--history]
+  import <file.zip>";
+
+fn data_dir() -> PathBuf {
+    PathBuf::from(".rubi-dev")
+}
+
+fn load_session(dir: &Path) -> Session {
+    fs::read_to_string(dir.join("session.json")).ok().and_then(|s| serde_json::from_str(&s).ok()).unwrap_or_default()
+}
+
+fn save_session(dir: &Path, s: &Session) -> Res<()> {
+    fs::write(dir.join("session.json"), serde_json::to_string_pretty(s)?)?;
+    Ok(())
+}
+
+fn short(s: &str, n: usize) -> String {
+    let mut out: String = s.chars().take(n).collect();
+    if s.chars().count() > n {
+        out.push('…');
+    }
+    out
+}
+
+#[tokio::main]
+async fn main() {
+    if let Err(e) = run().await {
+        eprintln!("错误: {e}");
+        std::process::exit(1);
+    }
+}
+
+async fn run() -> Res<()> {
+    let args: Vec<String> = std::env::args().skip(1).collect();
+    let Some(cmd) = args.first().map(String::as_str) else {
+        println!("{USAGE}");
+        return Ok(());
+    };
+    let dir = data_dir();
+    fs::create_dir_all(&dir)?;
+    let app = App::open(dir.join("rubi.db"), load_session(&dir))?;
+    app.auth.ensure_device_ids().await?;
+    save_session(&dir, &app.http.session())?;
+    let arg = |i: usize| args.get(i).map(String::as_str);
+
+    match cmd {
+        "feed" => feed(&app, arg(1).and_then(|n| n.parse().ok()).unwrap_or(20)).await,
+        "why" => why(&app, arg(1).ok_or("缺少 bvid")?),
+        "log" => log(&app, arg(1).and_then(|n| n.parse().ok()).unwrap_or(30)),
+        "signal" => signal(&app, arg(1).ok_or("缺少 bvid")?, arg(2).ok_or("缺少信号")?).await,
+        "dm" => dm(&app, arg(1).ok_or("缺少 bvid")?).await,
+        "play" => play(&app, arg(1).ok_or("缺少 bvid")?).await,
+        "login" => login(&app, &dir).await,
+        "whoami" => {
+            let nav = app.auth.nav().await?;
+            println!("{}", if nav.is_login { format!("已登录: {} ({})", nav.uname, nav.mid) } else { "游客".into() });
+            Ok(())
+        }
+        "export" => {
+            let path = arg(1).ok_or("缺少文件路径")?;
+            let include_history = args.iter().any(|a| a == "--history");
+            let events = if include_history { app.feed.history()? } else { Vec::new() };
+            export_bundle(
+                fs::File::create(path)?,
+                &app.feed.settings(),
+                &app.feed.profile(),
+                &events,
+                ExportOptions { include_history },
+            )?;
+            println!("已导出到 {path}（不含登录凭证）");
+            Ok(())
+        }
+        "import" => {
+            let imported = import_bundle(fs::File::open(arg(1).ok_or("缺少文件路径")?)?)?;
+            app.feed.set_settings(imported.settings)?;
+            app.feed.set_profile(imported.profile)?;
+            for ev in imported.history {
+                app.feed.record(ev)?;
+            }
+            println!("已导入");
+            Ok(())
+        }
+        _ => {
+            println!("{USAGE}");
+            Ok(())
+        }
+    }
+}
+
+async fn feed(app: &App, n: usize) -> Res<()> {
+    let r = app.feed.refresh(20).await?;
+    println!(
+        "刷新: 拉取 {} · 保留 {} · 过滤 {} · 冷却跳过 {:?}",
+        r.fetched.iter().map(|(k, n)| format!("{k:?}={n}")).collect::<Vec<_>>().join(" "),
+        r.kept,
+        r.blocked,
+        r.skipped
+    );
+    for e in &r.errors {
+        println!("  ! {e}");
+    }
+    println!();
+    for (i, item) in app.feed.next_page(n)?.iter().enumerate() {
+        let c = &item.card;
+        let top = item
+            .score
+            .parts
+            .iter()
+            .filter(|p| p.contribution.abs() > 0.01)
+            .map(|p| format!("{:?}{:+.2}", p.factor, p.contribution))
+            .collect::<Vec<_>>()
+            .join(" ");
+        println!(
+            "{:>2}. {:+.3}  {}  [{}]  {}",
+            i + 1,
+            item.score.total,
+            short(&c.title, 28),
+            short(&c.owner.name, 8),
+            c.bvid
+        );
+        println!("      {:?}  {}", c.sources, top);
+    }
+    Ok(())
+}
+
+fn why(app: &App, bvid: &str) -> Res<()> {
+    let Some(s) = app.feed.explain(bvid)? else {
+        println!("{bvid} 不在候选池里");
+        return Ok(());
+    };
+    println!("总分 {:+.3}", s.total);
+    for p in &s.parts {
+        println!(
+            "  {:<15} 原始 {:+.2} × 权重 {:.2} = {:+.3}",
+            format!("{:?}", p.factor),
+            p.raw,
+            p.weight,
+            p.contribution
+        );
+    }
+    println!("  来源调整 {:+.3} · 过滤惩罚 {:+.3}", s.source_adjust, s.penalty_adjust);
+    Ok(())
+}
+
+fn log(app: &App, n: usize) -> Res<()> {
+    for e in app.feed.filter_log(n)? {
+        println!("{:<14} {:<26} {:<16} {}", e.category, e.rule_id, e.source, short(&e.title, 30));
+    }
+    Ok(())
+}
+
+async fn signal(app: &App, bvid: &str, kind: &str) -> Res<()> {
+    let detail = app.video.view(bvid).await?;
+    let mut item = ItemRef::of(&detail.card);
+    item.tags = app.video.tags(bvid).await.unwrap_or_default();
+    let signal = match kind {
+        "click" => Signal::Click,
+        "like" => Signal::Like,
+        "coin" => Signal::Coin,
+        "fav" => Signal::Favorite,
+        "follow" => Signal::Follow,
+        "rewatch" => Signal::Rewatch,
+        "quick-exit" => Signal::QuickExit,
+        "dislike-up" => Signal::Dislike { reason: DislikeReason::Up },
+        "dislike-zone" => Signal::Dislike { reason: DislikeReason::Zone },
+        "dislike-title" => Signal::Dislike { reason: DislikeReason::Title },
+        k if k.starts_with("done:") => Signal::Completion { ratio: k[5..].parse()? },
+        _ => return Err(format!("未知信号 {kind}").into()),
+    };
+    app.feed.record(FeedbackEvent { signal, item: Some(item.clone()), at: now_secs() })?;
+    println!("已记录 {kind} → {}（标签 {:?}）", short(&item.title, 30), item.tags);
+    Ok(())
+}
+
+async fn dm(app: &App, bvid: &str) -> Res<()> {
+    let detail = app.video.view(bvid).await?;
+    let duration_ms = detail.card.duration_s * 1000;
+    let opts = app.feed.settings().rules.danmaku_options()?;
+    let out = load_danmaku(app.danmaku.as_ref(), detail.cid, duration_ms, &opts).await?;
+    println!("{} · 时长 {}s", detail.card.title, detail.card.duration_s);
+    println!("保留 {} 条", out.kept.len());
+    for (cat, n) in &out.removed {
+        println!("  移除 {cat:?}: {n}");
+    }
+    for m in &out.jump_marks {
+        println!("  空降点 {}", m.label);
+    }
+    for d in out.kept.iter().take(10) {
+        println!("  {:>6.1}s  {}", d.progress_ms as f32 / 1000.0, short(&d.content, 30));
+    }
+    Ok(())
+}
+
+async fn play(app: &App, bvid: &str) -> Res<()> {
+    let detail = app.video.view(bvid).await?;
+    let p = app.video.playurl(bvid, detail.cid, 80).await?;
+    println!("{} · 当前画质 {} · 可选 {:?}", detail.card.title, p.quality, p.accept);
+    for v in &p.video {
+        println!("  视频 {} {}x{} {} {}kbps", v.id, v.width, v.height, v.codecs, v.bandwidth / 1000);
+    }
+    for a in &p.audio {
+        println!("  音频 {} {} {}kbps", a.id, a.codecs, a.bandwidth / 1000);
+    }
+    println!("  请求头 {:?}", app.video.stream_headers());
+    Ok(())
+}
+
+async fn login(app: &App, dir: &Path) -> Res<()> {
+    let ticket = app.auth.qr_generate().await?;
+    let code = qrcode::QrCode::new(ticket.url.as_bytes())?;
+    println!("{}", code.render::<qrcode::render::unicode::Dense1x2>().quiet_zone(true).build());
+    println!("用手机端 App 扫码登录（180 秒内有效）");
+    loop {
+        tokio::time::sleep(std::time::Duration::from_secs(2)).await;
+        match app.auth.qr_poll(&ticket.key).await? {
+            QrState::Waiting => {}
+            QrState::Scanned => println!("已扫码，请在手机上确认"),
+            QrState::Expired => return Err("二维码已过期".into()),
+            QrState::Success(session) => {
+                save_session(dir, &session)?;
+                println!("登录成功（凭证明文存于 {}，仅供开发调试）", dir.join("session.json").display());
+                return Ok(());
+            }
+        }
+    }
+}

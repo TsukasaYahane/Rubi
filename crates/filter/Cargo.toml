@@ -1,0 +1,15 @@
+[package]
+name = "rubi-filter"
+description = "Rule pipeline for feed cards and danmaku, including the 空降 adapter."
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+publish.workspace = true
+
+[dependencies]
+rubi-model.workspace = true
+regex.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+thiserror.workspace = true
+toml.workspace = true

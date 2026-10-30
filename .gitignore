@@ -1,0 +1,11 @@
+/target
+/.rubi-dev
+*.db
+*.db-wal
+*.db-shm
+.DS_Store
+.idea/
+.vscode/
+local.properties
+.gradle/
+build/

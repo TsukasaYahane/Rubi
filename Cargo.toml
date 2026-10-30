@@ -1,0 +1,37 @@
+[workspace]
+resolver = "3"
+members = ["crates/*"]
+
+[workspace.package]
+version = "0.1.0"
+edition = "2024"
+license = "UNLICENSED"
+publish = false
+
+[workspace.dependencies]
+rubi-model = { path = "crates/model" }
+rubi-filter = { path = "crates/filter" }
+rubi-recommend = { path = "crates/recommend" }
+rubi-store = { path = "crates/store" }
+rubi-api = { path = "crates/api" }
+rubi-core = { path = "crates/core" }
+
+async-trait = "0.1"
+md-5 = "0.10"
+prost = "0.13"
+regex = "1"
+reqwest = { version = "0.12", default-features = false, features = ["rustls-tls", "json", "gzip", "brotli", "deflate"] }
+rusqlite = { version = "0.32", features = ["bundled"] }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+thiserror = "2"
+tokio = { version = "1", features = ["rt-multi-thread", "macros", "sync", "time"] }
+toml = "0.8"
+url = "2"
+zip = { version = "2", default-features = false, features = ["deflate"] }
+
+[profile.release]
+opt-level = "s"
+lto = true
+codegen-units = 1
+strip = true
