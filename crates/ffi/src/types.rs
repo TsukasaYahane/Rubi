@@ -1,7 +1,9 @@
 //! Flat, FFI-friendly records. Each mirrors a core type with only what the UI draws.
 
 use rubi_api::{PlayUrl, Stream};
-use rubi_model::{ChatMessage, ChatSession, Comment, Danmaku, JumpMark, Notice, ThreadRow, UnreadCounts, VideoCard};
+use rubi_model::{
+    ChatMessage, ChatSession, Comment, Danmaku, JumpMark, Notice, ThreadRow, UnreadCounts, VideoCard, VideoRef,
+};
 use rubi_recommend::ScoreBreakdown;
 
 #[derive(Debug, Clone, uniffi::Record)]
@@ -326,12 +328,47 @@ pub struct FfiNotice {
     pub context: String,
     pub uri: String,
     pub at: i64,
+    /// The video this notice is about; open it with `RubiCore::resolve_video`.
+    pub video: Option<FfiVideoRef>,
 }
 
 impl From<Notice> for FfiNotice {
     fn from(n: Notice) -> Self {
-        Self { id: n.id, from: n.from, text: n.text, context: n.context, uri: n.uri, at: n.at }
+        Self {
+            id: n.id,
+            from: n.from,
+            text: n.text,
+            context: n.context,
+            uri: n.uri,
+            at: n.at,
+            video: n.video.map(Into::into),
+        }
     }
+}
+
+/// A video pointer: a BV id, or an av number that needs `resolve_video` first.
+#[derive(Debug, Clone, uniffi::Enum)]
+pub enum FfiVideoRef {
+    Bvid { bvid: String },
+    Aid { aid: u64 },
+}
+
+impl From<VideoRef> for FfiVideoRef {
+    fn from(v: VideoRef) -> Self {
+        match v {
+            VideoRef::Bvid(bvid) => FfiVideoRef::Bvid { bvid },
+            VideoRef::Aid(aid) => FfiVideoRef::Aid { aid },
+        }
+    }
+}
+
+#[derive(Debug, Clone, uniffi::Record)]
+pub struct FfiSharedVideo {
+    pub video: FfiVideoRef,
+    /// Empty when the video was only mentioned by id in a text message.
+    pub title: String,
+    pub cover: String,
+    pub author: String,
 }
 
 #[derive(Debug, Clone, uniffi::Record)]
@@ -377,11 +414,23 @@ pub struct FfiChatMessage {
     pub from_me: bool,
     pub text: String,
     pub at: i64,
+    pub video: Option<FfiSharedVideo>,
 }
 
 impl FfiChatMessage {
     pub fn of(m: ChatMessage, talker: u64) -> Self {
-        Self { seqno: m.seqno, from_me: m.sender_mid != talker, text: m.text, at: m.at }
+        Self {
+            seqno: m.seqno,
+            from_me: m.sender_mid != talker,
+            text: m.text,
+            at: m.at,
+            video: m.video.map(|v| FfiSharedVideo {
+                video: v.video.into(),
+                title: v.title,
+                cover: v.cover,
+                author: v.author,
+            }),
+        }
     }
 }
 

@@ -22,6 +22,9 @@ pub struct Notice {
     pub uri: String,
     /// Unix seconds.
     pub at: i64,
+    /// The video this notice is about, when it is about one.
+    #[serde(default)]
+    pub video: Option<crate::VideoRef>,
 }
 
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
@@ -61,4 +64,16 @@ pub struct ChatMessage {
     pub text: String,
     /// Unix seconds.
     pub at: i64,
+    /// A shared video card, or a video id mentioned in the text.
+    #[serde(default)]
+    pub video: Option<SharedVideo>,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct SharedVideo {
+    pub video: crate::VideoRef,
+    /// Empty when the video was only mentioned by id in text.
+    pub title: String,
+    pub cover: String,
+    pub author: String,
 }

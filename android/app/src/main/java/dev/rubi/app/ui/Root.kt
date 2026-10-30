@@ -30,6 +30,9 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import dev.rubi.app.RubiApp
+import dev.rubi.core.FfiVideoRef
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.launch
 import dev.rubi.app.ui.theme.LocalMetro
 import dev.rubi.app.ui.theme.MetroType
 
@@ -51,6 +54,15 @@ class Nav {
     val stack = mutableStateListOf<Screen>()
     fun push(s: Screen) = stack.add(s)
     fun pop() = stack.removeLastOrNull()
+
+    /** Opens a video from a notice or message; av numbers are resolved to a BV id first. */
+    fun openVideo(scope: CoroutineScope, app: RubiApp, ref: FfiVideoRef, title: String, onError: (String) -> Unit = {}) {
+        scope.launch {
+            runCatching { app.core.resolveVideo(ref) }
+                .onSuccess { push(Screen.Player(it, title)) }
+                .onFailure { onError("无法打开视频：${it.message}") }
+        }
+    }
 }
 
 @Composable

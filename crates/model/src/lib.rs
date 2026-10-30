@@ -6,13 +6,15 @@ mod feedback;
 mod library;
 mod message;
 mod video;
+mod video_ref;
 
 pub use comment::{Comment, ThreadRow, flatten_thread};
 pub use danmaku::{CommandDanmaku, Danmaku, DanmakuMode, JumpMark};
 pub use feedback::{DislikeReason, FeedbackEvent, ItemRef, Signal};
 pub use library::{FavFolder, HistoryEntry, VideoRelation};
-pub use message::{ChatMessage, ChatSession, Notice, NoticeKind, UnreadCounts};
+pub use message::{ChatMessage, ChatSession, Notice, NoticeKind, SharedVideo, UnreadCounts};
 pub use video::{Owner, SourceKind, Stats, VideoCard, Zone};
+pub use video_ref::{VideoRef, find_video_ref};
 
 /// Current Unix time in seconds.
 pub fn now_secs() -> i64 {

@@ -54,6 +54,8 @@ pub struct PlayUrl {
 #[async_trait]
 pub trait VideoApi: Send + Sync {
     async fn view(&self, bvid: &str) -> Result<VideoDetail>;
+    /// Looks up the BV id of an av number (old links and share cards still use them).
+    async fn bvid_of(&self, aid: u64) -> Result<String>;
     async fn tags(&self, bvid: &str) -> Result<Vec<String>>;
     async fn playurl(&self, bvid: &str, cid: u64, qn: u32) -> Result<PlayUrl>;
     /// Headers the player must send with stream requests.
@@ -109,6 +111,12 @@ impl VideoApi for WebVideo {
             })
             .unwrap_or_default();
         Ok(VideoDetail { cid: u64_of(&d["cid"]), card: card_of(&d, SourceKind::Related), pages })
+    }
+
+    async fn bvid_of(&self, aid: u64) -> Result<String> {
+        let d = self.http.get_json(VIEW, params!["aid" => aid], false).await?;
+        let bvid = str_of(&d["bvid"]);
+        if bvid.is_empty() { Err(ApiError::Decode(format!("av{aid} has no bvid"))) } else { Ok(bvid) }
     }
 
     async fn tags(&self, bvid: &str) -> Result<Vec<String>> {

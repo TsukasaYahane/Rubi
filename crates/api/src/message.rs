@@ -4,7 +4,7 @@ use std::sync::Arc;
 use std::sync::atomic::{AtomicU64, Ordering};
 
 use async_trait::async_trait;
-use rubi_model::{ChatMessage, ChatSession, Notice, NoticeKind, UnreadCounts};
+use rubi_model::{ChatMessage, ChatSession, Notice, NoticeKind, SharedVideo, UnreadCounts, VideoRef, find_video_ref};
 use serde_json::Value;
 
 use crate::error::{ApiError, Result};
@@ -76,8 +76,42 @@ pub(crate) fn message_text(msg_type: u64, content: &str) -> String {
     }
 }
 
+/// A video share card (msg_type 7) or a video id mentioned in a text message.
+pub(crate) fn shared_video(msg_type: u64, content: &str, text: &str) -> Option<SharedVideo> {
+    let parsed: Value = serde_json::from_str(content).unwrap_or(Value::Null);
+    let card = || {
+        let video = Some(str_of(&parsed["bvid"]))
+            .filter(|b| b.starts_with("BV"))
+            .map(VideoRef::Bvid)
+            .or_else(|| Some(u64_of(&parsed["id"])).filter(|&a| a > 0).map(VideoRef::Aid))
+            .or_else(|| find_video_ref(&str_of(&parsed["url"])))?;
+        Some(SharedVideo {
+            video,
+            title: str_of(&parsed["title"]),
+            cover: str_of(&parsed["thumb"]),
+            author: str_of(&parsed["author"]),
+        })
+    };
+    match msg_type {
+        7 => card(),
+        1 => find_video_ref(text).map(|video| SharedVideo {
+            video,
+            title: String::new(),
+            cover: String::new(),
+            author: String::new(),
+        }),
+        _ => None,
+    }
+}
+
 pub(crate) fn notice_of(kind: NoticeKind, v: &Value) -> Notice {
     let item = &v["item"];
+    let mut notice = notice_body(kind, v, item);
+    notice.video = [&item["uri"], &item["native_uri"]].into_iter().find_map(|u| find_video_ref(&str_of(u)));
+    notice
+}
+
+fn notice_body(kind: NoticeKind, v: &Value, item: &Value) -> Notice {
     match kind {
         NoticeKind::Reply => {
             let mine = str_of(&item["target_reply_content"]);
@@ -90,6 +124,7 @@ pub(crate) fn notice_of(kind: NoticeKind, v: &Value) -> Notice {
                 context: if mine.is_empty() { title } else { format!("回复我的评论「{mine}」· {title}") },
                 uri: str_of(&item["uri"]),
                 at: u64_of(&v["reply_time"]) as i64,
+                video: None,
             }
         }
         NoticeKind::At => Notice {
@@ -100,6 +135,7 @@ pub(crate) fn notice_of(kind: NoticeKind, v: &Value) -> Notice {
             context: str_of(&item["title"]),
             uri: str_of(&item["uri"]),
             at: u64_of(&v["at_time"]) as i64,
+            video: None,
         },
         NoticeKind::Like => {
             let users = v["users"].as_array().cloned().unwrap_or_default();
@@ -113,6 +149,7 @@ pub(crate) fn notice_of(kind: NoticeKind, v: &Value) -> Notice {
                 context: str_of(&item["desc"]),
                 uri: str_of(&item["uri"]),
                 at: u64_of(&v["like_time"]) as i64,
+                video: None,
             }
         }
     }
@@ -208,11 +245,16 @@ impl ChatApi for WebMessages {
             .as_array()
             .map(|a| {
                 a.iter()
-                    .map(|m| ChatMessage {
-                        seqno: u64_of(&m["msg_seqno"]),
-                        sender_mid: u64_of(&m["sender_uid"]),
-                        text: message_text(u64_of(&m["msg_type"]), &str_of(&m["content"])),
-                        at: u64_of(&m["timestamp"]) as i64,
+                    .map(|m| {
+                        let (kind, content) = (u64_of(&m["msg_type"]), str_of(&m["content"]));
+                        let text = message_text(kind, &content);
+                        ChatMessage {
+                            seqno: u64_of(&m["msg_seqno"]),
+                            sender_mid: u64_of(&m["sender_uid"]),
+                            video: shared_video(kind, &content, &text),
+                            text,
+                            at: u64_of(&m["timestamp"]) as i64,
+                        }
                     })
                     .collect()
             })
@@ -257,6 +299,22 @@ mod tests {
         assert_eq!(message_text(1, r#"{"content":"你好"}"#), "你好");
         assert_eq!(message_text(2, r#"{"url":"x"}"#), "[图片]");
         assert_eq!(message_text(10, r#"{"title":"活动通知"}"#), "[活动通知]");
+    }
+
+    #[test]
+    fn finds_videos_in_messages_and_notices() {
+        let card = r#"{"author":"up","bvid":"BV17x411w7KC","id":170001,"title":"标题","thumb":"http://c.jpg"}"#;
+        let v = shared_video(7, card, "[标题]").unwrap();
+        assert_eq!((v.video, v.title.as_str()), (VideoRef::Bvid("BV17x411w7KC".into()), "标题"));
+        assert_eq!(shared_video(7, r#"{"id":170001}"#, "").unwrap().video, VideoRef::Aid(170001));
+        assert_eq!(shared_video(1, "", "看 BV17x411w7KC").unwrap().title, "");
+        assert!(shared_video(1, "", "你好").is_none());
+
+        let reply = json!({"item": {"uri": "https://www.bilibili.com/video/BV17x411w7KC", "native_uri": ""}});
+        assert_eq!(notice_of(NoticeKind::Reply, &reply).video, Some(VideoRef::Bvid("BV17x411w7KC".into())));
+        let dynamic =
+            json!({"item": {"uri": "https://t.bilibili.com/1", "native_uri": "bilibili://following/detail/1"}});
+        assert_eq!(notice_of(NoticeKind::At, &dynamic).video, None);
     }
 
     #[test]

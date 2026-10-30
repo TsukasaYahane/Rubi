@@ -41,6 +41,10 @@ import dev.rubi.core.FfiChatMessage
 import dev.rubi.core.FfiChatSession
 import dev.rubi.core.FfiNotice
 import dev.rubi.core.FfiNoticeKind
+import dev.rubi.core.FfiSharedVideo
+import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.text.style.TextOverflow
+import coil3.compose.AsyncImage
 import dev.rubi.core.FfiVideoCard
 import dev.rubi.core.RubiException
 import kotlinx.coroutines.launch
@@ -119,6 +123,7 @@ fun SearchScreen(app: RubiApp, nav: Nav) {
 @Composable
 fun InboxScreen(app: RubiApp, nav: Nav) {
     val c = LocalMetro.current
+    val scope = rememberCoroutineScope()
     var tab by remember { mutableStateOf(0) }
     var notices by remember { mutableStateOf(emptyList<FfiNotice>()) }
     var sessions by remember { mutableStateOf(emptyList<FfiChatSession>()) }
@@ -146,11 +151,18 @@ fun InboxScreen(app: RubiApp, nav: Nav) {
         LazyColumn(Modifier.weight(1f)) {
             if (tab < 3) {
                 items(notices, key = { it.id.toString() }) { n ->
-                    Column(Modifier.padding(horizontal = 16.dp, vertical = 12.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                    val video = n.video
+                    val open = Modifier.let { m ->
+                        if (video == null) m else m.clickable { nav.openVideo(scope, app, video, n.context, onError = { note = it }) }
+                    }
+                    Column(open.fillMaxWidth().padding(horizontal = 16.dp, vertical = 12.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
                         Text(n.from, fontSize = 15.sp, fontWeight = FontWeight.SemiBold, color = c.fg)
                         EmoteText(n.text, color = c.fg, fontSize = 15.sp, lineHeight = 22.sp)
                         EmoteText(n.context, color = c.fg2, fontSize = 12.sp)
-                        Meta(formatAge(n.at))
+                        Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                            Meta(formatAge(n.at))
+                            if (video != null) Meta("▷ 打开视频", color = c.fg)
+                        }
                     }
                 }
             } else {
@@ -170,6 +182,27 @@ fun InboxScreen(app: RubiApp, nav: Nav) {
                     }
                 }
             }
+        }
+    }
+}
+
+/** A video shared in chat: cover, title and author, opening the player on tap. */
+@Composable
+private fun SharedVideoCard(video: FfiSharedVideo, onOpen: () -> Unit) {
+    val c = LocalMetro.current
+    Row(
+        Modifier.widthIn(max = 300.dp).background(c.bg2).clickable(onClick = onOpen).padding(10.dp),
+        horizontalArrangement = Arrangement.spacedBy(10.dp),
+    ) {
+        AsyncImage(
+            model = video.cover,
+            contentDescription = null,
+            contentScale = ContentScale.Crop,
+            modifier = Modifier.size(width = 112.dp, height = 63.dp).background(c.line),
+        )
+        Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(4.dp)) {
+            Text(video.title, fontSize = 14.sp, lineHeight = 20.sp, color = c.fg, maxLines = 2, overflow = TextOverflow.Ellipsis)
+            Meta(if (video.author.isEmpty()) "▷ 视频" else "▷ ${video.author}")
         }
     }
 }
@@ -200,14 +233,23 @@ fun ChatScreen(app: RubiApp, nav: Nav, mid: ULong, name: String) {
         }
         LazyColumn(Modifier.weight(1f).padding(horizontal = 16.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
             items(messages, key = { it.seqno.toString() }) { m ->
-                Box(Modifier.fillMaxWidth(), contentAlignment = if (m.fromMe) Alignment.CenterEnd else Alignment.CenterStart) {
-                    EmoteText(
-                        m.text,
-                        fontSize = 15.sp,
-                        lineHeight = 22.sp,
-                        color = if (m.fromMe) Color.White else c.fg,
-                        modifier = Modifier.widthIn(max = 300.dp).background(if (m.fromMe) c.accent else c.bg2).padding(12.dp, 10.dp),
-                    )
+                val shared = m.video
+                Column(Modifier.fillMaxWidth(), horizontalAlignment = if (m.fromMe) Alignment.End else Alignment.Start) {
+                    if (shared != null && shared.title.isNotEmpty()) {
+                        SharedVideoCard(shared) { nav.openVideo(scope, app, shared.video, shared.title, onError = { note = it }) }
+                    } else {
+                        EmoteText(
+                            m.text,
+                            fontSize = 15.sp,
+                            lineHeight = 22.sp,
+                            color = if (m.fromMe) Color.White else c.fg,
+                            modifier = Modifier.widthIn(max = 300.dp).background(if (m.fromMe) c.accent else c.bg2).padding(12.dp, 10.dp),
+                        )
+                        // A BV / av id mentioned in plain text.
+                        if (shared != null) {
+                            TextAction("▷ 打开视频", onClick = { nav.openVideo(scope, app, shared.video, "", onError = { note = it }) })
+                        }
+                    }
                 }
             }
         }

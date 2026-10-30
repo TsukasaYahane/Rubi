@@ -210,6 +210,14 @@ impl RubiCore {
         Ok(FfiVideoCard::of(&self.card(&bvid).await?, None))
     }
 
+    /// The BV id to open for a video pointer (av numbers are looked up).
+    pub async fn resolve_video(&self, video: FfiVideoRef) -> Res<String> {
+        match video {
+            FfiVideoRef::Bvid { bvid } => Ok(bvid),
+            FfiVideoRef::Aid { aid } => Ok(self.app.video.bvid_of(aid).await?),
+        }
+    }
+
     /// Stream URLs for `qn` (the server caps it to what the account may play).
     pub async fn playback(&self, bvid: String, qn: u32) -> Res<FfiPlayback> {
         let detail = self.app.video.view(&bvid).await?;
