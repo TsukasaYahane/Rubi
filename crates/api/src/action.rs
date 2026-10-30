@@ -1,0 +1,228 @@
+//! Account actions (like / coin / favourite / watch later / follow) and the user's
+//! library (history, watch-later list, favourite folders, followings). Login required.
+
+use std::sync::Arc;
+
+use async_trait::async_trait;
+use rubi_model::{FavFolder, HistoryEntry, Owner, SourceKind, Stats, VideoCard, VideoRelation};
+use serde_json::Value;
+
+use crate::error::{ApiError, Result};
+use crate::http::HttpClient;
+use crate::params;
+use crate::parse::{card_of, duration_of, str_of, u64_of};
+
+const LIKE: &str = "https://api.bilibili.com/x/web-interface/archive/like";
+const COIN: &str = "https://api.bilibili.com/x/web-interface/coin/add";
+const FAV_DEAL: &str = "https://api.bilibili.com/x/v3/fav/resource/deal";
+const FAV_FOLDERS: &str = "https://api.bilibili.com/x/v3/fav/folder/created/list-all";
+const FAV_LIST: &str = "https://api.bilibili.com/x/v3/fav/resource/list";
+const TOVIEW_ADD: &str = "https://api.bilibili.com/x/v2/history/toview/add";
+const TOVIEW_LIST: &str = "https://api.bilibili.com/x/v2/history/toview";
+const RELATION_MODIFY: &str = "https://api.bilibili.com/x/relation/modify";
+const ARCHIVE_RELATION: &str = "https://api.bilibili.com/x/web-interface/archive/relation";
+const HISTORY: &str = "https://api.bilibili.com/x/web-interface/history/cursor";
+const FOLLOWINGS: &str = "https://api.bilibili.com/x/relation/followings";
+
+#[async_trait]
+pub trait ActionApi: Send + Sync {
+    async fn relation(&self, bvid: &str) -> Result<VideoRelation>;
+    async fn like(&self, bvid: &str, on: bool) -> Result<()>;
+    /// `count` is 1 or 2.
+    async fn coin(&self, bvid: &str, count: u32, also_like: bool) -> Result<()>;
+    async fn fav_folders(&self, aid: u64) -> Result<Vec<FavFolder>>;
+    async fn set_fav(&self, aid: u64, add: &[u64], remove: &[u64]) -> Result<()>;
+    async fn watch_later(&self, bvid: &str) -> Result<()>;
+    async fn follow(&self, mid: u64, on: bool) -> Result<()>;
+}
+
+#[async_trait]
+pub trait LibraryApi: Send + Sync {
+    /// Video history; pass the returned cursor back for the next page.
+    async fn history(&self, cursor: Option<&str>) -> Result<(Vec<HistoryEntry>, Option<String>)>;
+    async fn watch_later_list(&self) -> Result<Vec<VideoCard>>;
+    async fn fav_items(&self, folder_id: u64, pn: u32) -> Result<(Vec<VideoCard>, bool)>;
+    /// Mids the user follows, one page of 50; returns the total too.
+    async fn followings(&self, pn: u32) -> Result<(Vec<u64>, u32)>;
+}
+
+pub struct WebAccount {
+    http: Arc<HttpClient>,
+}
+
+impl WebAccount {
+    pub fn new(http: Arc<HttpClient>) -> Self {
+        Self { http }
+    }
+
+    fn my_mid(&self) -> Result<u64> {
+        self.http.session().dede_user_id.and_then(|m| m.parse().ok()).ok_or(ApiError::NotLoggedIn)
+    }
+}
+
+fn ids(list: &[u64]) -> String {
+    list.iter().map(u64::to_string).collect::<Vec<_>>().join(",")
+}
+
+pub(crate) fn history_of(v: &Value) -> Option<HistoryEntry> {
+    let h = &v["history"];
+    if str_of(&h["business"]) != "archive" {
+        return None;
+    }
+    Some(HistoryEntry {
+        card: VideoCard {
+            bvid: str_of(&h["bvid"]),
+            aid: u64_of(&h["oid"]),
+            cid: Some(u64_of(&h["cid"])).filter(|&c| c > 0),
+            title: str_of(&v["title"]),
+            cover: str_of(&v["cover"]),
+            owner: Owner { mid: u64_of(&v["author_mid"]), name: str_of(&v["author_name"]) },
+            duration_s: duration_of(&v["duration"]),
+            raw: v.clone(),
+            ..Default::default()
+        },
+        progress_s: v["progress"].as_i64().unwrap_or(0),
+        viewed_at: u64_of(&v["view_at"]) as i64,
+    })
+}
+
+pub(crate) fn fav_item_of(v: &Value) -> VideoCard {
+    let cnt = &v["cnt_info"];
+    VideoCard {
+        bvid: str_of(&v["bvid"]),
+        aid: u64_of(&v["id"]),
+        title: str_of(&v["title"]),
+        desc: str_of(&v["intro"]),
+        cover: str_of(&v["cover"]),
+        owner: Owner { mid: u64_of(&v["upper"]["mid"]), name: str_of(&v["upper"]["name"]) },
+        duration_s: duration_of(&v["duration"]),
+        pubdate: u64_of(&v["pubtime"]) as i64,
+        stats: Stats {
+            view: u64_of(&cnt["play"]),
+            danmaku: u64_of(&cnt["danmaku"]),
+            favorite: u64_of(&cnt["collect"]),
+            ..Default::default()
+        },
+        raw: v.clone(),
+        ..Default::default()
+    }
+}
+
+#[async_trait]
+impl ActionApi for WebAccount {
+    async fn relation(&self, bvid: &str) -> Result<VideoRelation> {
+        let d = self.http.get_json(ARCHIVE_RELATION, params!["bvid" => bvid], false).await?;
+        Ok(VideoRelation {
+            liked: d["like"].as_bool().unwrap_or(false),
+            coins: u64_of(&d["coin"]) as u32,
+            favorited: d["favorite"].as_bool().unwrap_or(false),
+            following_up: d["attention"].as_bool().unwrap_or(false),
+        })
+    }
+
+    async fn like(&self, bvid: &str, on: bool) -> Result<()> {
+        self.http.post_form(LIKE, params!["bvid" => bvid, "like" => if on { 1 } else { 2 }]).await.map(|_| ())
+    }
+
+    async fn coin(&self, bvid: &str, count: u32, also_like: bool) -> Result<()> {
+        let form = params!["bvid" => bvid, "multiply" => count.clamp(1, 2), "select_like" => u8::from(also_like)];
+        self.http.post_form(COIN, form).await.map(|_| ())
+    }
+
+    async fn fav_folders(&self, aid: u64) -> Result<Vec<FavFolder>> {
+        let mid = self.my_mid()?;
+        let d = self.http.get_json(FAV_FOLDERS, params!["up_mid" => mid, "type" => 2, "rid" => aid], false).await?;
+        Ok(d["list"]
+            .as_array()
+            .map(|a| {
+                a.iter()
+                    .map(|f| FavFolder {
+                        id: u64_of(&f["id"]),
+                        title: str_of(&f["title"]),
+                        count: u64_of(&f["media_count"]) as u32,
+                        contains: u64_of(&f["fav_state"]) == 1,
+                    })
+                    .collect()
+            })
+            .unwrap_or_default())
+    }
+
+    async fn set_fav(&self, aid: u64, add: &[u64], remove: &[u64]) -> Result<()> {
+        let form = params!["rid" => aid, "type" => 2, "add_media_ids" => ids(add), "del_media_ids" => ids(remove)];
+        self.http.post_form(FAV_DEAL, form).await.map(|_| ())
+    }
+
+    async fn watch_later(&self, bvid: &str) -> Result<()> {
+        self.http.post_form(TOVIEW_ADD, params!["bvid" => bvid]).await.map(|_| ())
+    }
+
+    async fn follow(&self, mid: u64, on: bool) -> Result<()> {
+        let form = params!["fid" => mid, "act" => if on { 1 } else { 2 }, "re_src" => 11];
+        self.http.post_form(RELATION_MODIFY, form).await.map(|_| ())
+    }
+}
+
+#[async_trait]
+impl LibraryApi for WebAccount {
+    async fn history(&self, cursor: Option<&str>) -> Result<(Vec<HistoryEntry>, Option<String>)> {
+        let mut p = params!["ps" => 20, "type" => "archive"];
+        if let Some((max, view_at)) = cursor.and_then(|c| c.split_once(':')) {
+            p.push(("max".into(), max.into()));
+            p.push(("view_at".into(), view_at.into()));
+            p.push(("business".into(), "archive".into()));
+        }
+        let d = self.http.get_json(HISTORY, p, false).await?;
+        let list: Vec<HistoryEntry> =
+            d["list"].as_array().map(|a| a.iter().filter_map(history_of).collect()).unwrap_or_default();
+        let c = &d["cursor"];
+        let next = (!list.is_empty() && u64_of(&c["max"]) > 0)
+            .then(|| format!("{}:{}", u64_of(&c["max"]), u64_of(&c["view_at"])));
+        Ok((list, next))
+    }
+
+    async fn watch_later_list(&self) -> Result<Vec<VideoCard>> {
+        let d = self.http.get_json(TOVIEW_LIST, params![], false).await?;
+        Ok(d["list"]
+            .as_array()
+            .map(|a| a.iter().map(|v| card_of(v, SourceKind::Related)).collect())
+            .unwrap_or_default())
+    }
+
+    async fn fav_items(&self, folder_id: u64, pn: u32) -> Result<(Vec<VideoCard>, bool)> {
+        let d = self
+            .http
+            .get_json(FAV_LIST, params!["media_id" => folder_id, "pn" => pn, "ps" => 20, "platform" => "web"], false)
+            .await?;
+        let items = d["medias"].as_array().map(|a| a.iter().map(fav_item_of).collect()).unwrap_or_default();
+        Ok((items, d["has_more"].as_bool().unwrap_or(false)))
+    }
+
+    async fn followings(&self, pn: u32) -> Result<(Vec<u64>, u32)> {
+        let mid = self.my_mid()?;
+        let d = self.http.get_json(FOLLOWINGS, params!["vmid" => mid, "pn" => pn, "ps" => 50], false).await?;
+        let mids = d["list"].as_array().map(|a| a.iter().map(|u| u64_of(&u["mid"])).collect()).unwrap_or_default();
+        Ok((mids, u64_of(&d["total"]) as u32))
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use serde_json::json;
+
+    #[test]
+    fn parses_history_and_skips_non_videos() {
+        let v = json!({"title": "t", "author_name": "up", "author_mid": 3, "progress": -1, "view_at": 9, "duration": 100,
+            "history": {"business": "archive", "bvid": "BV1", "oid": 7, "cid": 8}});
+        let h = history_of(&v).unwrap();
+        assert_eq!((h.card.aid, h.card.cid, h.progress_s, h.viewed_at), (7, Some(8), -1, 9));
+        assert!(history_of(&json!({"history": {"business": "live"}})).is_none());
+    }
+
+    #[test]
+    fn parses_fav_item() {
+        let v = json!({"id": 5, "bvid": "BV5", "title": "t", "upper": {"mid": 1, "name": "u"}, "cnt_info": {"play": 10, "collect": 2}});
+        let c = fav_item_of(&v);
+        assert_eq!((c.aid, c.stats.view, c.stats.favorite), (5, 10, 2));
+    }
+}

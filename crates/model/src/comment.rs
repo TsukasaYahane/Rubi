@@ -14,6 +14,11 @@ pub struct Comment {
     pub ctime: i64,
     pub is_up: bool,
     pub reply_count: u32,
+    /// Pinned by the UP or the platform.
+    pub pinned: bool,
+    /// The reply exactly as the API returned it; the pinned-comment rules match against this.
+    #[serde(default)]
+    pub raw: serde_json::Value,
 }
 
 /// One row of a thread drawn as a fishbone tree.

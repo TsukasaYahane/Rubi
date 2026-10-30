@@ -3,11 +3,15 @@
 mod comment;
 mod danmaku;
 mod feedback;
+mod library;
+mod message;
 mod video;
 
 pub use comment::{Comment, ThreadRow, flatten_thread};
 pub use danmaku::{CommandDanmaku, Danmaku, DanmakuMode, JumpMark};
 pub use feedback::{DislikeReason, FeedbackEvent, ItemRef, Signal};
+pub use library::{FavFolder, HistoryEntry, VideoRelation};
+pub use message::{ChatMessage, ChatSession, Notice, NoticeKind, UnreadCounts};
 pub use video::{Owner, SourceKind, Stats, VideoCard, Zone};
 
 /// Current Unix time in seconds.

@@ -50,6 +50,38 @@
 | `x/v2/dm/wbi/web/seg.so` | ✅ | 2026-10-30 实测解码 5499 条；字段号见 `crates/api/src/proto.rs` |
 | `x/v2/dm/web/view` | ✅ | `CommandDm.mid` 实为 int64（varint），不是 string；其余字段解码正常 |
 
-## 尚未实现
+## 评论与搜索
 
-评论（含 `parent` / `dialog` 重建对话树）、搜索、消息中心与私信、点赞投币收藏稍后再看、历史、收藏夹、关注列表同步。
+| 接口 | 状态 | 说明 |
+|---|---|---|
+| `x/v2/reply/wbi/main` | ✅ | 2026-10-30 游客实测；置顶在 `top_replies` 与 `upper.top`，分页用 `pagination_str` |
+| `x/v2/reply/reply` | ✅ | 2026-10-30 实测；二级回复为扁平列表，按 `parent` 重建对话树（`rubi_model::flatten_thread`） |
+| `x/web-interface/wbi/search/type` | ✅ | 2026-10-30 游客实测；标题含 `<em>` 高亮与 `&#x27;` 等实体，已解码 |
+| `x/web-interface/search/square` | ✅ | 2026-10-30 实测；推广热搜标记字段（`is_commercial`）❓ |
+
+## 消息中心与私信（需登录，均未实测）
+
+| 接口 | 状态 | 说明 |
+|---|---|---|
+| `x/msgfeed/unread` | 🔶 | reply / at / like 未读数 |
+| `api.vc…/session_svr/v1/session_svr/single_unread` | 🔶 | 私信未读 = follow_unread + unfollow_unread |
+| `x/msgfeed/reply` · `at` · `like` | 🔶 | 游标 `id` + `reply_time` / `at_time` / `like_time`；like 列表在 `data.total` 下 |
+| `api.vc…/session_svr/v1/session_svr/get_sessions` | 🔶 | 会话无昵称，另查 `account/v1/user/cards` |
+| `api.vc…/svr_sync/v1/svr_sync/fetch_session_msgs` | 🔶 | `content` 是 JSON 字符串；msg_type 1 文本 / 2 图片 / 5 撤回 |
+| `api.vc…/web_im/v1/web_im/send_msg` | 🔶 | 表单 `msg[...]` + `csrf` + `csrf_token`，`dev_id` 为 UUID 格式 |
+| `api.vc…/session_svr/v1/session_svr/update_ack` | 🔶 | 标记已读 |
+| 营销私信识别（`last_msg.msg_type = 10`） | ❓ | |
+
+## 互动与个人库（需登录，均未实测）
+
+| 接口 | 状态 |
+|---|---|
+| `x/web-interface/archive/relation` | 🔶 |
+| `x/web-interface/archive/like` | 🔶 |
+| `x/web-interface/coin/add` | 🔶 |
+| `x/v3/fav/folder/created/list-all` · `x/v3/fav/resource/deal` · `x/v3/fav/resource/list` | 🔶 |
+| `x/v2/history/toview/add` · `x/v2/history/toview` | 🔶 |
+| `x/relation/modify` · `x/relation/followings` | 🔶 |
+| `x/web-interface/history/cursor` | 🔶 |
+
+需要登录的接口要等你用 `rubi login` 扫码后再实测；写操作（点赞、投币、私信等）会作用在你的真实账号上，实测前我会先问你。

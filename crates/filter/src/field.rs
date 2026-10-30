@@ -120,8 +120,10 @@ pub enum Target {
     Goods,
     /// Pinned comments.
     Comment,
-    /// Message-center notices and private messages.
+    /// Message-center notices and private-message sessions.
     Notice,
+    /// Trending search words.
+    HotWord,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]

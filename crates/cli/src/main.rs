@@ -8,7 +8,7 @@ use rubi_api::{QrState, Session};
 use rubi_core::{App, ExportOptions, export_bundle, import_bundle, load_danmaku};
 use rubi_model::{DislikeReason, FeedbackEvent, ItemRef, Signal, now_secs};
 
-type Res<T> = Result<T, Box<dyn std::error::Error>>;
+pub(crate) type Res<T> = Result<T, Box<dyn std::error::Error>>;
 
 const USAGE: &str = "\
 用法: rubi <命令> [参数]
@@ -23,7 +23,22 @@ const USAGE: &str = "\
   login                    终端扫码登录（凭证明文存于 .rubi-dev，仅供开发）
   whoami                   当前登录状态
   export <file.zip> [--history]
-  import <file.zip>";
+  import <file.zip>
+
+  comments <bvid> [time]   评论区（鱼骨图对话树，前 3 个对话展开）
+  search <关键词>          搜索视频（已过滤广告）
+  hot                      热搜（已过滤推广词）
+  unread                   消息未读数                       [需登录，下同]
+  inbox <reply|at|like>    消息中心
+  chats                    私信会话（已过滤营销私信）
+  chat <mid>               与某人的私信记录
+  send <mid> <文本>        发送私信
+  like|coin|later|follow <bvid>   互动操作（同时记入推荐画像）
+  favs <bvid>              该视频所在 / 可加入的收藏夹
+  history                  观看历史
+  sync-follow              同步关注列表到推荐算法";
+
+mod social;
 
 fn data_dir() -> PathBuf {
     PathBuf::from(".rubi-dev")
@@ -38,7 +53,7 @@ fn save_session(dir: &Path, s: &Session) -> Res<()> {
     Ok(())
 }
 
-fn short(s: &str, n: usize) -> String {
+pub(crate) fn short(s: &str, n: usize) -> String {
     let mut out: String = s.chars().take(n).collect();
     if s.chars().count() > n {
         out.push('…');
@@ -104,8 +119,10 @@ async fn run() -> Res<()> {
             println!("已导入");
             Ok(())
         }
-        _ => {
-            println!("{USAGE}");
+        other => {
+            if !social::run(&app, other, &args).await? {
+                println!("{USAGE}");
+            }
             Ok(())
         }
     }

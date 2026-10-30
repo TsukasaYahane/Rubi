@@ -92,7 +92,16 @@ when = { op = "any", of = [{ op = "exists", path = "content.jump_url" }, { op = 
 
 [[field_rules]]
 id = "notice.official_promo"
-name = "系统推广通知"
+name = "系统推广通知 / 营销私信"
 category = "ad"
 target = "notice"
-when = { op = "eq", path = "msg_type", value = 10 }
+when = { op = "any", of = [{ op = "eq", path = "msg_type", value = 10 }, { op = "eq", path = "last_msg.msg_type", value = 10 }] }
+
+# ---------- 热搜 ----------
+
+[[field_rules]]
+id = "hot_word.commercial"
+name = "推广热搜词"
+category = "ad"
+target = "hot_word"
+when = { op = "any", of = [{ op = "eq", path = "is_commercial", value = "1" }, { op = "exists", path = "ad_info" }] }
