@@ -1,0 +1,454 @@
+//! The Kotlin-facing API. One [`RubiCore`] object wraps [`rubi_core::App`]; every call
+//! returns flat records from [`types`]. Generated bindings live in the Android module.
+
+mod types;
+
+use std::collections::HashMap;
+use std::path::PathBuf;
+use std::sync::{Arc, Mutex};
+
+use rubi_api::{ApiError, CommentSort, SearchOrder, Session};
+use rubi_core::{App, CoreError, ExportOptions, export_bundle, import_bundle, load_danmaku};
+use rubi_filter::danmaku::layout::{EstimateMeasurer, Lane, LayoutConfig, layout};
+use rubi_model::{
+    Comment, Danmaku, DislikeReason, FeedbackEvent, ItemRef, NoticeKind, Signal, ThreadRow, VideoCard, flatten_thread,
+    now_secs,
+};
+
+pub use types::*;
+
+uniffi::setup_scaffolding!();
+
+#[derive(Debug, thiserror::Error, uniffi::Error)]
+pub enum RubiError {
+    #[error("网络错误：{msg}")]
+    Network { msg: String },
+    #[error("请求被风控拦截：{msg}")]
+    RiskControl { msg: String },
+    #[error("需要登录")]
+    NotLoggedIn,
+    #[error("{msg}")]
+    Invalid { msg: String },
+    #[error("{msg}")]
+    Internal { msg: String },
+}
+
+impl From<ApiError> for RubiError {
+    fn from(e: ApiError) -> Self {
+        match e {
+            ApiError::Http(e) => RubiError::Network { msg: e.to_string() },
+            ApiError::RiskControl { .. } => RubiError::RiskControl { msg: e.to_string() },
+            ApiError::NotLoggedIn => RubiError::NotLoggedIn,
+            other => RubiError::Internal { msg: other.to_string() },
+        }
+    }
+}
+
+impl From<CoreError> for RubiError {
+    fn from(e: CoreError) -> Self {
+        match e {
+            CoreError::Api(a) => a.into(),
+            CoreError::Rules(_) | CoreError::Json(_) | CoreError::Invalid(_) => {
+                RubiError::Invalid { msg: e.to_string() }
+            }
+            other => RubiError::Internal { msg: other.to_string() },
+        }
+    }
+}
+
+impl From<serde_json::Error> for RubiError {
+    fn from(e: serde_json::Error) -> Self {
+        RubiError::Invalid { msg: e.to_string() }
+    }
+}
+
+impl From<std::io::Error> for RubiError {
+    fn from(e: std::io::Error) -> Self {
+        RubiError::Internal { msg: e.to_string() }
+    }
+}
+
+type Res<T> = Result<T, RubiError>;
+
+/// Replies loaded per page when a thread is expanded.
+const THREAD_MAX_PAGES: u32 = 5;
+
+#[derive(uniffi::Object)]
+pub struct RubiCore {
+    app: App,
+    /// Cards handed to the UI, so signals and actions can carry item features.
+    cards: Mutex<HashMap<String, VideoCard>>,
+    /// Root comments by rpid, so threads can be expanded later.
+    roots: Mutex<HashMap<u64, Comment>>,
+}
+
+impl RubiCore {
+    fn remember(&self, cards: &[VideoCard]) {
+        let mut map = self.cards.lock().unwrap_or_else(|e| e.into_inner());
+        if map.len() > 5_000 {
+            map.clear();
+        }
+        for c in cards {
+            map.insert(c.bvid.clone(), c.clone());
+        }
+    }
+
+    async fn card(&self, bvid: &str) -> Res<VideoCard> {
+        if let Some(c) = self.cards.lock().unwrap_or_else(|e| e.into_inner()).get(bvid) {
+            return Ok(c.clone());
+        }
+        let mut card = self.app.video.view(bvid).await?.card;
+        card.tags = self.app.video.tags(bvid).await.unwrap_or_default();
+        self.remember(std::slice::from_ref(&card));
+        Ok(card)
+    }
+}
+
+#[uniffi::export(async_runtime = "tokio")]
+impl RubiCore {
+    /// `data_dir` is the app's private files directory; `session_json` is what a
+    /// previous login returned (decrypted by the caller), or `None` for a guest.
+    #[uniffi::constructor]
+    pub fn new(data_dir: String, session_json: Option<String>) -> Res<Arc<Self>> {
+        let session: Session = session_json.as_deref().map(serde_json::from_str).transpose()?.unwrap_or_default();
+        let db = PathBuf::from(data_dir).join("rubi.db");
+        let app = App::open(db, session)?;
+        Ok(Arc::new(Self { app, cards: Mutex::default(), roots: Mutex::default() }))
+    }
+
+    /// The current session, to be stored encrypted by the caller.
+    pub fn session_json(&self) -> Res<String> {
+        Ok(serde_json::to_string(&self.app.http.session())?)
+    }
+
+    pub fn logout(&self) {
+        self.app.http.update_session(|s| {
+            *s = Session { buvid3: s.buvid3.take(), buvid4: s.buvid4.take(), ..Session::default() };
+        });
+    }
+
+    pub async fn ensure_device_ids(&self) -> Res<()> {
+        Ok(self.app.auth.ensure_device_ids().await?)
+    }
+
+    pub async fn account(&self) -> Res<FfiAccount> {
+        let nav = self.app.auth.nav().await?;
+        Ok(FfiAccount { logged_in: nav.is_login, mid: nav.mid, name: nav.uname })
+    }
+
+    pub async fn qr_generate(&self) -> Res<FfiQrTicket> {
+        let t = self.app.auth.qr_generate().await?;
+        Ok(FfiQrTicket { url: t.url, key: t.key })
+    }
+
+    pub async fn qr_poll(&self, key: String) -> Res<FfiQrState> {
+        use rubi_api::QrState::*;
+        Ok(match self.app.auth.qr_poll(&key).await? {
+            Waiting => FfiQrState::Waiting,
+            Scanned => FfiQrState::Scanned,
+            Expired => FfiQrState::Expired,
+            Success(s) => FfiQrState::Success { session_json: serde_json::to_string(&s)? },
+        })
+    }
+
+    // ----- home feed -----
+
+    pub async fn refresh_feed(&self, per_source: u32) -> Res<FfiRefreshReport> {
+        let r = self.app.feed.refresh(per_source as usize).await?;
+        Ok(FfiRefreshReport { kept: r.kept as u32, blocked: r.blocked as u32, errors: r.errors })
+    }
+
+    pub fn next_page(&self, n: u32) -> Res<Vec<FfiVideoCard>> {
+        let ranked = self.app.feed.next_page(n as usize)?;
+        let cards: Vec<VideoCard> = ranked.iter().map(|r| r.card.clone()).collect();
+        self.remember(&cards);
+        Ok(ranked.iter().map(|r| FfiVideoCard::of(&r.card, Some(&r.score))).collect())
+    }
+
+    pub fn explain(&self, bvid: String) -> Res<Option<FfiBreakdown>> {
+        Ok(self.app.feed.explain(&bvid)?.map(Into::into))
+    }
+
+    pub async fn record(&self, bvid: String, signal: FfiSignal) -> Res<()> {
+        let card = self.card(&bvid).await?;
+        let first_tag = card.tags.first().cloned().unwrap_or_default();
+        let signal = match signal {
+            FfiSignal::Click => Signal::Click,
+            FfiSignal::QuickExit => Signal::QuickExit,
+            FfiSignal::Completion { ratio } => Signal::Completion { ratio },
+            FfiSignal::Rewatch => Signal::Rewatch,
+            FfiSignal::DislikeUp => Signal::Dislike { reason: DislikeReason::Up },
+            FfiSignal::DislikeZone => Signal::Dislike { reason: DislikeReason::Zone },
+            FfiSignal::DislikeTag { tag } => {
+                Signal::Dislike { reason: DislikeReason::Tag(if tag.is_empty() { first_tag } else { tag }) }
+            }
+            FfiSignal::DislikeTitle => Signal::Dislike { reason: DislikeReason::Title },
+        };
+        Ok(self.app.feed.record(FeedbackEvent { signal, item: Some(ItemRef::of(&card)), at: now_secs() })?)
+    }
+
+    pub fn filter_log(&self, limit: u32) -> Res<Vec<FfiFilterLogEntry>> {
+        Ok(self
+            .app
+            .feed
+            .filter_log(limit as usize)?
+            .into_iter()
+            .map(|e| FfiFilterLogEntry {
+                at: e.at,
+                rule_id: e.rule_id,
+                category: e.category,
+                title: e.title,
+                source: e.source,
+                reason: e.reason,
+            })
+            .collect())
+    }
+
+    // ----- video page -----
+
+    pub async fn video(&self, bvid: String) -> Res<FfiVideoCard> {
+        Ok(FfiVideoCard::of(&self.card(&bvid).await?, None))
+    }
+
+    /// Stream URLs for `qn` (the server caps it to what the account may play).
+    pub async fn playback(&self, bvid: String, qn: u32) -> Res<FfiPlayback> {
+        let detail = self.app.video.view(&bvid).await?;
+        let p = self.app.video.playurl(&bvid, detail.cid, qn).await?;
+        Ok(FfiPlayback::of(detail.cid, p, self.app.video.stream_headers()))
+    }
+
+    pub async fn danmaku(&self, cid: u64, duration_ms: u32) -> Res<FfiDanmakuSet> {
+        let opts = self.app.feed.settings().rules.danmaku_options().map_err(CoreError::from)?;
+        let out = load_danmaku(self.app.danmaku.as_ref(), cid, duration_ms, &opts).await?;
+        let mut removed: Vec<String> = out.removed.iter().map(|(c, n)| format!("{c:?}: {n}")).collect();
+        removed.sort();
+        Ok(FfiDanmakuSet {
+            items: out.kept.into_iter().map(Into::into).collect(),
+            jump_marks: out.jump_marks.into_iter().map(Into::into).collect(),
+            removed,
+        })
+    }
+
+    /// Track layout for a batch of danmaku (font-free width estimate for now).
+    pub fn layout_danmaku(
+        &self,
+        items: Vec<FfiDanmaku>,
+        viewport_w: f32,
+        font_size: f32,
+        tracks: u32,
+    ) -> Vec<FfiPlacement> {
+        let dms: Vec<Danmaku> = items
+            .into_iter()
+            .map(|d| Danmaku {
+                id: d.id,
+                progress_ms: d.progress_ms,
+                mode: d.mode,
+                content: d.content,
+                ..Default::default()
+            })
+            .collect();
+        let cfg = LayoutConfig { viewport_w, font_size, tracks: tracks as usize, ..LayoutConfig::default() };
+        layout(&dms, &cfg, &EstimateMeasurer)
+            .into_iter()
+            .map(|p| FfiPlacement {
+                id: p.id,
+                lane: match p.lane {
+                    Lane::Scroll => FfiLane::Scroll,
+                    Lane::Top => FfiLane::Top,
+                    Lane::Bottom => FfiLane::Bottom,
+                },
+                track: p.track as u32,
+                start_ms: p.start_ms,
+                width: p.width,
+            })
+            .collect()
+    }
+
+    // ----- comments -----
+
+    /// Root comments with their inline previews drawn as fishbone rows.
+    pub async fn comments(&self, aid: u64, by_time: bool, offset: Option<String>) -> Res<FfiCommentPage> {
+        let sort = if by_time { CommentSort::Time } else { CommentSort::Hot };
+        let page = self.app.comments(aid, sort, offset.as_deref()).await?;
+        let mut roots = self.roots.lock().unwrap_or_else(|e| e.into_inner());
+        let threads = page
+            .page
+            .threads
+            .iter()
+            .map(|t| {
+                roots.insert(t.root.rpid, t.root.clone());
+                thread_of(&t.root, &t.preview, usize::MAX, t.total_replies)
+            })
+            .collect();
+        let pinned = page
+            .page
+            .pinned
+            .iter()
+            .map(|c| {
+                let row = ThreadRow { rpid: c.rpid, depth: 0, has_later_sibling: false, reply_to: None };
+                FfiCommentRow::of(&row, c)
+            })
+            .collect();
+        Ok(FfiCommentPage {
+            pinned,
+            threads,
+            hidden_pinned: page.hidden_pinned as u32,
+            next_offset: page.page.next_offset,
+        })
+    }
+
+    /// Loads a thread fully and returns its first `limit` replies as fishbone rows.
+    pub async fn comment_thread(&self, aid: u64, root_rpid: u64, limit: u32) -> Res<FfiCommentThread> {
+        let root = self
+            .roots
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .get(&root_rpid)
+            .cloned()
+            .ok_or_else(|| RubiError::Invalid { msg: "unknown root comment; load the page first".into() })?;
+        let replies = self.app.thread(aid, root_rpid, THREAD_MAX_PAGES).await?;
+        let total = root.reply_count.max(replies.len() as u32);
+        Ok(thread_of(&root, &replies, limit as usize, total))
+    }
+
+    // ----- search -----
+
+    pub async fn search(&self, keyword: String, page: u32) -> Res<FfiSearchResult> {
+        let (cards, hidden) = self.app.search_videos(&keyword, page.max(1), SearchOrder::Relevance).await?;
+        self.remember(&cards);
+        Ok(FfiSearchResult { cards: cards.iter().map(|c| FfiVideoCard::of(c, None)).collect(), hidden: hidden as u32 })
+    }
+
+    pub async fn hot_words(&self) -> Res<FfiHotWords> {
+        let (words, hidden) = self.app.hot_words(10).await?;
+        Ok(FfiHotWords { words: words.into_iter().map(|w| w.keyword).collect(), hidden: hidden as u32 })
+    }
+
+    // ----- message center -----
+
+    pub async fn unread(&self) -> Res<FfiUnread> {
+        Ok(self.app.notices.unread().await?.into())
+    }
+
+    pub async fn notices(&self, kind: FfiNoticeKind, cursor: Option<String>) -> Res<FfiNoticePage> {
+        let kind = match kind {
+            FfiNoticeKind::Reply => NoticeKind::Reply,
+            FfiNoticeKind::At => NoticeKind::At,
+            FfiNoticeKind::Like => NoticeKind::Like,
+        };
+        let (items, cursor) = self.app.notices.notices(kind, cursor.as_deref()).await?;
+        Ok(FfiNoticePage { items: items.into_iter().map(Into::into).collect(), cursor })
+    }
+
+    pub async fn chat_sessions(&self) -> Res<FfiChatSessions> {
+        let (sessions, hidden) = self.app.chat_sessions().await?;
+        Ok(FfiChatSessions { sessions: sessions.into_iter().map(Into::into).collect(), hidden: hidden as u32 })
+    }
+
+    pub async fn chat_messages(&self, talker_mid: u64) -> Res<Vec<FfiChatMessage>> {
+        let msgs = self.app.chat.messages(talker_mid, 30).await?;
+        Ok(msgs.into_iter().map(|m| FfiChatMessage::of(m, talker_mid)).collect())
+    }
+
+    pub async fn send_message(&self, talker_mid: u64, text: String) -> Res<()> {
+        Ok(self.app.chat.send_text(talker_mid, &text).await?)
+    }
+
+    pub async fn mark_read(&self, talker_mid: u64, ack_seqno: u64) -> Res<()> {
+        Ok(self.app.chat.mark_read(talker_mid, ack_seqno).await?)
+    }
+
+    // ----- account actions -----
+
+    pub async fn like(&self, bvid: String, on: bool) -> Res<()> {
+        let card = self.card(&bvid).await?;
+        Ok(self.app.like(&card, on).await?)
+    }
+
+    pub async fn coin(&self, bvid: String, count: u32) -> Res<()> {
+        let card = self.card(&bvid).await?;
+        Ok(self.app.coin(&card, count, false).await?)
+    }
+
+    pub async fn watch_later(&self, bvid: String) -> Res<()> {
+        let card = self.card(&bvid).await?;
+        Ok(self.app.watch_later(&card).await?)
+    }
+
+    pub async fn follow_up(&self, bvid: String, on: bool) -> Res<()> {
+        let card = self.card(&bvid).await?;
+        Ok(self.app.follow(&card, on).await?)
+    }
+
+    pub async fn sync_followings(&self) -> Res<u32> {
+        Ok(self.app.sync_followings().await? as u32)
+    }
+
+    // ----- settings, export -----
+
+    /// The whole settings object (rules, weights, intervals) as JSON.
+    pub fn settings_json(&self) -> Res<String> {
+        Ok(serde_json::to_string(&self.app.feed.settings())?)
+    }
+
+    pub fn set_settings_json(&self, json: String) -> Res<()> {
+        Ok(self.app.feed.set_settings(serde_json::from_str(&json)?)?)
+    }
+
+    /// Writes a zip with settings, rules, weights and profile (never credentials).
+    pub fn export_to(&self, path: String, include_history: bool) -> Res<()> {
+        let history = if include_history { self.app.feed.history()? } else { Vec::new() };
+        let file = std::fs::File::create(path)?;
+        let opts = ExportOptions { include_history };
+        Ok(export_bundle(file, &self.app.feed.settings(), &self.app.feed.profile(), &history, opts)?)
+    }
+
+    pub fn import_from(&self, path: String) -> Res<()> {
+        let imported = import_bundle(std::fs::File::open(path)?)?;
+        self.app.feed.set_settings(imported.settings)?;
+        self.app.feed.set_profile(imported.profile)?;
+        for ev in imported.history {
+            self.app.feed.record(ev)?;
+        }
+        Ok(())
+    }
+}
+
+fn thread_of(root: &Comment, replies: &[Comment], limit: usize, total: u32) -> FfiCommentThread {
+    let (rows, hidden) = flatten_thread(root, replies, limit);
+    let rows = rows
+        .iter()
+        .filter_map(|r| {
+            let c = if r.rpid == root.rpid { Some(root) } else { replies.iter().find(|c| c.rpid == r.rpid) };
+            c.map(|c| FfiCommentRow::of(r, c))
+        })
+        .collect::<Vec<_>>();
+    let shown = rows.len().saturating_sub(1) as u32;
+    let hidden = (hidden as u32).max(total.saturating_sub(shown));
+    FfiCommentThread { root_rpid: root.rpid, rows, hidden, total_replies: total }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn thread_counts_unloaded_replies_as_hidden() {
+        let root = Comment { rpid: 1, reply_count: 10, ..Default::default() };
+        let preview = vec![Comment { rpid: 2, root: 1, parent: 1, ..Default::default() }];
+        let t = thread_of(&root, &preview, usize::MAX, 10);
+        assert_eq!(t.rows.len(), 2);
+        assert_eq!(t.hidden, 9);
+    }
+
+    #[test]
+    fn guest_core_opens_and_ranks_an_empty_pool() {
+        let dir = std::env::temp_dir().join(format!("rubi-ffi-test-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let core = RubiCore::new(dir.to_string_lossy().into_owned(), None).unwrap();
+        assert!(core.next_page(10).unwrap().is_empty());
+        assert!(core.settings_json().unwrap().contains("rules"));
+        drop(core);
+        let _ = std::fs::remove_dir_all(dir);
+    }
+}

@@ -218,6 +218,7 @@
 - ASCII 与几何美学：几何/字符图标（`▶ ✕ ≡ ↻` 等）、等宽数字（播放量、时长、时间戳）、细线与网格。
 - Pivot 式大号小写标题，可左右滑动切换子页；WP 风格翻转 / 滑入动效。
 - 字体：Selawik 或 Inter（拉丁）、思源黑体 / Noto Sans SC（中文）、JetBrains Mono（等宽）。
+  - App 实现（2026-10-30）：暂用系统字体（系统无衬线 + 系统等宽）。内置中文字体会使 APK 超出 15 MB 预算；是否改用可下载字体待定。
 - 色彩：黑/白底 + 强调色，默认 **cobalt**；自定义调色盘后续再做。深浅色均支持。
 
 ### 9.2 导航与页面
@@ -262,6 +263,12 @@
 - CI 中不存放任何账号凭证。
 
 ### 11.3 本地构建
+
+运行 `powershell -File scripts\build-apk.ps1 [-Variant release]`，产物在 `dist\`（不入库）。
+
+工具链与镜像（本机，2026-10-30）：Android SDK 在 `%LOCALAPPDATA%\Android\Sdk`（platform 36、build-tools 36.1.0、NDK r29），由腾讯云镜像下载；Gradle 8.14.3 在 `D:\rubi-cache\gradle-dist`；Maven 依赖经 `D:\rubi-cache\gradle\init.d` 的阿里云镜像，crates 经 `D:\rubi-cache\cargo\config.toml` 的 USTC 镜像。镜像配置只在本机缓存目录，不入库。
+
+
 - 每次测试构建在 `D:\` 下新建唯一临时目录（如 `D:\rubi-build-<时间戳>`），复制源码后构建。
 - 结束后（无论成败）删除该临时目录的全部构建产物并核验无残留。
 - 依赖下载缓存保留在固定目录 `D:\rubi-cache`（`CARGO_HOME`、`GRADLE_USER_HOME` 指向此处），不存放构建产物。

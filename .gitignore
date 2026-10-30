@@ -1,5 +1,6 @@
 /target
 /.rubi-dev
+/dist
 *.db
 *.db-wal
 *.db-shm
