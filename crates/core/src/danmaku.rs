@@ -1,21 +1,133 @@
+use std::collections::BTreeMap;
+use std::sync::{Arc, Mutex};
+
+use futures_util::future::join_all;
 use rubi_api::{DanmakuApi, SEGMENT_MS};
 use rubi_filter::danmaku::{DanmakuOptions, DanmakuOutput, process};
+use rubi_model::{CommandDanmaku, Danmaku};
 
 use crate::error::Result;
 
 /// Loads every danmaku segment of `cid` plus its command danmaku and runs the filters.
 pub async fn load_danmaku(
-    api: &dyn DanmakuApi,
+    api: Arc<dyn DanmakuApi>,
     cid: u64,
     duration_ms: u32,
     opts: &DanmakuOptions,
 ) -> Result<DanmakuOutput> {
-    let view = api.view(cid).await?;
-    let by_duration = duration_ms.div_ceil(SEGMENT_MS).max(1);
-    let segments = if view.segment_count > 0 { view.segment_count } else { by_duration };
-    let mut all = Vec::new();
-    for i in 1..=segments {
-        all.extend(api.segment(cid, i).await?);
+    let session = DanmakuSession::open(api, cid, duration_ms, opts.clone());
+    let all: Vec<u32> = (1..=session.segment_count()).collect();
+    session.load(&all).await
+}
+
+#[derive(Default)]
+struct Loaded {
+    segments: BTreeMap<u32, Vec<Danmaku>>,
+    commands: Option<Vec<CommandDanmaku>>,
+}
+
+/// Loads a video's danmaku segment by segment, so the part being watched can be shown
+/// before the rest arrives. Every [`load`](Self::load) returns the filtered result over
+/// everything loaded so far (jump merging needs the whole set to stay consistent).
+pub struct DanmakuSession {
+    api: Arc<dyn DanmakuApi>,
+    cid: u64,
+    duration_ms: u32,
+    opts: DanmakuOptions,
+    loaded: Mutex<Loaded>,
+}
+
+impl DanmakuSession {
+    pub fn open(api: Arc<dyn DanmakuApi>, cid: u64, duration_ms: u32, opts: DanmakuOptions) -> Self {
+        Self { api, cid, duration_ms, opts, loaded: Mutex::default() }
     }
-    Ok(process(all, view.commands, duration_ms, opts))
+
+    /// Six-minute segments covering the video (at least one).
+    pub fn segment_count(&self) -> u32 {
+        self.duration_ms.div_ceil(SEGMENT_MS).max(1)
+    }
+
+    /// The 1-based segment containing `position_ms`.
+    pub fn segment_at(&self, position_ms: u32) -> u32 {
+        (position_ms / SEGMENT_MS + 1).min(self.segment_count())
+    }
+
+    /// Fetches the given segments (skipping ones already loaded) concurrently, plus the
+    /// command danmaku on the first call, then filters everything loaded so far.
+    pub async fn load(&self, indices: &[u32]) -> Result<DanmakuOutput> {
+        let missing: Vec<u32> = {
+            let l = self.loaded.lock().unwrap_or_else(|e| e.into_inner());
+            indices.iter().copied().filter(|i| !l.segments.contains_key(i)).collect()
+        };
+        let need_commands = self.loaded.lock().unwrap_or_else(|e| e.into_inner()).commands.is_none();
+
+        let segments = join_all(missing.iter().map(|&i| self.api.segment(self.cid, i)));
+        let commands = async { if need_commands { Some(self.api.view(self.cid).await) } else { None } };
+        let (segments, commands) = tokio::join!(segments, commands);
+
+        let mut l = self.loaded.lock().unwrap_or_else(|e| e.into_inner());
+        for (i, seg) in missing.iter().zip(segments) {
+            l.segments.insert(*i, seg?);
+        }
+        if let Some(view) = commands {
+            // Command danmaku are optional; a failure here must not hide regular danmaku.
+            l.commands = Some(view.map(|v| v.commands).unwrap_or_default());
+        }
+        let all: Vec<Danmaku> = l.segments.values().flatten().cloned().collect();
+        let commands = l.commands.clone().unwrap_or_default();
+        drop(l);
+        Ok(process(all, commands, self.duration_ms, &self.opts))
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use async_trait::async_trait;
+    use rubi_api::DanmakuView;
+    use std::sync::atomic::{AtomicU32, Ordering};
+
+    #[derive(Default)]
+    struct Fake {
+        calls: AtomicU32,
+    }
+
+    #[async_trait]
+    impl DanmakuApi for Fake {
+        async fn segment(&self, _: u64, index: u32) -> rubi_api::Result<Vec<Danmaku>> {
+            self.calls.fetch_add(1, Ordering::Relaxed);
+            let at = (index - 1) * SEGMENT_MS + 1000;
+            Ok(vec![Danmaku {
+                id: u64::from(index),
+                progress_ms: at,
+                mode: 1,
+                content: format!("seg{index}"),
+                ..Default::default()
+            }])
+        }
+
+        async fn view(&self, _: u64) -> rubi_api::Result<DanmakuView> {
+            Ok(DanmakuView { segment_count: 0, commands: vec![CommandDanmaku::default()] })
+        }
+    }
+
+    #[tokio::test]
+    async fn loads_incrementally_and_skips_loaded_segments() {
+        let fake = Arc::new(Fake::default());
+        let s = DanmakuSession::open(
+            fake.clone(),
+            1,
+            20 * 60 * 1000,
+            DanmakuOptions { drop_commands: true, ..Default::default() },
+        );
+        assert_eq!(s.segment_count(), 4);
+        assert_eq!(s.segment_at(7 * 60 * 1000), 2);
+
+        let first = s.load(&[2]).await.unwrap();
+        assert_eq!(first.kept.len(), 1);
+        let more = s.load(&[1, 2, 3]).await.unwrap();
+        assert_eq!(more.kept.len(), 3);
+        assert_eq!(fake.calls.load(Ordering::Relaxed), 3, "segment 2 was not fetched twice");
+        assert_eq!(more.removed[&rubi_filter::Category::CommandDanmaku], 1);
+    }
 }

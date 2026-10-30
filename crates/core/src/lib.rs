@@ -10,7 +10,7 @@ mod social;
 mod sources;
 
 pub use app::App;
-pub use danmaku::load_danmaku;
+pub use danmaku::{DanmakuSession, load_danmaku};
 pub use error::{CoreError, Result};
 pub use export::{ExportOptions, Imported, export_bundle, import_bundle};
 pub use feed::{AppStore, DanmakuDisplay, FeedService, RefreshReport, Seeded, Settings};

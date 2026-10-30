@@ -217,7 +217,7 @@ async fn dm(app: &App, bvid: &str) -> Res<()> {
     let detail = app.video.view(bvid).await?;
     let duration_ms = detail.card.duration_s * 1000;
     let opts = app.feed.settings().rules.danmaku_options()?;
-    let out = load_danmaku(app.danmaku.as_ref(), detail.cid, duration_ms, &opts).await?;
+    let out = load_danmaku(app.danmaku.clone(), detail.cid, duration_ms, &opts).await?;
     println!("{} · 时长 {}s", detail.card.title, detail.card.duration_s);
     println!("保留 {} 条", out.kept.len());
     for (cat, n) in &out.removed {

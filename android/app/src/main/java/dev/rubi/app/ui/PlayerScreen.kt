@@ -73,16 +73,25 @@ fun PlayerScreen(app: RubiApp, nav: Nav, bvid: String, title: String) {
             val playback = app.core.playback(bvid, 80u)
             PlayerHolder.play(ctx, playback, v.title)
             val durationMs = maxOf(v.durationS.toULong() * 1000u, playback.durationMs).toUInt()
-            runCatching { app.core.danmaku(playback.cid, durationMs) }
-                .onSuccess { set ->
+            runCatching {
+                val session = app.core.danmakuSession(playback.cid, durationMs)
+                val total = session.segmentCount()
+                // The segment being watched first, then the rest from nearest to farthest.
+                val here = session.segmentAt(PlayerHolder.get(ctx).currentPosition.toUInt())
+                val order = (1u..total).sortedBy { kotlin.math.abs(it.toInt() - here.toInt()) }
+                var done = 0
+                for (batch in listOf(order.take(1)) + order.drop(1).chunked(3)) {
+                    val set = session.load(batch)
+                    done += batch.size
                     danmaku = set
-                    dmStatus = "弹幕 ${set.items.size} · 空降点 ${set.jumpMarks.size}"
-                    Log.i(TAG, "danmaku loaded: ${set.items.size} items, removed ${set.removed}")
+                    dmStatus = "弹幕 ${set.items.size} · 空降点 ${set.jumpMarks.size}" +
+                        if (done < total.toInt()) " · 加载中 $done/$total" else ""
                 }
-                .onFailure { e ->
-                    dmStatus = "弹幕加载失败：${e.message}"
-                    Log.w(TAG, "danmaku load failed", e)
-                }
+                Log.i(TAG, "danmaku loaded: ${danmaku?.items?.size} items in $total segments")
+            }.onFailure { e ->
+                dmStatus = if (danmaku == null) "弹幕加载失败：${e.message}" else "部分弹幕加载失败：${e.message}"
+                Log.w(TAG, "danmaku load failed", e)
+            }
         }.onFailure { error = it.message }
     }
 

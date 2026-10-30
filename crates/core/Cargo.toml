@@ -13,6 +13,7 @@ rubi-model.workspace = true
 rubi-recommend.workspace = true
 rubi-store.workspace = true
 async-trait.workspace = true
+futures-util = { version = "0.3", default-features = false, features = ["alloc"] }
 serde.workspace = true
 serde_json.workspace = true
 thiserror.workspace = true

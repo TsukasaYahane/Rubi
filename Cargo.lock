@@ -1243,6 +1243,7 @@ name = "rubi-core"
 version = "0.1.0"
 dependencies = [
  "async-trait",
+ "futures-util",
  "rubi-api",
  "rubi-filter",
  "rubi-model",

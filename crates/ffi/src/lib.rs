@@ -8,7 +8,7 @@ use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
 
 use rubi_api::{ApiError, CommentSort, SearchOrder, Session};
-use rubi_core::{App, CoreError, ExportOptions, export_bundle, import_bundle, load_danmaku};
+use rubi_core::{App, CoreError, DanmakuSession, ExportOptions, export_bundle, import_bundle, load_danmaku};
 use rubi_filter::danmaku::layout::{EstimateMeasurer, Lane, LayoutConfig, layout};
 use rubi_model::{
     Comment, Danmaku, DislikeReason, FeedbackEvent, ItemRef, NoticeKind, Signal, ThreadRow, VideoCard, flatten_thread,
@@ -217,16 +217,16 @@ impl RubiCore {
         Ok(FfiPlayback::of(detail.cid, p, self.app.video.stream_headers()))
     }
 
+    /// All danmaku at once. Prefer [`danmaku_session`](Self::danmaku_session) for playback.
     pub async fn danmaku(&self, cid: u64, duration_ms: u32) -> Res<FfiDanmakuSet> {
         let opts = self.app.feed.settings().rules.danmaku_options().map_err(CoreError::from)?;
-        let out = load_danmaku(self.app.danmaku.as_ref(), cid, duration_ms, &opts).await?;
-        let mut removed: Vec<String> = out.removed.iter().map(|(c, n)| format!("{c:?}: {n}")).collect();
-        removed.sort();
-        Ok(FfiDanmakuSet {
-            items: out.kept.into_iter().map(Into::into).collect(),
-            jump_marks: out.jump_marks.into_iter().map(Into::into).collect(),
-            removed,
-        })
+        Ok(load_danmaku(self.app.danmaku.clone(), cid, duration_ms, &opts).await?.into())
+    }
+
+    /// A segment-by-segment loader: load the segment being watched first, then the rest.
+    pub fn danmaku_session(&self, cid: u64, duration_ms: u32) -> Res<Arc<FfiDanmakuSession>> {
+        let opts = self.app.feed.settings().rules.danmaku_options().map_err(CoreError::from)?;
+        Ok(Arc::new(FfiDanmakuSession(DanmakuSession::open(self.app.danmaku.clone(), cid, duration_ms, opts))))
     }
 
     /// Track layout for a batch of danmaku (font-free width estimate for now).
@@ -439,6 +439,39 @@ impl RubiCore {
             self.app.feed.record(ev)?;
         }
         Ok(())
+    }
+}
+
+#[derive(uniffi::Object)]
+pub struct FfiDanmakuSession(DanmakuSession);
+
+#[uniffi::export(async_runtime = "tokio")]
+impl FfiDanmakuSession {
+    pub fn segment_count(&self) -> u32 {
+        self.0.segment_count()
+    }
+
+    /// The 1-based segment containing `position_ms`.
+    pub fn segment_at(&self, position_ms: u32) -> u32 {
+        self.0.segment_at(position_ms)
+    }
+
+    /// Loads `segments` (concurrently, skipping loaded ones) and returns the filtered
+    /// danmaku over everything loaded so far.
+    pub async fn load(&self, segments: Vec<u32>) -> Res<FfiDanmakuSet> {
+        Ok(self.0.load(&segments).await?.into())
+    }
+}
+
+impl From<rubi_filter::danmaku::DanmakuOutput> for FfiDanmakuSet {
+    fn from(out: rubi_filter::danmaku::DanmakuOutput) -> Self {
+        let mut removed: Vec<String> = out.removed.iter().map(|(c, n)| format!("{c:?}: {n}")).collect();
+        removed.sort();
+        Self {
+            items: out.kept.into_iter().map(Into::into).collect(),
+            jump_marks: out.jump_marks.into_iter().map(Into::into).collect(),
+            removed,
+        }
     }
 }
 
