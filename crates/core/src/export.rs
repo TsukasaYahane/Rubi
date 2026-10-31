@@ -38,6 +38,8 @@ struct SettingsFile {
     danmaku_display: crate::feed::DanmakuDisplay,
     #[serde(default)]
     background_play: bool,
+    #[serde(default)]
+    preview: crate::feed::PreviewSettings,
 }
 
 pub fn export_bundle<W: Write + Seek>(
@@ -66,6 +68,7 @@ pub fn export_bundle<W: Write + Seek>(
         min_source_interval_s: settings.min_source_interval_s,
         danmaku_display: settings.danmaku_display.clone(),
         background_play: settings.background_play,
+        preview: settings.preview.clone(),
     };
     zip.start_file("settings.json", o)?;
     zip.write_all(&serde_json::to_vec_pretty(&sf)?)?;
@@ -117,6 +120,7 @@ pub fn import_bundle<R: Read + Seek>(input: R) -> Result<Imported> {
         settings.min_source_interval_s = sf.min_source_interval_s;
         settings.danmaku_display = sf.danmaku_display;
         settings.background_play = sf.background_play;
+        settings.preview = sf.preview;
     }
     let profile = read("profile.json")?.map(|p| serde_json::from_str(&p)).transpose()?.unwrap_or_default();
     let history = read("history.jsonl")?

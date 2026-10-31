@@ -18,6 +18,16 @@ impl TextMeasurer for EstimateMeasurer {
     }
 }
 
+/// Widths measured by the renderer ahead of time (at the layout's font size), keyed by text;
+/// anything not measured falls back to [`EstimateMeasurer`].
+pub struct MeasuredWidths<'a>(pub std::collections::HashMap<&'a str, f32>);
+
+impl TextMeasurer for MeasuredWidths<'_> {
+    fn width(&self, text: &str, font_size: f32) -> f32 {
+        self.0.get(text).copied().unwrap_or_else(|| EstimateMeasurer.width(text, font_size))
+    }
+}
+
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct LayoutConfig {
     pub viewport_w: f32,
@@ -114,6 +124,15 @@ mod tests {
 
     fn dm(id: u64, ms: u32, mode: u8, text: &str) -> Danmaku {
         Danmaku { id, progress_ms: ms, mode, content: text.into(), ..Default::default() }
+    }
+
+    #[test]
+    fn measured_widths_win_over_the_estimate() {
+        let m = MeasuredWidths([("hello", 90.0)].into_iter().collect());
+        assert_eq!(m.width("hello", 10.0), 90.0);
+        assert_eq!(m.width("中文", 10.0), EstimateMeasurer.width("中文", 10.0));
+        let placed = layout(&[dm(1, 0, 1, "hello")], &LayoutConfig::default(), &m);
+        assert_eq!(placed[0].width, 90.0);
     }
 
     #[test]

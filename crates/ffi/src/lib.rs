@@ -9,7 +9,7 @@ use std::sync::{Arc, Mutex};
 
 use rubi_api::{ApiError, CommentSort, SearchOrder, SendDanmaku, Session, UpOrder};
 use rubi_core::{App, CoreError, DanmakuSession, ExportOptions, export_bundle, import_bundle, load_danmaku};
-use rubi_filter::danmaku::layout::{EstimateMeasurer, Lane, LayoutConfig, layout};
+use rubi_filter::danmaku::layout::{Lane, LayoutConfig, MeasuredWidths, layout};
 use rubi_model::{
     Comment, Danmaku, DislikeReason, FeedbackEvent, ItemRef, NoticeKind, Signal, ThreadRow, VideoCard, VideoRef,
     flatten_thread, now_secs,
@@ -286,6 +286,7 @@ impl RubiCore {
     pub fn layout_danmaku(
         &self,
         items: Vec<FfiDanmaku>,
+        widths: Vec<f32>,
         viewport_w: f32,
         font_size: f32,
         tracks: u32,
@@ -308,7 +309,10 @@ impl RubiCore {
             scroll_ms: scroll_ms.max(1000),
             ..LayoutConfig::default()
         };
-        layout(&dms, &cfg, &EstimateMeasurer)
+        // `widths[i]` is the rendered width of `items[i]` (same unit as `viewport_w`); empty or
+        // shorter lists fall back to the estimate for the rest.
+        let measured = MeasuredWidths(dms.iter().map(|d| d.content.as_str()).zip(widths).collect());
+        layout(&dms, &cfg, &measured)
             .into_iter()
             .map(|p| FfiPlacement {
                 id: p.id,

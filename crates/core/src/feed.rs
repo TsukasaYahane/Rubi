@@ -44,6 +44,25 @@ pub struct Settings {
     pub danmaku_display: DanmakuDisplay,
     /// Keep playing when the app goes to the background. Off: pause instead.
     pub background_play: bool,
+    pub preview: PreviewSettings,
+}
+
+/// 大图预览: the card in the middle of the single-column feed plays a short preview.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(default)]
+pub struct PreviewSettings {
+    pub enabled: bool,
+    /// Only on unmetered networks (Wi-Fi), so previews never spend mobile data.
+    pub wifi_only: bool,
+    /// 0.0 (muted) – 1.0.
+    pub volume: f32,
+    pub danmaku: bool,
+}
+
+impl Default for PreviewSettings {
+    fn default() -> Self {
+        Self { enabled: true, wifi_only: true, volume: 0.0, danmaku: false }
+    }
 }
 
 /// How danmaku are drawn (the filters themselves live in the rule table).
@@ -92,6 +111,7 @@ impl Default for Settings {
             min_source_interval_s: 30,
             danmaku_display: DanmakuDisplay::default(),
             background_play: false,
+            preview: PreviewSettings::default(),
         }
     }
 }

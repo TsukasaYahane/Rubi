@@ -40,11 +40,13 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import coil3.compose.AsyncImage
 import dev.rubi.app.RubiApp
+import dev.rubi.app.data.PreviewPrefs
 import dev.rubi.app.ui.theme.LocalMetro
 import dev.rubi.app.ui.theme.MetroType
 import dev.rubi.core.FfiBreakdown
@@ -141,6 +143,10 @@ fun HomeScreen(app: RubiApp, nav: Nav, home: HomeState) {
     }
     val refreshing = feed.loading
     val dual = home.dual
+    val ctx = LocalContext.current
+    // Re-read when coming back from 设置.
+    val preview = remember(nav.stack.size) { PreviewPrefs.load(app.core) }
+    val previewing = rememberPreviewTarget(grid, enabled = !dual && home.pivot == 0 && preview.allowed(ctx))
     val pivot = home.pivot
 
     Column(Modifier.fillMaxSize()) {
@@ -171,7 +177,13 @@ fun HomeScreen(app: RubiApp, nav: Nav, home: HomeState) {
                 modifier = Modifier.fillMaxSize(),
             ) {
                 items(cards, key = { it.bvid }) { card ->
-                    VideoCardView(card, big = !dual, onOpen = { nav.push(Screen.Player(card.bvid, card.title)) }, onMore = { why = card })
+                    VideoCardView(
+                        card,
+                        big = !dual,
+                        onOpen = { nav.push(Screen.Player(card.bvid, card.title)) },
+                        onMore = { why = card },
+                        preview = if (card.bvid == previewing) { { FeedPreview(app, card, preview) } } else null,
+                    )
                 }
                 if (cards.isEmpty() && !refreshing) {
                     item(span = { GridItemSpan(maxLineSpan) }) { Text("候选池为空，下拉刷新", color = c.fg2) }
@@ -198,6 +210,9 @@ fun HomeScreen(app: RubiApp, nav: Nav, home: HomeState) {
 /** 热门 (paged grid) and 排行 (numbered list); both already filtered by the rule table. */
 @Composable
 private fun HotRankList(app: RubiApp, nav: Nav, list: FeedList, ranking: Boolean, dual: Boolean) {
+    val ctx = LocalContext.current
+    val preview = remember(nav.stack.size) { PreviewPrefs.load(app.core) }
+    val previewing = rememberPreviewTarget(list.grid, enabled = !dual && !ranking && preview.allowed(ctx))
     val c = LocalMetro.current
     val cards = list.cards
     val grid = list.grid
@@ -260,19 +275,32 @@ private fun HotRankList(app: RubiApp, nav: Nav, list: FeedList, ranking: Boolean
             }
         } else {
             items(cards, key = { it.bvid }) { card ->
-                VideoCardView(card, big = !dual, onOpen = { nav.push(Screen.Player(card.bvid, card.title)) })
+                VideoCardView(
+                    card,
+                    big = !dual,
+                    onOpen = { nav.push(Screen.Player(card.bvid, card.title)) },
+                    preview = if (card.bvid == previewing) { { FeedPreview(app, card, preview) } } else null,
+                )
             }
         }
     }
 }
 
 @Composable
-fun VideoCardView(card: FfiVideoCard, big: Boolean, onOpen: () -> Unit, onMore: (() -> Unit)? = null) {
+fun VideoCardView(
+    card: FfiVideoCard,
+    big: Boolean,
+    onOpen: () -> Unit,
+    onMore: (() -> Unit)? = null,
+    /** Drawn over the cover (大图预览). */
+    preview: (@Composable () -> Unit)? = null,
+) {
     val c = LocalMetro.current
     Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
         Column(Modifier.clickable(onClick = onOpen), verticalArrangement = Arrangement.spacedBy(8.dp)) {
             Box(Modifier.fillMaxWidth().aspectRatio(16f / 9f).background(c.bg2)) {
                 AsyncImage(model = card.cover, contentDescription = null, contentScale = ContentScale.Crop, modifier = Modifier.fillMaxSize())
+                preview?.invoke()
                 if (card.reason.isNotEmpty()) Tag(card.reason, Modifier.align(Alignment.TopStart))
                 Text(
                     formatDuration(card.durationS),

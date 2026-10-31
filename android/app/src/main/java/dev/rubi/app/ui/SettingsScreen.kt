@@ -83,6 +83,27 @@ fun SettingsScreen(app: RubiApp, nav: Nav) {
                     save()
                 }
             }
+            item(key = "preview-$version") {
+                val preview = settings.optJSONObject("preview") ?: JSONObject().also { settings.put("preview", it) }
+                SectionTitle("大图预览")
+                Meta("首页单列模式下，停在屏幕中间的视频自动播放预览（360P，循环）", Modifier.padding(horizontal = 16.dp))
+                ToggleRow("启用预览", "关闭后只显示封面", preview.optBoolean("enabled", true)) { preview.put("enabled", it); save() }
+                ToggleRow("仅 Wi-Fi", "使用移动数据时不预览", preview.optBoolean("wifi_only", true)) { preview.put("wifi_only", it); save() }
+                ToggleRow("预览弹幕", "在预览画面上显示弹幕", preview.optBoolean("danmaku", false)) { preview.put("danmaku", it); save() }
+                var volume by remember(version) { mutableStateOf(preview.optDouble("volume", 0.0).toFloat()) }
+                Row(Modifier.fillMaxWidth().padding(horizontal = 16.dp), verticalAlignment = Alignment.CenterVertically) {
+                    Text("预览音量", fontSize = 14.sp, color = c.fg, modifier = Modifier.width(72.dp))
+                    Slider(
+                        value = volume,
+                        onValueChange = { volume = it },
+                        onValueChangeFinished = { preview.put("volume", volume.toDouble()); save() },
+                        valueRange = 0f..1f,
+                        colors = SliderDefaults.colors(thumbColor = c.accent, activeTrackColor = c.accent, inactiveTrackColor = c.line),
+                        modifier = Modifier.weight(1f),
+                    )
+                    Meta(if (volume < 0.01f) "静音" else "${(volume * 100).toInt()}%", Modifier.width(40.dp), c.fg)
+                }
+            }
             item(key = "filters-$version") {
                 SectionTitle("内容过滤")
                 FILTER_TOGGLES.forEach { (key, title, desc) ->

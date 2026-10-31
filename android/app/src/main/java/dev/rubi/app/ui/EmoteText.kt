@@ -21,7 +21,8 @@ import dev.rubi.core.FfiEmote
 /** The default emote set (`[doge]` → url), loaded once at startup. */
 val LocalEmotes = staticCompositionLocalOf<Map<String, String>> { emptyMap() }
 
-private val TOKEN = Regex("""\[[^\[\]\s]{1,24}]""")
+/** A `[xxx]` emote token (comments, danmaku). */
+internal val EMOTE_TOKEN = Regex("""\[[^\[\]\s]{1,24}]""")
 
 /**
  * Text with bilibili emote tokens drawn as inline images. Tokens with no known image
@@ -43,7 +44,7 @@ fun EmoteText(
         val inline = mutableMapOf<String, InlineTextContent>()
         val annotated = buildAnnotatedString {
             var last = 0
-            for (m in TOKEN.findAll(text)) {
+            for (m in EMOTE_TOKEN.findAll(text)) {
                 val url = lookup[m.value] ?: continue
                 append(text, last, m.range.first)
                 appendInlineContent(m.value, m.value)

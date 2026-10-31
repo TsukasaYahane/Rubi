@@ -13,7 +13,7 @@ pub use app::{App, UpUploads};
 pub use danmaku::{DanmakuSession, load_danmaku};
 pub use error::{CoreError, Result};
 pub use export::{ExportOptions, Imported, export_bundle, import_bundle};
-pub use feed::{AppStore, DanmakuDisplay, FeedService, RefreshReport, Seeded, Settings};
+pub use feed::{AppStore, DanmakuDisplay, FeedService, PreviewSettings, RefreshReport, Seeded, Settings};
 pub use social::{FilteredComments, filter_hot_words, filter_sessions, is_blocked_pinned, load_comments, load_thread};
 pub use sources::{
     BiliRecommendSource, FollowedUpsSource, PopularSource, PreferredZoneSource, RankingSource, RelatedSource,
