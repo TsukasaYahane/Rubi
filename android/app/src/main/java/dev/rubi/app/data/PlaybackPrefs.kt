@@ -17,6 +17,9 @@ object PlaybackPrefs {
     /** Whether to keep playing when the app goes to the background (default: pause). */
     fun backgroundPlay(core: RubiCore): Boolean = settings(core)?.optBoolean(BACKGROUND_PLAY, false) ?: false
 
+    /** Leaving the app from the player shrinks it into picture-in-picture (default off). */
+    fun autoPip(core: RubiCore): Boolean = settings(core)?.optBoolean("auto_pip", false) ?: false
+
     /** Speed while the fullscreen player is held down (default 1.5×). */
     fun longPressSpeed(core: RubiCore): Float =
         settings(core)?.optDouble(LONG_PRESS_SPEED, 1.5)?.toFloat()?.takeIf { it > 0f } ?: 1.5f

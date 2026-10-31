@@ -124,7 +124,8 @@ fun SearchScreen(app: RubiApp, nav: Nav) {
 fun InboxScreen(app: RubiApp, nav: Nav) {
     val c = LocalMetro.current
     val scope = rememberCoroutineScope()
-    var tab by remember { mutableStateOf(0) }
+    // Kept in Nav: opening a video disposes this page, and coming back must land on the same tab.
+    var tab by nav::inboxTab
     var notices by remember { mutableStateOf(emptyList<FfiNotice>()) }
     var sessions by remember { mutableStateOf(emptyList<FfiChatSession>()) }
     var note by remember { mutableStateOf("") }

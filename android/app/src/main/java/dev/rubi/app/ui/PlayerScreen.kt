@@ -56,6 +56,7 @@ import androidx.lifecycle.LifecycleEventObserver
 import androidx.lifecycle.compose.LocalLifecycleOwner
 import dev.rubi.app.data.DanmakuDisplay
 import dev.rubi.app.data.PlaybackPrefs
+import dev.rubi.app.playback.Pip
 import dev.rubi.app.playback.PlayerHolder
 import dev.rubi.app.ui.theme.LocalMetro
 import dev.rubi.app.ui.theme.MetroType
@@ -96,6 +97,19 @@ fun PlayerScreen(app: RubiApp, nav: Nav, bvid: String, title: String, focus: Ffi
     var qualitySheet by remember { mutableStateOf(false) }
     var playerView by remember { mutableStateOf<PlayerView?>(null) }
     val holdSpeed = remember { PlaybackPrefs.longPressSpeed(app.core) }
+    val inPip by Pip.active
+    // Fullscreen and picture-in-picture both show the video alone.
+    val compact = fullscreen || inPip
+    val activity = remember(ctx) { ctx.activity() }
+    DisposableEffect(Unit) {
+        Pip.onPlayer = true
+        Pip.autoEnter = PlaybackPrefs.autoPip(app.core)
+        activity?.let(Pip::sync)
+        onDispose {
+            Pip.onPlayer = false
+            activity?.let(Pip::sync)
+        }
+    }
     val listState = rememberLazyListState()
     val scope = rememberCoroutineScope()
 
@@ -150,14 +164,17 @@ fun PlayerScreen(app: RubiApp, nav: Nav, bvid: String, title: String, focus: Ffi
                 dmStatus = if (danmaku == null) "弹幕加载失败：${e.message}" else "部分弹幕加载失败：${e.message}"
                 Log.w(TAG, "danmaku load failed", e)
             }
-        }.onFailure { error = it.message }
+        }.onFailure {
+            error = playbackError(it)
+            dmStatus = ""
+        }
     }
 
     FullscreenMode(fullscreen)
     BackHandler(enabled = fullscreen) { fullscreen = false }
 
     Column(Modifier.fillMaxSize()) {
-        if (!fullscreen) Row(Modifier.fillMaxWidth().padding(start = 4.dp, end = 16.dp), verticalAlignment = Alignment.CenterVertically) {
+        if (!compact) Row(Modifier.fillMaxWidth().padding(start = 4.dp, end = 16.dp), verticalAlignment = Alignment.CenterVertically) {
             Box(Modifier.size(44.dp).clickable { nav.pop() }, contentAlignment = Alignment.Center) { GlyphIcon(Glyph.Back) }
             Meta(dmStatus, Modifier.weight(1f))
             Text(
@@ -183,6 +200,14 @@ fun PlayerScreen(app: RubiApp, nav: Nav, bvid: String, title: String, focus: Ffi
                     modifier = Modifier.height(44.dp).padding(start = 12.dp).wrapContentSize(Alignment.CenterEnd).clickable { qualitySheet = true },
                 )
             }
+            if (activity != null && Pip.supported(activity)) {
+                Text(
+                    "小窗",
+                    style = MetroType.meta.copy(fontSize = 12.sp),
+                    color = c.fg,
+                    modifier = Modifier.size(44.dp, 44.dp).wrapContentSize(Alignment.CenterEnd).clickable { Pip.enter(activity) },
+                )
+            }
             Text(
                 "全屏",
                 style = MetroType.meta.copy(fontSize = 12.sp),
@@ -192,7 +217,7 @@ fun PlayerScreen(app: RubiApp, nav: Nav, bvid: String, title: String, focus: Ffi
         }
         // The same slot in both modes, so the PlayerView (and its frame) survives the switch.
         Box(
-            (if (fullscreen) Modifier.fillMaxSize() else Modifier.fillMaxWidth().aspectRatio(16f / 9f)).background(Color.Black),
+            (if (compact) Modifier.fillMaxSize() else Modifier.fillMaxWidth().aspectRatio(16f / 9f)).background(Color.Black),
         ) {
             AndroidView(
                 factory = {
@@ -203,14 +228,19 @@ fun PlayerScreen(app: RubiApp, nav: Nav, bvid: String, title: String, focus: Ffi
                         playerView = this
                     }
                 },
-                update = { it.setFullscreenButtonState(fullscreen) },
+                update = {
+                    it.setFullscreenButtonState(fullscreen)
+                    // The small window has no room for controls; the system draws its own.
+                    it.useController = !inPip
+                },
                 modifier = Modifier.fillMaxSize(),
             )
             val set = danmaku
-            if (display.enabled && set != null) DanmakuLayer(app.core, set, display, Modifier.fillMaxSize())
+            // No danmaku in the small window: too little room to read them.
+            if (display.enabled && set != null && !inPip) DanmakuLayer(app.core, set, display, Modifier.fillMaxSize())
             // Only while the controls are hidden: their buttons must get their own taps.
-            if (fullscreen && !controlsVisible) FullscreenGestures(PlayerHolder.get(ctx), playerView, holdSpeed)
-            if (fullscreen) {
+            if (fullscreen && !inPip && !controlsVisible) FullscreenGestures(PlayerHolder.get(ctx), playerView, holdSpeed)
+            if (fullscreen && !inPip) {
                 FullscreenOverlay(
                     title = video?.title ?: title,
                     controlsVisible = controlsVisible,
@@ -236,7 +266,7 @@ fun PlayerScreen(app: RubiApp, nav: Nav, bvid: String, title: String, focus: Ffi
                 )
             }
         }
-        if (fullscreen) return@Column
+        if (compact) return@Column
         danmaku?.jumpMarks?.takeIf { it.isNotEmpty() }?.let { marks ->
             // One line that scrolls sideways, however many marks there are.
             Row(
@@ -501,3 +531,14 @@ private fun CommentRow(row: FfiCommentRow, open: BooleanArray, pinnedLabel: Bool
 
 /** The label of the quality being played ("1080P 高清"), or its qn when the list lacks it. */
 private fun qualityLabel(p: FfiPlayback): String = p.accept.firstOrNull { it.qn == p.quality }?.label ?: "${p.quality}"
+
+/** Why a video cannot be opened, in words: deleted, hidden or region-locked videos say so. */
+private fun playbackError(e: Throwable): String {
+    val msg = e.message.orEmpty()
+    return when {
+        listOf("62002", "62004", "62012", "-404").any { it in msg } -> "这个视频已失效或不可见"
+        e is dev.rubi.core.RubiException.RiskControl -> "被 B 站风控拦截，稍等片刻再试"
+        e is dev.rubi.core.RubiException.Network -> "网络错误：${msg.substringAfter("：")}"
+        else -> "无法播放：$msg"
+    }
+}

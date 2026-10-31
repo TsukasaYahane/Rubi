@@ -84,6 +84,10 @@ fun SettingsScreen(app: RubiApp, nav: Nav) {
                     settings.put("background_play", it)
                     save()
                 }
+                ToggleRow("切到后台自动小窗", "在播放页回到桌面时以小窗继续播放；关闭小窗后按「后台播放」决定继续或暂停", settings.optBoolean("auto_pip", false)) {
+                    settings.put("auto_pip", it)
+                    save()
+                }
                 val speed = settings.optDouble("long_press_speed", 1.5).toFloat()
                 Column(Modifier.padding(horizontal = 16.dp, vertical = 8.dp)) {
                     Text("长按倍速", fontSize = 16.sp, color = c.fg)
@@ -191,7 +195,7 @@ private fun ToggleRow(title: String, desc: String, on: Boolean, onChange: (Boole
         Modifier.fillMaxWidth().heightIn(min = 56.dp).clickable { onChange(!on) }.padding(horizontal = 16.dp, vertical = 8.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
-        Column(Modifier.weight(1f)) {
+        Column(Modifier.weight(1f).padding(end = 12.dp)) {
             Text(title, fontSize = 16.sp, color = c.fg)
             if (desc.isNotEmpty()) Meta(desc)
         }

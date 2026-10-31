@@ -48,6 +48,7 @@ import androidx.compose.ui.unit.sp
 import coil3.compose.AsyncImage
 import dev.rubi.app.RubiApp
 import dev.rubi.app.data.PreviewPrefs
+import dev.rubi.app.data.UiPrefs
 import dev.rubi.app.ui.theme.LocalMetro
 import dev.rubi.app.ui.theme.MetroType
 import dev.rubi.core.FfiBreakdown
@@ -75,7 +76,7 @@ class FeedList {
  * Home-tab state hoisted above the screen: it survives opening a video, switching tabs
  * and coming back, so the feed only changes when the user pulls to refresh.
  */
-class HomeState {
+class HomeState(private val ui: UiPrefs) {
     val recommend = FeedList()
     val hot = FeedList()
     val rank = FeedList()
@@ -83,7 +84,14 @@ class HomeState {
     /** Why sources failed on the last refresh; shown when the status line is tapped. */
     var sourceErrors by mutableStateOf(emptyList<String>())
     var showErrors by mutableStateOf(false)
-    var dual by mutableStateOf(true)
+    /** Two columns or one; remembered on this device. */
+    var dual by mutableStateOf(ui.homeDual)
+        private set
+
+    fun toggleDual() {
+        dual = !dual
+        ui.homeDual = dual
+    }
     var pivot by mutableStateOf(0)
 }
 
@@ -162,7 +170,7 @@ fun HomeScreen(app: RubiApp, nav: Nav, home: HomeState) {
                 if (dual) "▦ 双列" else "▭ 单列",
                 style = MetroType.meta.copy(fontSize = 12.sp),
                 color = c.fg,
-                modifier = Modifier.padding(end = 16.dp).clickable { home.dual = !home.dual },
+                modifier = Modifier.padding(end = 16.dp).clickable { home.toggleDual() },
             )
         }
         if (pivot != 0) {

@@ -44,6 +44,8 @@ struct SettingsFile {
     long_press_speed: f32,
     #[serde(default = "default_quality")]
     preferred_quality: u32,
+    #[serde(default)]
+    auto_pip: bool,
 }
 
 fn default_speed() -> f32 {
@@ -83,6 +85,7 @@ pub fn export_bundle<W: Write + Seek>(
         preview: settings.preview.clone(),
         long_press_speed: settings.long_press_speed,
         preferred_quality: settings.preferred_quality,
+        auto_pip: settings.auto_pip,
     };
     zip.start_file("settings.json", o)?;
     zip.write_all(&serde_json::to_vec_pretty(&sf)?)?;
@@ -137,6 +140,7 @@ pub fn import_bundle<R: Read + Seek>(input: R) -> Result<Imported> {
         settings.preview = sf.preview;
         settings.long_press_speed = sf.long_press_speed;
         settings.preferred_quality = sf.preferred_quality;
+        settings.auto_pip = sf.auto_pip;
     }
     let profile = read("profile.json")?.map(|p| serde_json::from_str(&p)).transpose()?.unwrap_or_default();
     let history = read("history.jsonl")?

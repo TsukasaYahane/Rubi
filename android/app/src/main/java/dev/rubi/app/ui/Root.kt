@@ -34,6 +34,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import dev.rubi.app.RubiApp
+import dev.rubi.app.data.UiPrefs
 import dev.rubi.core.FfiCommentRef
 import dev.rubi.core.FfiVideoRef
 import kotlinx.coroutines.CoroutineScope
@@ -63,6 +64,8 @@ enum class Tab(val label: String) { Home("首页"), Follow("关注"), Me("我的
 class Nav {
     var tab by mutableStateOf(Tab.Home)
     val stack = mutableStateListOf<Screen>()
+    /** The message center's tab, kept while a video opened from it is on top. */
+    var inboxTab by mutableStateOf(0)
     /** A tap on the tab that is already selected: that tab scrolls back to the top. */
     val reselected = MutableSharedFlow<Tab>(extraBufferCapacity = 1)
 
@@ -94,7 +97,7 @@ class Nav {
 fun RubiRoot(app: RubiApp) {
     val c = LocalMetro.current
     val nav = remember { Nav() }
-    val home = remember { HomeState() }
+    val home = remember { HomeState(UiPrefs(app)) }
     var unread by remember { mutableStateOf(0u) }
     var emotes by remember { mutableStateOf(emptyMap<String, String>()) }
 

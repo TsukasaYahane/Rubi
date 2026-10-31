@@ -49,6 +49,8 @@ pub struct Settings {
     pub long_press_speed: f32,
     /// Quality (qn) asked for when a video opens; the server caps it to what the account may play.
     pub preferred_quality: u32,
+    /// Leaving the app from the player goes into picture-in-picture instead of pausing.
+    pub auto_pip: bool,
 }
 
 /// 大图预览: the card in the middle of the single-column feed plays a short preview.
@@ -118,6 +120,7 @@ impl Default for Settings {
             preview: PreviewSettings::default(),
             long_press_speed: 1.5,
             preferred_quality: 80,
+            auto_pip: false,
         }
     }
 }
