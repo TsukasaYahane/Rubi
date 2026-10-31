@@ -527,3 +527,95 @@ pub enum FfiSignal {
     DislikeTag { tag: String },
     DislikeTitle,
 }
+
+/// What the current user has done to a video (for the player's action row).
+#[derive(Debug, Clone, uniffi::Record)]
+pub struct FfiVideoRelation {
+    pub liked: bool,
+    pub coins: u32,
+    pub favorited: bool,
+    pub following_up: bool,
+}
+
+impl From<rubi_model::VideoRelation> for FfiVideoRelation {
+    fn from(r: rubi_model::VideoRelation) -> Self {
+        Self { liked: r.liked, coins: r.coins, favorited: r.favorited, following_up: r.following_up }
+    }
+}
+
+#[derive(Debug, Clone, uniffi::Record)]
+pub struct FfiFavFolder {
+    pub id: u64,
+    pub title: String,
+    pub count: u32,
+    /// Whether the video asked about is already in this folder.
+    pub contains: bool,
+}
+
+impl From<rubi_model::FavFolder> for FfiFavFolder {
+    fn from(f: rubi_model::FavFolder) -> Self {
+        Self { id: f.id, title: f.title, count: f.count, contains: f.contains }
+    }
+}
+
+#[derive(Debug, Clone, uniffi::Record)]
+pub struct FfiTriple {
+    pub liked: bool,
+    pub coined: bool,
+    pub favorited: bool,
+    /// Coins given by this request.
+    pub coins: u32,
+}
+
+impl From<rubi_api::Triple> for FfiTriple {
+    fn from(t: rubi_api::Triple) -> Self {
+        Self { liked: t.liked, coined: t.coined, favorited: t.favorited, coins: t.coins }
+    }
+}
+
+#[derive(Debug, Clone, uniffi::Record)]
+pub struct FfiUpProfile {
+    pub mid: u64,
+    pub name: String,
+    pub face: String,
+    pub sign: String,
+    pub level: u32,
+    pub official: String,
+    pub fans: u64,
+    pub followings: u64,
+    pub archives: u64,
+    pub followed: bool,
+}
+
+impl From<rubi_model::UpProfile> for FfiUpProfile {
+    fn from(p: rubi_model::UpProfile) -> Self {
+        Self {
+            mid: p.mid,
+            name: p.name,
+            face: p.face,
+            sign: p.sign,
+            level: p.level,
+            official: p.official,
+            fans: p.fans,
+            followings: p.followings,
+            archives: p.archives,
+            followed: p.followed,
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, uniffi::Enum)]
+pub enum FfiUpOrder {
+    Newest,
+    MostViewed,
+    MostFavorited,
+}
+
+#[derive(Debug, Clone, uniffi::Record)]
+pub struct FfiUpUploads {
+    pub items: Vec<FfiVideoCard>,
+    pub total: u32,
+    /// 充电专属 videos removed from this page.
+    pub hidden_charging: u32,
+    pub has_more: bool,
+}

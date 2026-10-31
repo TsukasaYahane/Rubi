@@ -13,6 +13,7 @@ use crate::params;
 use crate::parse::{card_of, duration_of, str_of, u64_of};
 
 const LIKE: &str = "https://api.bilibili.com/x/web-interface/archive/like";
+const TRIPLE: &str = "https://api.bilibili.com/x/web-interface/archive/like/triple";
 const COIN: &str = "https://api.bilibili.com/x/web-interface/coin/add";
 const FAV_DEAL: &str = "https://api.bilibili.com/x/v3/fav/resource/deal";
 const FAV_FOLDERS: &str = "https://api.bilibili.com/x/v3/fav/folder/created/list-all";
@@ -30,6 +31,8 @@ pub trait ActionApi: Send + Sync {
     async fn like(&self, bvid: &str, on: bool) -> Result<()>;
     /// `count` is 1 or 2.
     async fn coin(&self, bvid: &str, count: u32, also_like: bool) -> Result<()>;
+    /// 一键三连: like, the remaining coins (up to 2) and the default favourite folder at once.
+    async fn triple(&self, bvid: &str) -> Result<Triple>;
     async fn fav_folders(&self, aid: u64) -> Result<Vec<FavFolder>>;
     async fn set_fav(&self, aid: u64, add: &[u64], remove: &[u64]) -> Result<()>;
     async fn watch_later(&self, bvid: &str) -> Result<()>;
@@ -44,6 +47,16 @@ pub trait LibraryApi: Send + Sync {
     async fn fav_items(&self, folder_id: u64, pn: u32) -> Result<(Vec<VideoCard>, bool)>;
     /// Mids the user follows, one page of 50; returns the total too.
     async fn followings(&self, pn: u32) -> Result<(Vec<u64>, u32)>;
+}
+
+/// What a 一键三连 request achieved; each part can fail on its own (e.g. coins run out).
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub struct Triple {
+    pub liked: bool,
+    pub coined: bool,
+    pub favorited: bool,
+    /// Coins given by this request.
+    pub coins: u32,
 }
 
 pub struct WebAccount {
@@ -84,6 +97,16 @@ pub(crate) fn history_of(v: &Value) -> Option<HistoryEntry> {
         progress_s: v["progress"].as_i64().unwrap_or(0),
         viewed_at: u64_of(&v["view_at"]) as i64,
     })
+}
+
+pub(crate) fn triple_of(d: &Value) -> Triple {
+    let coined = d["coin"].as_bool().unwrap_or(false);
+    Triple {
+        liked: d["like"].as_bool().unwrap_or(false),
+        coined,
+        favorited: d["fav"].as_bool().unwrap_or(false),
+        coins: if coined { u64_of(&d["multiply"]) as u32 } else { 0 },
+    }
 }
 
 pub(crate) fn fav_item_of(v: &Value) -> VideoCard {
@@ -127,6 +150,10 @@ impl ActionApi for WebAccount {
     async fn coin(&self, bvid: &str, count: u32, also_like: bool) -> Result<()> {
         let form = params!["bvid" => bvid, "multiply" => count.clamp(1, 2), "select_like" => u8::from(also_like)];
         self.http.post_form(COIN, form).await.map(|_| ())
+    }
+
+    async fn triple(&self, bvid: &str) -> Result<Triple> {
+        self.http.post_form(TRIPLE, params!["bvid" => bvid]).await.map(|d| triple_of(&d))
     }
 
     async fn fav_folders(&self, aid: u64) -> Result<Vec<FavFolder>> {
@@ -217,6 +244,13 @@ mod tests {
         let h = history_of(&v).unwrap();
         assert_eq!((h.card.aid, h.card.cid, h.progress_s, h.viewed_at), (7, Some(8), -1, 9));
         assert!(history_of(&json!({"history": {"business": "live"}})).is_none());
+    }
+
+    #[test]
+    fn parses_triple() {
+        let t = triple_of(&json!({"like": true, "coin": false, "fav": true, "multiply": 2}));
+        assert_eq!(t, Triple { liked: true, coined: false, favorited: true, coins: 0 });
+        assert_eq!(triple_of(&json!({"like": true, "coin": true, "fav": true, "multiply": 1})).coins, 1);
     }
 
     #[test]

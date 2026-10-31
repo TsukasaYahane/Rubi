@@ -24,7 +24,7 @@ import java.util.Date
 import java.util.Locale
 
 /**
- * 视频详情 between the UP name and the 推荐 / 评论 bar. Collapsed: engagement numbers and two
+ * 视频详情 under the action row. Collapsed: comment and danmaku counts and two
  * lines of description. Expanded: full description, tags and identifiers. Tap to toggle.
  */
 @OptIn(ExperimentalLayoutApi::class)
@@ -32,11 +32,8 @@ import java.util.Locale
 fun VideoDetailBlock(d: FfiVideoDetail, expanded: Boolean, onToggle: () -> Unit) {
     val c = LocalMetro.current
     Column(Modifier.fillMaxWidth().clickable(onClick = onToggle), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-        Meta(
-            "赞 ${formatCount(d.likes)} · 币 ${formatCount(d.coins)} · 藏 ${formatCount(d.favorites)} · " +
-                "评论 ${formatCount(d.replies)} · 弹幕 ${formatCount(d.danmaku)}",
-            color = c.fg,
-        )
+        // 赞 / 币 / 藏 counts sit on the action row above.
+        Meta("评论 ${formatCount(d.replies)} · 弹幕 ${formatCount(d.danmaku)}", color = c.fg)
         if (d.desc.isNotBlank()) {
             if (expanded) {
                 SelectionContainer { Text(d.desc, fontSize = 14.sp, lineHeight = 21.sp, color = c.fg2) }

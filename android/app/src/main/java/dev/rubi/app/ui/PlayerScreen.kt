@@ -25,6 +25,7 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.key
 import androidx.compose.runtime.mutableStateListOf
 import androidx.compose.runtime.mutableStateMapOf
 import androidx.compose.runtime.mutableStateOf
@@ -179,12 +180,23 @@ fun PlayerScreen(app: RubiApp, nav: Nav, bvid: String, title: String) {
                 Column(Modifier.padding(start = 16.dp, end = 16.dp, top = 16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
                     Text(video?.title ?: title, style = MetroType.title, color = c.fg)
                     video?.let { Meta("${formatCount(it.views)} 播放 · ${formatAge(it.pubdate)} · ${it.zone ?: ""}") }
-                    video?.let { Text(it.upName, fontSize = 15.sp, fontWeight = FontWeight.SemiBold, color = c.fg) }
+                    video?.let { v ->
+                        Text(
+                            "${v.upName}  ›",
+                            fontSize = 15.sp,
+                            fontWeight = FontWeight.SemiBold,
+                            color = c.fg,
+                            modifier = Modifier.clickable { nav.push(Screen.Up(v.upMid, v.upName)) }.padding(vertical = 6.dp),
+                        )
+                    }
                 }
             }
             item(key = "detail") {
                 Column(Modifier.padding(horizontal = 16.dp, vertical = 8.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                    detail?.let { VideoDetailBlock(it, detailOpen) { detailOpen = !detailOpen } }
+                    detail?.let {
+                        key(it.bvid) { VideoActions(app, nav, it) }
+                        VideoDetailBlock(it, detailOpen) { detailOpen = !detailOpen }
+                    }
                     error?.let { Text(it, color = c.fg2, fontSize = 13.sp) }
                     danmaku?.removed?.takeIf { it.isNotEmpty() }?.let { Meta("已过滤 · " + it.joinToString(" · ")) }
                 }

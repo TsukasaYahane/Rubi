@@ -66,7 +66,7 @@ impl HttpClient {
         let resp = self.send_get(url, params, sign).await?;
         let set_cookies =
             resp.headers().get_all(SET_COOKIE).iter().filter_map(|v| v.to_str().ok().map(str::to_owned)).collect();
-        let body: Value = resp.json().await?;
+        let body = json_body(resp).await?;
         Ok(Response { data: unwrap_envelope(body)?, set_cookies })
     }
 
@@ -81,7 +81,7 @@ impl HttpClient {
         form.push(("csrf".into(), csrf));
         self.limiter.acquire().await;
         let resp = self.decorate(self.client.post(url)).form(&form).send().await?;
-        unwrap_envelope(resp.json().await?)
+        unwrap_envelope(json_body(resp).await?)
     }
 
     async fn send_get(&self, url: &str, params: Params, sign: bool) -> Result<reqwest::Response> {
@@ -121,6 +121,20 @@ impl HttpClient {
         *cached = Some((keys.clone(), now));
         Ok(keys)
     }
+}
+
+/// Reads a JSON body. A 412 or a non-JSON page (the risk-control block page) is reported
+/// as such instead of a bare decode error.
+async fn json_body(resp: reqwest::Response) -> Result<Value> {
+    let status = resp.status();
+    let text = resp.text().await?;
+    if status.as_u16() == 412 {
+        return Err(ApiError::RiskControl { code: -412, message: "HTTP 412".into() });
+    }
+    serde_json::from_str(&text).map_err(|e| {
+        let head: String = text.chars().take(160).collect();
+        ApiError::Decode(format!("HTTP {status}, {e}: {head}"))
+    })
 }
 
 fn unwrap_envelope(body: Value) -> Result<Value> {

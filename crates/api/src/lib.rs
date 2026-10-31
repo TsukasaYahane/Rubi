@@ -17,10 +17,11 @@ mod parse;
 mod proto;
 mod search;
 mod session;
+mod space;
 mod video;
 pub mod wbi;
 
-pub use action::{ActionApi, LibraryApi, WebAccount};
+pub use action::{ActionApi, LibraryApi, Triple, WebAccount};
 pub use auth::{AuthApi, NavInfo, QrState, QrTicket, WebAuth};
 pub use comment::{CommentApi, CommentPage, CommentSort, ThreadPreview, WebComment};
 pub use danmaku::{DanmakuApi, DanmakuView, SEGMENT_MS, WebDanmaku};
@@ -32,4 +33,5 @@ pub use limiter::RateLimiter;
 pub use message::{ChatApi, NoticeApi, NoticeCursor, WebMessages};
 pub use search::{HotWord, SearchApi, SearchOrder, WebSearch};
 pub use session::Session;
+pub use space::{SpaceApi, UpOrder, UpVideo, UpVideos, WebSpace};
 pub use video::{Page, PlayUrl, Stream, VideoApi, VideoDetail, WebVideo};

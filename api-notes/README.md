@@ -72,12 +72,20 @@
 | `api.vc…/session_svr/v1/session_svr/update_ack` | 🔶 | 标记已读 |
 | 营销私信识别（`last_msg.msg_type = 10`） | ❓ | |
 
+## UP 主页
+
+| 接口 | 状态 | 备注 |
+|---|---|---|
+| `x/web-interface/card` | ✅ | 资料、粉丝、投稿数、`following`（是否已关注） |
+| `x/space/wbi/arc/search` | ⚠️ | WBI 签名；`is_charging_arc` / `elec_arc_type` 标记充电专属。风控严格：连续请求时常返回 -352 或 HTTP 412（非 JSON 拦截页），客户端只提示并让用户手动重试 |
+
 ## 互动与个人库（需登录，均未实测）
 
 | 接口 | 状态 |
 |---|---|
 | `x/web-interface/archive/relation` | 🔶 |
 | `x/web-interface/archive/like` | 🔶 |
+| `x/web-interface/archive/like/triple`（一键三连：返回 like / coin / fav / multiply 各自成败） | 🔶 |
 | `x/web-interface/coin/add` | 🔶 |
 | `x/v3/fav/folder/created/list-all` · `x/v3/fav/resource/deal` · `x/v3/fav/resource/list` | 🔶 |
 | `x/v2/history/toview/add` · `x/v2/history/toview` | 🔶 |

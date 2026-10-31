@@ -7,7 +7,7 @@ use std::collections::HashMap;
 use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
 
-use rubi_api::{ApiError, CommentSort, SearchOrder, Session};
+use rubi_api::{ApiError, CommentSort, SearchOrder, Session, UpOrder};
 use rubi_core::{App, CoreError, DanmakuSession, ExportOptions, export_bundle, import_bundle, load_danmaku};
 use rubi_filter::danmaku::layout::{EstimateMeasurer, Lane, LayoutConfig, layout};
 use rubi_model::{
@@ -422,9 +422,33 @@ impl RubiCore {
         Ok(self.app.like(&card, on).await?)
     }
 
-    pub async fn coin(&self, bvid: String, count: u32) -> Res<()> {
+    /// Whether the user has liked / coined / favourited the video and follows its UP.
+    pub async fn relation(&self, bvid: String) -> Res<FfiVideoRelation> {
+        Ok(self.app.actions.relation(&bvid).await?.into())
+    }
+
+    /// `count` is 1 or 2; `also_like` likes the video in the same request.
+    pub async fn coin(&self, bvid: String, count: u32, also_like: bool) -> Res<()> {
         let card = self.card(&bvid).await?;
-        Ok(self.app.coin(&card, count, false).await?)
+        Ok(self.app.coin(&card, count, also_like).await?)
+    }
+
+    /// 一键三连: like, the remaining coins (up to 2) and the default favourite folder.
+    pub async fn triple(&self, bvid: String) -> Res<FfiTriple> {
+        let card = self.card(&bvid).await?;
+        Ok(self.app.triple(&card).await?.into())
+    }
+
+    /// The user's favourite folders, each marked if it already holds the video.
+    pub async fn fav_folders(&self, bvid: String) -> Res<Vec<FfiFavFolder>> {
+        let card = self.card(&bvid).await?;
+        Ok(self.app.actions.fav_folders(card.aid).await?.into_iter().map(Into::into).collect())
+    }
+
+    /// Adds the video to the `add` folders and removes it from the `remove` ones.
+    pub async fn set_favorite(&self, bvid: String, add: Vec<u64>, remove: Vec<u64>) -> Res<()> {
+        let card = self.card(&bvid).await?;
+        Ok(self.app.favorite(&card, &add, &remove).await?)
     }
 
     pub async fn watch_later(&self, bvid: String) -> Res<()> {
@@ -435,6 +459,34 @@ impl RubiCore {
     pub async fn follow_up(&self, bvid: String, on: bool) -> Res<()> {
         let card = self.card(&bvid).await?;
         Ok(self.app.follow(&card, on).await?)
+    }
+
+    /// Follow / unfollow from the UP's page.
+    pub async fn follow_mid(&self, mid: u64, name: String, on: bool) -> Res<()> {
+        Ok(self.app.follow_mid(mid, &name, on).await?)
+    }
+
+    // ----- UP space -----
+
+    pub async fn up_profile(&self, mid: u64) -> Res<FfiUpProfile> {
+        Ok(self.app.up_profile(mid).await?.into())
+    }
+
+    /// Page `pn` (from 1) of an UP's uploads, 充电专属 videos removed.
+    pub async fn up_videos(&self, mid: u64, pn: u32, order: FfiUpOrder) -> Res<FfiUpUploads> {
+        let order = match order {
+            FfiUpOrder::Newest => UpOrder::Pubdate,
+            FfiUpOrder::MostViewed => UpOrder::Click,
+            FfiUpOrder::MostFavorited => UpOrder::Stow,
+        };
+        let page = self.app.up_videos(mid, pn, order).await?;
+        self.remember(&page.items);
+        Ok(FfiUpUploads {
+            items: page.items.iter().map(|c| FfiVideoCard::of(c, None)).collect(),
+            total: page.total,
+            hidden_charging: page.hidden_charging as u32,
+            has_more: page.has_more,
+        })
     }
 
     pub async fn sync_followings(&self) -> Res<u32> {

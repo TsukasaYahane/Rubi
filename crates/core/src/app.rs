@@ -3,10 +3,10 @@ use std::sync::Arc;
 
 use rubi_api::{
     ActionApi, AuthApi, ChatApi, CommentApi, CommentSort, DEFAULT_PACKAGES, DanmakuApi, Emote, EmoteApi, FeedApi,
-    HotWord, HttpClient, LibraryApi, NoticeApi, SearchApi, SearchOrder, Session, VideoApi, WebAccount, WebAuth,
-    WebComment, WebDanmaku, WebEmote, WebFeed, WebMessages, WebSearch, WebVideo,
+    HotWord, HttpClient, LibraryApi, NoticeApi, SearchApi, SearchOrder, Session, SpaceApi, Triple, UpOrder, VideoApi,
+    WebAccount, WebAuth, WebComment, WebDanmaku, WebEmote, WebFeed, WebMessages, WebSearch, WebSpace, WebVideo,
 };
-use rubi_model::{ChatSession, Comment, FeedbackEvent, ItemRef, Signal, VideoCard, now_secs};
+use rubi_model::{ChatSession, Comment, FeedbackEvent, ItemRef, Signal, UpProfile, VideoCard, now_secs};
 use rubi_recommend::Source;
 use rubi_store::SqliteStore;
 use tokio::sync::Mutex as AsyncMutex;
@@ -20,6 +20,15 @@ use crate::sources::{
 
 /// Following lists are fetched at most this many pages (50 per page).
 const MAX_FOLLOWING_PAGES: u32 = 40;
+
+/// A page of [`App::up_videos`].
+#[derive(Debug, Clone, Default)]
+pub struct UpUploads {
+    pub items: Vec<VideoCard>,
+    pub total: u32,
+    pub hidden_charging: usize,
+    pub has_more: bool,
+}
 
 /// Every service, wired once. Hold one per process.
 pub struct App {
@@ -35,6 +44,7 @@ pub struct App {
     pub actions: Arc<dyn ActionApi>,
     pub library: Arc<dyn LibraryApi>,
     pub emote: Arc<dyn EmoteApi>,
+    pub space: Arc<dyn SpaceApi>,
     pub feed: FeedService<SqliteStore>,
     emotes: AsyncMutex<Option<Arc<Vec<Emote>>>>,
 }
@@ -69,6 +79,7 @@ impl App {
             actions: account.clone(),
             library: account,
             emote: Arc::new(WebEmote::new(http.clone())),
+            space: Arc::new(WebSpace::new(http.clone())),
             feed_api,
             http,
             feed,
@@ -126,6 +137,16 @@ impl App {
         self.signal(card, Signal::Coin)
     }
 
+    /// 一键三连; each part that succeeded feeds the profile.
+    pub async fn triple(&self, card: &VideoCard) -> Result<Triple> {
+        let t = self.actions.triple(&card.bvid).await?;
+        let done = [(t.liked, Signal::Like), (t.coined, Signal::Coin), (t.favorited, Signal::Favorite)];
+        for (_, s) in done.into_iter().filter(|(ok, _)| *ok) {
+            self.signal(card, s)?;
+        }
+        Ok(t)
+    }
+
     pub async fn favorite(&self, card: &VideoCard, add: &[u64], remove: &[u64]) -> Result<()> {
         self.actions.set_fav(card.aid, add, remove).await?;
         if add.is_empty() { Ok(()) } else { self.signal(card, Signal::Favorite) }
@@ -138,6 +159,29 @@ impl App {
     pub async fn follow(&self, card: &VideoCard, on: bool) -> Result<()> {
         self.actions.follow(card.owner.mid, on).await?;
         if on { self.signal(card, Signal::Follow) } else { Ok(()) }
+    }
+
+    /// Follow / unfollow from the UP's page, where there is no video to attach.
+    pub async fn follow_mid(&self, mid: u64, name: &str, on: bool) -> Result<()> {
+        self.actions.follow(mid, on).await?;
+        if !on {
+            return Ok(());
+        }
+        let item = ItemRef { up_mid: mid, title: name.to_owned(), ..ItemRef::of(&VideoCard::default()) };
+        self.feed.record(FeedbackEvent { signal: Signal::Follow, item: Some(item), at: now_secs() })
+    }
+
+    pub async fn up_profile(&self, mid: u64) -> Result<UpProfile> {
+        Ok(self.space.profile(mid).await?)
+    }
+
+    /// One page of an UP's uploads without 充电专属 videos; also returns the total count and
+    /// how many charging-only videos this page hid.
+    pub async fn up_videos(&self, mid: u64, pn: u32, order: UpOrder) -> Result<UpUploads> {
+        let page = self.space.videos(mid, pn, order).await?;
+        let fetched = page.items.len();
+        let items: Vec<VideoCard> = page.items.into_iter().filter(|v| !v.charging).map(|v| v.card).collect();
+        Ok(UpUploads { hidden_charging: fetched - items.len(), has_more: page.has_more, items, total: page.total })
     }
 
     /// Copies the account's following list into the follow factor. Returns how many.

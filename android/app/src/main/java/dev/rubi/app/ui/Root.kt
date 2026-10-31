@@ -42,6 +42,7 @@ sealed interface Screen {
     data object Search : Screen
     data object Inbox : Screen
     data class Chat(val mid: ULong, val name: String) : Screen
+    data class Up(val mid: ULong, val name: String) : Screen
     data object Login : Screen
     data object Filtered : Screen
     data object Settings : Screen
@@ -100,6 +101,7 @@ fun RubiRoot(app: RubiApp) {
             Screen.Search -> SearchScreen(app, nav)
             Screen.Inbox -> InboxScreen(app, nav)
             is Screen.Chat -> ChatScreen(app, nav, top.mid, top.name)
+            is Screen.Up -> key(top) { UpScreen(app, nav, top.mid, top.name) }
             Screen.Login -> LoginScreen(app, nav)
             Screen.Filtered -> FilteredScreen(app, nav)
             Screen.Settings -> SettingsScreen(app, nav)

@@ -1,6 +1,6 @@
 //! Commands for comments, search, the message center, chat and account actions.
 
-use rubi_api::{CommentSort, SearchOrder};
+use rubi_api::{CommentSort, SearchOrder, UpOrder};
 use rubi_core::App;
 use rubi_model::{Comment, NoticeKind, VideoCard, flatten_thread};
 
@@ -72,6 +72,29 @@ pub async fn run(app: &App, cmd: &str, args: &[String]) -> Res<bool> {
                 _ => app.follow(&card, true).await?,
             }
             println!("完成：{cmd} {}", short(&card.title, 30));
+        }
+        "up" => {
+            let mid: u64 = arg(1).ok_or("缺少 mid")?.parse()?;
+            let order = match arg(2) {
+                Some("click") => UpOrder::Click,
+                Some("stow") => UpOrder::Stow,
+                _ => UpOrder::Pubdate,
+            };
+            let p = app.up_profile(mid).await?;
+            let followed = if p.followed { " · 已关注" } else { "" };
+            println!(
+                "{} Lv{} {}  粉丝 {} · 关注 {} · 投稿 {}{followed}",
+                p.name, p.level, p.official, p.fans, p.followings, p.archives
+            );
+            println!("{}", p.sign);
+            let page = app.up_videos(mid, 1, order).await?;
+            for c in &page.items {
+                println!("{:>8} 播放  {}  [{}]", c.stats.view, short(&c.title, 30), c.bvid);
+            }
+            println!(
+                "共 {} 个 · 本页隐藏充电专属 {} 个 · 还有更多：{}",
+                page.total, page.hidden_charging, page.has_more
+            );
         }
         "favs" => {
             let card = card(app, bvid()?).await?;
