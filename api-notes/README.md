@@ -26,7 +26,8 @@
 | `x/web-interface/popular` | ✅ | 2026-10-30 游客实测 |
 | `x/web-interface/ranking/v2` | ✅ | 2026-10-30 游客实测，无需 WBI |
 | `x/web-interface/archive/related` | 🔶 | |
-| `x/web-interface/dynamic/region` | 🔶 | 分区最新 |
+| `x/web-interface/dynamic/region` | ⛔ | 2026-10-31 已下线：任何 rid 均返回 -404「啥都木有」；偏好分区源已停用 |
+| `x/web-interface/region/feed/rcmd` | 🔶 | 替代接口：`from_region` 只认 v2 主分区号（如 1005），旧 tid 与 v2 子分区返回 -400；条目无分区字段，封面为 `http://` |
 | `x/polymer/web-dynamic/v1/feed/all?type=video` | 🔶 | 关注 UP 投稿，需登录 |
 
 ## 广告 / 推广识别字段（见 `crates/filter/src/default_rules.toml`）
@@ -85,14 +86,14 @@
 
 | 接口 | 状态 |
 |---|---|
-| `x/web-interface/archive/relation` | 🔶 |
-| `x/web-interface/archive/like` | 🔶 |
+| `x/web-interface/archive/relation` | ✅ 2026-10-31 实测 |
+| `x/web-interface/archive/like` | ✅ 2026-10-31 实测（点赞 / 取消） |
 | `x/v2/dm/post`（发送弹幕：type=1、oid=cid、msg、progress、mode、color、fontsize、rnd；返回 `dmid`） | 🔶 |
 | `x/web-interface/archive/like/triple`（一键三连：返回 like / coin / fav / multiply 各自成败） | 🔶 |
 | `x/web-interface/coin/add` | 🔶 |
-| `x/v3/fav/folder/created/list-all` · `x/v3/fav/resource/deal` · `x/v3/fav/resource/list` | 🔶 |
-| `x/v2/history/toview/add` · `x/v2/history/toview` | 🔶 |
+| `x/v3/fav/folder/created/list-all` · `x/v3/fav/resource/deal` · `x/v3/fav/resource/list` | ✅ 2026-10-31 实测（列表、加入 / 移出、浏览） |
+| `x/v2/history/toview/add` · `x/v2/history/toview` | 列表 ✅ 2026-10-31；添加 🔶 |
 | `x/relation/modify` · `x/relation/followings` | 🔶 |
-| `x/web-interface/history/cursor` | 🔶 |
+| `x/web-interface/history/cursor` | ✅ 2026-10-31 实测 |
 
 需要登录的接口要等你用 `rubi login` 扫码后再实测；写操作（点赞、投币、私信等）会作用在你的真实账号上，实测前我会先问你。

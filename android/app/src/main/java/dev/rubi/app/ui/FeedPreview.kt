@@ -37,7 +37,7 @@ import kotlinx.coroutines.flow.collectLatest
 private const val SETTLE_MS = 600L
 
 /**
- * The bvid of the card to preview: the one under the vertical centre of `grid`, once
+ * The bvid of the card to preview: the one nearest the vertical centre of `grid`, once
  * scrolling has rested for a moment. Null while scrolling or when previews are off.
  */
 @Composable
@@ -49,7 +49,12 @@ fun rememberPreviewTarget(grid: LazyGridState, enabled: Boolean): String? {
             } else {
                 val info = grid.layoutInfo
                 val centre = (info.viewportStartOffset + info.viewportEndOffset) / 2
-                info.visibleItemsInfo.firstOrNull { centre in it.offset.y until it.offset.y + it.size.height }?.key as? String
+                // The card whose middle is nearest the screen's middle; the centre line may
+                // well fall in the gap between two cards.
+                info.visibleItemsInfo
+                    .filter { it.key is String }
+                    .minByOrNull { kotlin.math.abs(it.offset.y + it.size.height / 2 - centre) }
+                    ?.key as? String
             }
         }.collectLatest { bvid ->
             if (bvid == null) {

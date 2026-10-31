@@ -16,9 +16,7 @@ use tokio::sync::Mutex as AsyncMutex;
 use crate::error::{CoreError, Result};
 use crate::feed::{FeedService, Seeded};
 use crate::social::{self, FilteredComments};
-use crate::sources::{
-    BiliRecommendSource, FollowedUpsSource, PopularSource, PreferredZoneSource, RankingSource, RelatedSource,
-};
+use crate::sources::{BiliRecommendSource, FollowedUpsSource, PopularSource, RankingSource, RelatedSource};
 
 /// Following lists are fetched at most this many pages (50 per page).
 const MAX_FOLLOWING_PAGES: u32 = 40;
@@ -57,17 +55,18 @@ impl App {
         let http = Arc::new(HttpClient::new(session)?);
         let feed_api: Arc<dyn FeedApi> = Arc::new(WebFeed::new(http.clone()));
         let related = Arc::new(RelatedSource::new(feed_api.clone()));
-        let zones = Arc::new(PreferredZoneSource::new(feed_api.clone()));
+        // PreferredZoneSource is left out: x/web-interface/dynamic/region answers -404 for every
+        // zone since 2026-10 and its successor (region/feed/rcmd) takes v2 zone ids we do not
+        // map yet. Zone preference still counts through the interest factor.
         let sources: Vec<Arc<dyn Source>> = vec![
             Arc::new(BiliRecommendSource::new(feed_api.clone())),
             Arc::new(FollowedUpsSource::new(feed_api.clone())),
             Arc::new(PopularSource::new(feed_api.clone())),
             Arc::new(RankingSource::new(feed_api.clone())),
             related.clone(),
-            zones.clone(),
         ];
         let store = Arc::new(SqliteStore::open(db_path)?);
-        let feed = FeedService::new(store, sources, Seeded { related: Some(related), zones: Some(zones) })?;
+        let feed = FeedService::new(store, sources, Seeded { related: Some(related), zones: None })?;
         let messages = Arc::new(WebMessages::new(http.clone()));
         let account = Arc::new(WebAccount::new(http.clone()));
         Ok(Self {

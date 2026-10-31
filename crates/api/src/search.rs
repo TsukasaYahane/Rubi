@@ -7,7 +7,7 @@ use serde_json::Value;
 use crate::error::Result;
 use crate::http::HttpClient;
 use crate::params;
-use crate::parse::{duration_of, str_of, u64_of};
+use crate::parse::{duration_of, image_of, plain_letters, str_of, u64_of};
 
 const SEARCH_TYPE: &str = "https://api.bilibili.com/x/web-interface/wbi/search/type";
 /// Hot words with their commercial flag (`stat_datas.is_commercial`).
@@ -115,7 +115,6 @@ fn decode_entities(s: &str) -> String {
 }
 
 pub(crate) fn card_of_search(v: &Value) -> VideoCard {
-    let pic = str_of(&v["pic"]);
     let zone = match u64_of(&v["typeid"]) {
         0 => None,
         tid => Some(Zone { tid: tid as u32, name: str_of(&v["typename"]) }),
@@ -124,9 +123,9 @@ pub(crate) fn card_of_search(v: &Value) -> VideoCard {
         bvid: str_of(&v["bvid"]),
         aid: u64_of(&v["aid"]),
         cid: None,
-        title: strip_markup(&str_of(&v["title"])),
+        title: plain_letters(&strip_markup(&str_of(&v["title"]))),
         desc: str_of(&v["description"]),
-        cover: if pic.starts_with("//") { format!("https:{pic}") } else { pic },
+        cover: image_of(&v["pic"]),
         owner: Owner { mid: u64_of(&v["mid"]), name: str_of(&v["author"]) },
         zone,
         tags: str_of(&v["tag"]).split(',').map(str::trim).filter(|t| !t.is_empty()).map(str::to_owned).collect(),

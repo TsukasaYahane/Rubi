@@ -16,6 +16,49 @@ pub fn str_of(v: &Value) -> String {
     v.as_str().unwrap_or_default().to_owned()
 }
 
+/// A title as text: "styled" letters and digits from the Mathematical Alphanumeric block
+/// (𝐇𝐃𝐑, 𝟏𝟐𝟎, used as decoration) become plain ASCII, so fonts without them show no boxes
+/// and keyword rules see the real word. Everything else is kept as is.
+pub fn title_of(v: &Value) -> String {
+    plain_letters(v.as_str().unwrap_or_default())
+}
+
+pub fn plain_letters(s: &str) -> String {
+    s.chars().map(fold_styled).collect()
+}
+
+fn fold_styled(c: char) -> char {
+    let u = c as u32;
+    let mapped = match u {
+        // Thirteen styles of A–Z a–z, 52 code points each (some reserved, never sent).
+        0x1D400..=0x1D6A3 => {
+            let i = (u - 0x1D400) % 52;
+            if i < 26 { 'A' as u32 + i } else { 'a' as u32 + i - 26 }
+        }
+        // Five styles of 0–9.
+        0x1D7CE..=0x1D7FF => '0' as u32 + (u - 0x1D7CE) % 10,
+        _ => return c,
+    };
+    char::from_u32(mapped).unwrap_or(c)
+}
+
+/// An image url the app can load: list endpoints still hand out `http://` and `//` covers,
+/// which Android refuses as cleartext, so both become `https://`.
+pub fn image_of(v: &Value) -> String {
+    https_image(v.as_str().unwrap_or_default())
+}
+
+/// [`image_of`] for a url already parsed (e.g. cards cached before the upgrade).
+pub fn https_image(s: &str) -> String {
+    if let Some(rest) = s.strip_prefix("http://") {
+        format!("https://{rest}")
+    } else if s.starts_with("//") {
+        format!("https:{s}")
+    } else {
+        s.to_owned()
+    }
+}
+
 /// Accepts seconds as a number or a `mm:ss` / `hh:mm:ss` string.
 pub fn duration_of(v: &Value) -> u32 {
     match v {
@@ -50,9 +93,9 @@ pub fn card_of(v: &Value, source: SourceKind) -> VideoCard {
         bvid: str_of(&v["bvid"]),
         aid,
         cid: Some(u64_of(&v["cid"])).filter(|&c| c > 0),
-        title: str_of(&v["title"]),
+        title: title_of(&v["title"]),
         desc: str_of(&v["desc"]),
-        cover: [&v["pic"], &v["cover"]].into_iter().map(str_of).find(|s| !s.is_empty()).unwrap_or_default(),
+        cover: [&v["pic"], &v["cover"]].into_iter().map(image_of).find(|s| !s.is_empty()).unwrap_or_default(),
         owner: Owner { mid: u64_of(&owner["mid"]), name: str_of(&owner["name"]) },
         zone,
         tags: Vec::new(),
@@ -75,9 +118,9 @@ pub fn card_of_dynamic(item: &Value) -> Option<VideoCard> {
     Some(VideoCard {
         bvid: str_of(&archive["bvid"]),
         aid: u64_of(&archive["aid"]),
-        title: str_of(&archive["title"]),
+        title: title_of(&archive["title"]),
         desc: str_of(&archive["desc"]),
-        cover: str_of(&archive["cover"]),
+        cover: image_of(&archive["cover"]),
         owner: Owner { mid: u64_of(&author["mid"]), name: str_of(&author["name"]) },
         duration_s: duration_of(&archive["duration_text"]),
         pubdate: u64_of(&author["pub_ts"]) as i64,
@@ -96,6 +139,21 @@ pub fn card_of_dynamic(item: &Value) -> Option<VideoCard> {
 mod tests {
     use super::*;
     use serde_json::json;
+
+    #[test]
+    fn styled_letters_become_plain() {
+        assert_eq!(plain_letters("【𝟖𝐊/𝐇𝐃𝐑/𝟏𝟐𝟎𝐅𝐏𝐒】韩立"), "【8K/HDR/120FPS】韩立");
+        assert_eq!(plain_letters("𝒂𝒃𝒄 𝔸𝔹 𝟘𝟙 𝚡"), "abc AB 01 x");
+        assert_eq!(plain_letters("普通标题！ABC"), "普通标题！ABC");
+    }
+
+    #[test]
+    fn image_urls_become_https() {
+        assert_eq!(image_of(&json!("http://i0.hdslb.com/a.jpg")), "https://i0.hdslb.com/a.jpg");
+        assert_eq!(image_of(&json!("//i0.hdslb.com/a.jpg")), "https://i0.hdslb.com/a.jpg");
+        assert_eq!(image_of(&json!("https://i0.hdslb.com/a.jpg")), "https://i0.hdslb.com/a.jpg");
+        assert_eq!(image_of(&json!(null)), "");
+    }
 
     #[test]
     fn parses_rcmd_item() {

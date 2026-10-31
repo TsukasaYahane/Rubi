@@ -623,7 +623,7 @@ impl FfiDanmakuSession {
 
 impl From<rubi_filter::danmaku::DanmakuOutput> for FfiDanmakuSet {
     fn from(out: rubi_filter::danmaku::DanmakuOutput) -> Self {
-        let mut removed: Vec<String> = out.removed.iter().map(|(c, n)| format!("{c:?}: {n}")).collect();
+        let mut removed: Vec<String> = out.removed.iter().map(|(c, n)| format!("{} {n}", c.label())).collect();
         removed.sort();
         Self {
             items: out.kept.into_iter().map(Into::into).collect(),

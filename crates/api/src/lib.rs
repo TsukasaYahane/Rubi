@@ -31,6 +31,7 @@ pub use feed::{FeedApi, WebFeed};
 pub use http::HttpClient;
 pub use limiter::RateLimiter;
 pub use message::{ChatApi, NoticeApi, NoticeCursor, WebMessages};
+pub use parse::{https_image, plain_letters};
 pub use search::{HotWord, SearchApi, SearchOrder, WebSearch};
 pub use session::Session;
 pub use space::{SpaceApi, UpOrder, UpVideo, UpVideos, WebSpace};

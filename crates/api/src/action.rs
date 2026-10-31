@@ -10,7 +10,7 @@ use serde_json::Value;
 use crate::error::{ApiError, Result};
 use crate::http::HttpClient;
 use crate::params;
-use crate::parse::{card_of, duration_of, str_of, u64_of};
+use crate::parse::{card_of, duration_of, image_of, str_of, title_of, u64_of};
 
 const LIKE: &str = "https://api.bilibili.com/x/web-interface/archive/like";
 const TRIPLE: &str = "https://api.bilibili.com/x/web-interface/archive/like/triple";
@@ -88,8 +88,8 @@ pub(crate) fn history_of(v: &Value) -> Option<HistoryEntry> {
             bvid: str_of(&h["bvid"]),
             aid: u64_of(&h["oid"]),
             cid: Some(u64_of(&h["cid"])).filter(|&c| c > 0),
-            title: str_of(&v["title"]),
-            cover: str_of(&v["cover"]),
+            title: title_of(&v["title"]),
+            cover: image_of(&v["cover"]),
             owner: Owner { mid: u64_of(&v["author_mid"]), name: str_of(&v["author_name"]) },
             duration_s: duration_of(&v["duration"]),
             raw: v.clone(),
@@ -115,9 +115,9 @@ pub(crate) fn fav_item_of(v: &Value) -> VideoCard {
     VideoCard {
         bvid: str_of(&v["bvid"]),
         aid: u64_of(&v["id"]),
-        title: str_of(&v["title"]),
+        title: title_of(&v["title"]),
         desc: str_of(&v["intro"]),
-        cover: str_of(&v["cover"]),
+        cover: image_of(&v["cover"]),
         owner: Owner { mid: u64_of(&v["upper"]["mid"]), name: str_of(&v["upper"]["name"]) },
         duration_s: duration_of(&v["duration"]),
         pubdate: u64_of(&v["pubtime"]) as i64,

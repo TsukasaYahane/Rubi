@@ -29,8 +29,8 @@ impl FfiVideoCard {
         Self {
             bvid: c.bvid.clone(),
             aid: c.aid,
-            title: c.title.clone(),
-            cover: c.cover.clone(),
+            title: rubi_api::plain_letters(&c.title),
+            cover: rubi_api::https_image(&c.cover),
             up_name: c.owner.name.clone(),
             up_mid: c.owner.mid,
             zone: c.zone.as_ref().map(|z| z.name.clone()),

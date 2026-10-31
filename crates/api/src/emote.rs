@@ -5,7 +5,7 @@ use async_trait::async_trait;
 use crate::error::Result;
 use crate::http::HttpClient;
 use crate::params;
-use crate::parse::str_of;
+use crate::parse::{image_of, str_of};
 
 const PACKAGE: &str = "https://api.bilibili.com/x/emote/package";
 /// 小黄脸, the default set used across comments, messages and danmaku. Readable as a guest.
@@ -43,7 +43,7 @@ impl EmoteApi for WebEmote {
             .into_iter()
             .flatten()
             .flat_map(|p| p["emote"].as_array().cloned().unwrap_or_default())
-            .map(|e| Emote { text: str_of(&e["text"]), url: str_of(&e["url"]) })
+            .map(|e| Emote { text: str_of(&e["text"]), url: image_of(&e["url"]) })
             .filter(|e| e.text.starts_with('[') && !e.url.is_empty())
             .collect())
     }

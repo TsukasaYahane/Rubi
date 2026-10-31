@@ -1,5 +1,6 @@
 package dev.rubi.app.ui
 
+import android.util.Log
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
@@ -79,6 +80,9 @@ class HomeState {
     val hot = FeedList()
     val rank = FeedList()
     var status by mutableStateOf("")
+    /** Why sources failed on the last refresh; shown when the status line is tapped. */
+    var sourceErrors by mutableStateOf(emptyList<String>())
+    var showErrors by mutableStateOf(false)
     var dual by mutableStateOf(true)
     var pivot by mutableStateOf(0)
 }
@@ -112,8 +116,10 @@ fun HomeScreen(app: RubiApp, nav: Nav, home: HomeState) {
         cards.addAll(fresh)
         feed.ended = fresh.isEmpty()
         report?.let {
+            home.sourceErrors = it.getOrNull()?.errors.orEmpty()
+            home.sourceErrors.forEach { e -> Log.w("RubiFeed", "source failed: $e") }
             home.status = it.fold(
-                { r -> "↻ 本次保留 ${r.kept} · 过滤 ${r.blocked}" + if (r.errors.isNotEmpty()) " · ${r.errors.size} 个来源失败" else "" },
+                { r -> "↻ 本次保留 ${r.kept} · 过滤 ${r.blocked}" + if (r.errors.isNotEmpty()) " · ${r.errors.size} 源失败 ▾" else "" },
                 { e -> "刷新失败：${e.message}" },
             )
         }
@@ -164,8 +170,11 @@ fun HomeScreen(app: RubiApp, nav: Nav, home: HomeState) {
             return@Column
         }
         Row(Modifier.fillMaxWidth().height(44.dp).padding(horizontal = 16.dp), verticalAlignment = Alignment.CenterVertically) {
-            Meta(home.status, Modifier.weight(1f))
+            Meta(home.status, Modifier.weight(1f).clickable(enabled = home.sourceErrors.isNotEmpty()) { home.showErrors = !home.showErrors })
             Text("被过滤内容 →", style = MetroType.meta, color = c.fg, modifier = Modifier.clickable { nav.push(Screen.Filtered) })
+        }
+        if (home.showErrors) {
+            Column(Modifier.padding(horizontal = 16.dp)) { home.sourceErrors.forEach { Meta(it) } }
         }
         PullToRefreshBox(isRefreshing = refreshing, onRefresh = { scope.launch { load(reset = true) } }) {
             LazyVerticalGrid(

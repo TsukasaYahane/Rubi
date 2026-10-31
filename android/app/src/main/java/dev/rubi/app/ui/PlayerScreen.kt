@@ -7,6 +7,9 @@ import android.view.View
 import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.background
+import androidx.compose.foundation.layout.heightIn
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.lazy.rememberLazyListState
 import dev.rubi.core.FfiVideoDetail
 import androidx.compose.foundation.clickable
@@ -214,12 +217,24 @@ fun PlayerScreen(app: RubiApp, nav: Nav, bvid: String, title: String, focus: Ffi
         }
         if (fullscreen) return@Column
         danmaku?.jumpMarks?.takeIf { it.isNotEmpty() }?.let { marks ->
-            Row(Modifier.padding(horizontal = 16.dp, vertical = 4.dp), horizontalArrangement = Arrangement.spacedBy(16.dp)) {
+            // One line that scrolls sideways, however many marks there are.
+            Row(
+                Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()).padding(horizontal = 16.dp, vertical = 4.dp),
+                horizontalArrangement = Arrangement.spacedBy(16.dp),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
                 Meta("空降点")
                 marks.forEach { m ->
-                    Text(m.label, style = MetroType.meta, color = c.fg, modifier = Modifier.clickable {
-                        PlayerHolder.get(ctx).seekTo(m.targetMs.toLong())
-                    })
+                    Text(
+                        m.label,
+                        style = MetroType.meta,
+                        color = c.fg,
+                        maxLines = 1,
+                        softWrap = false,
+                        modifier = Modifier.heightIn(min = 32.dp).wrapContentSize(Alignment.Center).clickable {
+                            PlayerHolder.get(ctx).seekTo(m.targetMs.toLong())
+                        },
+                    )
                 }
             }
         }

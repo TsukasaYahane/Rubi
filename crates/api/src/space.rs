@@ -9,7 +9,7 @@ use serde_json::Value;
 use crate::error::Result;
 use crate::http::HttpClient;
 use crate::params;
-use crate::parse::{duration_of, str_of, u64_of};
+use crate::parse::{duration_of, image_of, str_of, title_of, u64_of};
 
 const CARD: &str = "https://api.bilibili.com/x/web-interface/card";
 const ARC_SEARCH: &str = "https://api.bilibili.com/x/space/wbi/arc/search";
@@ -76,7 +76,7 @@ pub(crate) fn profile_of(d: &Value) -> UpProfile {
     UpProfile {
         mid: u64_of(&c["mid"]),
         name: str_of(&c["name"]),
-        face: str_of(&c["face"]),
+        face: image_of(&c["face"]),
         sign: str_of(&c["sign"]),
         level: u64_of(&c["level_info"]["current_level"]) as u32,
         official: [&c["Official"]["title"], &c["official_verify"]["desc"]]
@@ -95,9 +95,9 @@ pub(crate) fn up_video_of(v: &Value) -> UpVideo {
     let card = VideoCard {
         bvid: str_of(&v["bvid"]),
         aid: u64_of(&v["aid"]),
-        title: str_of(&v["title"]),
+        title: title_of(&v["title"]),
         desc: str_of(&v["description"]),
-        cover: str_of(&v["pic"]),
+        cover: image_of(&v["pic"]),
         owner: Owner { mid: u64_of(&v["mid"]), name: str_of(&v["author"]) },
         duration_s: duration_of(&v["length"]),
         pubdate: u64_of(&v["created"]) as i64,

@@ -48,7 +48,7 @@ fun VideoDetailBlock(d: FfiVideoDetail, expanded: Boolean, onToggle: () -> Unit)
                 }
             }
             val time = SimpleDateFormat("yyyy-MM-dd HH:mm", Locale.CHINA).format(Date(d.pubdate * 1000))
-            Meta(listOfNotNull(time, d.zone, "${d.pages} P", formatDuration(d.durationS)).joinToString(" · "))
+            Meta(listOfNotNull(time, d.zone, "${d.pages} P", formatDuration(d.durationS)).filter { it.isNotBlank() }.joinToString(" · "))
             SelectionContainer { Meta("${d.bvid} · av${d.aid}") }
         }
         Row(Modifier.fillMaxWidth().heightIn(min = 32.dp), verticalAlignment = Alignment.CenterVertically) {

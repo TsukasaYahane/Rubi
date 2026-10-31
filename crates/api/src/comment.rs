@@ -7,7 +7,7 @@ use serde_json::Value;
 use crate::error::{ApiError, Result};
 use crate::http::HttpClient;
 use crate::params;
-use crate::parse::{str_of, u64_of};
+use crate::parse::{image_of, str_of, u64_of};
 
 const MAIN: &str = "https://api.bilibili.com/x/v2/reply/wbi/main";
 const REPLIES: &str = "https://api.bilibili.com/x/v2/reply/reply";
@@ -72,7 +72,7 @@ pub(crate) fn comment_of(v: &Value, up_mid: u64) -> Comment {
         pinned: false,
         emotes: v["content"]["emote"]
             .as_object()
-            .map(|m| m.iter().map(|(k, e)| (k.clone(), str_of(&e["url"]))).filter(|(_, u)| !u.is_empty()).collect())
+            .map(|m| m.iter().map(|(k, e)| (k.clone(), image_of(&e["url"]))).filter(|(_, u)| !u.is_empty()).collect())
             .unwrap_or_default(),
         raw: v.clone(),
     }

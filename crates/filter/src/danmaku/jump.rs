@@ -48,7 +48,13 @@ pub fn parse_jump(content: &str, progress_ms: u32, duration_ms: u32) -> Option<(
     }
 
     let core = text.trim_matches(|c: char| !c.is_alphanumeric());
-    let target = bare_re().captures(core).and_then(|c| captured_ms(&c))?;
+    let caps = bare_re().captures(core)?;
+    // A lone "5分钟" on a fresh video means "here 5 minutes after upload", not a time to
+    // jump to; without a keyword only forms with seconds ("5:30", "5分30秒") count.
+    if caps.name("cm").is_some() && caps.name("cs").is_none() {
+        return None;
+    }
+    let target = captured_ms(&caps)?;
     (target >= progress_ms.saturating_add(BARE_MIN_LEAD_MS) && within(target)).then_some((target, JumpKind::Bare))
 }
 
@@ -117,6 +123,15 @@ pub fn format_time(ms: u32) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn minutes_alone_are_not_bare_jumps() {
+        for text in ["5分钟", "14分钟前", "2分", "1分钟！"] {
+            assert_eq!(parse_jump(text, 0, 20 * 60_000), None, "{text}");
+        }
+        assert_eq!(parse_jump("5分30秒", 0, 0), Some((330_000, JumpKind::Bare)));
+        assert_eq!(parse_jump("空降5分钟", 0, 0), Some((300_000, JumpKind::Keyword)));
+    }
 
     const DUR: u32 = 30 * 60 * 1000;
 

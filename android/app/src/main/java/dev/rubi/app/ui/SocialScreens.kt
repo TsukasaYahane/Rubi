@@ -139,7 +139,7 @@ fun InboxScreen(app: RubiApp, nav: Nav) {
             } else {
                 val s = app.core.chatSessions()
                 sessions = s.sessions
-                note = "已过滤系统推广通知与营销私信 ${s.hidden} 个"
+                note = "已过滤营销私信 ${s.hidden} 个（未关注账号的推广卡片）"
             }
         }.onFailure { note = if (it is RubiException.NotLoggedIn) "登录后可查看消息" else "加载失败：${it.message}" }
     }

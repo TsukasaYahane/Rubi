@@ -12,7 +12,7 @@ use serde_json::Value;
 use crate::error::{ApiError, Result};
 use crate::http::HttpClient;
 use crate::params;
-use crate::parse::{str_of, u64_of};
+use crate::parse::{image_of, str_of, title_of, u64_of};
 
 const UNREAD: &str = "https://api.bilibili.com/x/msgfeed/unread";
 const FEED_REPLY: &str = "https://api.bilibili.com/x/msgfeed/reply";
@@ -89,8 +89,8 @@ pub(crate) fn shared_video(msg_type: u64, content: &str, text: &str) -> Option<S
             .or_else(|| find_video_ref(&str_of(&parsed["url"])))?;
         Some(SharedVideo {
             video,
-            title: str_of(&parsed["title"]),
-            cover: str_of(&parsed["thumb"]),
+            title: title_of(&parsed["title"]),
+            cover: image_of(&parsed["thumb"]),
             author: str_of(&parsed["author"]),
         })
     };
@@ -229,7 +229,9 @@ impl ChatApi for WebMessages {
                         let last = &s["last_msg"];
                         ChatSession {
                             talker_mid: u64_of(&s["talker_id"]),
-                            name: String::new(),
+                            // Official accounts (服务通知, 创作助手…) name themselves here; user
+                            // cards below fill in everyone else.
+                            name: str_of(&s["account_info"]["name"]),
                             unread: u64_of(&s["unread_count"]) as u32,
                             last_text: message_text(u64_of(&last["msg_type"]), &str_of(&last["content"])),
                             last_from_me: u64_of(&last["sender_uid"]) == me,
@@ -246,8 +248,9 @@ impl ChatApi for WebMessages {
             let cards = self.http.get_json(USER_CARDS, params!["uids" => uids], false).await?;
             for c in cards.as_array().into_iter().flatten() {
                 let mid = u64_of(&c["mid"]);
-                for s in sessions.iter_mut().filter(|s| s.talker_mid == mid) {
-                    s.name = str_of(&c["name"]);
+                let name = str_of(&c["name"]);
+                for s in sessions.iter_mut().filter(|s| s.talker_mid == mid && !name.is_empty()) {
+                    s.name = name.clone();
                 }
             }
         }

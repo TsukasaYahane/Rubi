@@ -174,10 +174,19 @@ impl Source for PreferredZoneSource {
     async fn fetch(&self, want: usize) -> Result<Vec<VideoCard>, SourceError> {
         let zones: Vec<u32> = self.zones.lock().unwrap_or_else(|e| e.into_inner()).iter().take(3).copied().collect();
         let per = (want / zones.len().max(1)).clamp(5, 30) as u32;
+        // A zone the endpoint does not know (-404, e.g. a parent or new-style tid) is skipped;
+        // the source fails only when every zone does.
         let mut out = Vec::new();
-        for z in zones {
-            out.extend(self.api.zone_newest(z, 1, per).await.map_err(err(self.kind()))?);
+        let mut last_err = None;
+        for z in &zones {
+            match self.api.zone_newest(*z, 1, per).await {
+                Ok(cards) => out.extend(cards),
+                Err(e) => last_err = Some(e),
+            }
         }
-        Ok(out)
+        match last_err {
+            Some(e) if out.is_empty() && !zones.is_empty() => Err(err(self.kind())(e)),
+            _ => Ok(out),
+        }
     }
 }

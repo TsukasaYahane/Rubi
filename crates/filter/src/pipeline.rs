@@ -26,6 +26,32 @@ pub enum Category {
     DanmakuUser,
 }
 
+impl Category {
+    /// The name users see (filter summaries, the 被过滤内容 page).
+    pub fn label(self) -> &'static str {
+        match self {
+            Category::Promotion => "必火推广",
+            Category::Ad => "广告",
+            Category::Banner => "横幅",
+            Category::Goods => "商品卡片",
+            Category::PinnedComment => "置顶带货评论",
+            Category::Commercial => "商业合作",
+            Category::NonVideo => "非视频内容",
+            Category::Keyword => "屏蔽词",
+            Category::UpBlock => "屏蔽 UP",
+            Category::Zone => "屏蔽分区",
+            Category::Duration => "时长",
+            Category::Pubdate => "发布时间",
+            Category::Watched => "已看过",
+            Category::CommandDanmaku => "互动弹幕",
+            Category::AdvancedDanmaku => "高级弹幕",
+            Category::JumpMerge => "空降合并",
+            Category::DanmakuKeyword => "弹幕屏蔽词",
+            Category::DanmakuUser => "屏蔽弹幕用户",
+        }
+    }
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
 #[serde(tag = "kind", rename_all = "snake_case")]
 pub enum Action {
