@@ -142,7 +142,11 @@ fun FullscreenOverlay(
             )
         }
         if (composing) {
-            Column(Modifier.padding(start = 14.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+            // A near-opaque panel: the danmaku behind would otherwise run through the input.
+            Column(
+                Modifier.padding(start = 14.dp, top = 4.dp).background(Color(0xE6000000)).padding(10.dp),
+                verticalArrangement = Arrangement.spacedBy(6.dp),
+            ) {
                 Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(12.dp)) {
                     BasicTextField(
                         value = text,
@@ -152,7 +156,7 @@ fun FullscreenOverlay(
                         cursorBrush = SolidColor(Color.White),
                         keyboardOptions = KeyboardOptions(imeAction = ImeAction.Send),
                         keyboardActions = KeyboardActions(onSend = { submit() }),
-                        modifier = Modifier.weight(1f).heightIn(min = 40.dp).background(Color(0x66000000)).padding(horizontal = 10.dp, vertical = 10.dp),
+                        modifier = Modifier.weight(1f).heightIn(min = 40.dp).background(Color(0xFF262626)).padding(horizontal = 10.dp, vertical = 10.dp),
                         decorationBox = { inner ->
                             if (text.isEmpty()) Text("发个友善的弹幕见证当下", fontSize = 15.sp, color = Color(0x99FFFFFF))
                             inner()

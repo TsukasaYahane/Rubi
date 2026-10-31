@@ -31,7 +31,8 @@ pub trait ActionApi: Send + Sync {
     async fn like(&self, bvid: &str, on: bool) -> Result<()>;
     /// `count` is 1 or 2.
     async fn coin(&self, bvid: &str, count: u32, also_like: bool) -> Result<()>;
-    /// 一键三连: like, the remaining coins (up to 2) and the default favourite folder at once.
+    /// 一键三连: like, coins and the default favourite folder at once. A video already coined
+    /// gets no more coins (verified 2026-10-31: `coin` succeeds with `multiply` 0).
     async fn triple(&self, bvid: &str) -> Result<Triple>;
     /// The user's own folders; with `aid > 0` each is marked if it holds that video.
     async fn fav_folders(&self, aid: u64) -> Result<Vec<FavFolder>>;

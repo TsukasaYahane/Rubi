@@ -108,7 +108,9 @@ fun VideoActions(app: RubiApp, nav: Nav, d: FfiVideoDetail) {
                                     "投币".takeUnless { t.coined },
                                     "收藏".takeUnless { t.favorited },
                                 )
-                                note = if (missed.isEmpty()) "三连成功 · 投币 ${t.coins} 枚"
+                                note = if (missed.isEmpty()) {
+                                    if (t.coins > 0u) "三连成功 · 投币 ${t.coins} 枚" else "三连成功（之前已投过币，这次未再投币）"
+                                }
                                 else "三连部分完成，未成功：" + missed.joinToString("、")
                             }
                             .onFailure { failed(it) }

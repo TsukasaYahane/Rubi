@@ -475,7 +475,7 @@ impl RubiCore {
         Ok(self.app.coin(&card, count, also_like).await?)
     }
 
-    /// 一键三连: like, the remaining coins (up to 2) and the default favourite folder.
+    /// 一键三连: like, coins (none if already coined) and the default favourite folder.
     pub async fn triple(&self, bvid: String) -> Res<FfiTriple> {
         let card = self.card(&bvid).await?;
         Ok(self.app.triple(&card).await?.into())

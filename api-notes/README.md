@@ -88,12 +88,12 @@
 |---|---|
 | `x/web-interface/archive/relation` | ✅ 2026-10-31 实测 |
 | `x/web-interface/archive/like` | ✅ 2026-10-31 实测（点赞 / 取消） |
-| `x/v2/dm/post`（发送弹幕：type=1、oid=cid、msg、progress、mode、color、fontsize、rnd；返回 `dmid`） | 🔶 |
-| `x/web-interface/archive/like/triple`（一键三连：返回 like / coin / fav / multiply 各自成败） | 🔶 |
-| `x/web-interface/coin/add` | 🔶 |
+| `x/v2/dm/post`（发送弹幕：type=1、oid=cid、msg、progress、mode、color、fontsize、rnd；返回 `dmid`） | ✅ 2026-10-31 实测返回成功；新弹幕不会立即出现在公开分段（审核 / 缓存） |
+| `x/web-interface/archive/like/triple`（一键三连：返回 like / coin / fav / multiply 各自成败） | ✅ 2026-10-31 实测：已投过币时 `coin` 仍为成功但不再投币（`multiply` 0） |
+| `x/web-interface/coin/add` | ✅ 2026-10-31 实测（`select_like=0` 时只投币） |
 | `x/v3/fav/folder/created/list-all` · `x/v3/fav/resource/deal` · `x/v3/fav/resource/list` | ✅ 2026-10-31 实测（列表、加入 / 移出、浏览） |
-| `x/v2/history/toview/add` · `x/v2/history/toview` | 列表 ✅ 2026-10-31；添加 🔶 |
-| `x/relation/modify` · `x/relation/followings` | 🔶 |
+| `x/v2/history/toview/add` · `x/v2/history/toview` · `x/v2/history/toview/del` | ✅ 2026-10-31 实测（添加、列表；移除用 `del`，客户端暂未接入） |
+| `x/relation/modify` · `x/relation/followings` | 关注 / 取关 ✅ 2026-10-31 实测；关注列表 🔶 |
 | `x/web-interface/history/cursor` | ✅ 2026-10-31 实测 |
 
 需要登录的接口要等你用 `rubi login` 扫码后再实测；写操作（点赞、投币、私信等）会作用在你的真实账号上，实测前我会先问你。
