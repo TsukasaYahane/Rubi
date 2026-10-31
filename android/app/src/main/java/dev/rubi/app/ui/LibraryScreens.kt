@@ -93,7 +93,7 @@ private fun LazyListScope.listFooter(nav: Nav, empty: Boolean, loading: Boolean,
             when {
                 error != null -> {
                     Meta(describe(error))
-                    if (error is RubiException.NotLoggedIn) AccentButton("扫码登录") { nav.push(Screen.Login) }
+                    if (error is RubiException.NotLoggedIn) AccentButton("登录") { nav.push(Screen.Login) }
                     else TextAction("重试", onClick = retry)
                 }
                 loading -> Meta("加载中…")

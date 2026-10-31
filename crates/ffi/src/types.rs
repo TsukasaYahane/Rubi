@@ -672,3 +672,31 @@ pub struct FfiFavPage {
     pub items: Vec<FfiVideoCard>,
     pub has_more: bool,
 }
+
+#[derive(Debug, Clone, uniffi::Record)]
+pub struct FfiLoginCaptcha {
+    pub token: String,
+    pub gt: String,
+    pub challenge: String,
+}
+
+/// What the Geetest widget returned (its challenge may differ from the one it was given).
+#[derive(Debug, Clone, uniffi::Record)]
+pub struct FfiSolvedCaptcha {
+    pub token: String,
+    pub challenge: String,
+    pub validate: String,
+    pub seccode: String,
+}
+
+impl From<FfiSolvedCaptcha> for rubi_api::SolvedCaptcha {
+    fn from(c: FfiSolvedCaptcha) -> Self {
+        Self { token: c.token, challenge: c.challenge, validate: c.validate, seccode: c.seccode }
+    }
+}
+
+#[derive(Debug, Clone, uniffi::Record)]
+pub struct FfiLoginKey {
+    pub hash: String,
+    pub public_key_pem: String,
+}

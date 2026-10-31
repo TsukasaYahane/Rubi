@@ -22,7 +22,7 @@ mod video;
 pub mod wbi;
 
 pub use action::{ActionApi, LibraryApi, Triple, WebAccount};
-pub use auth::{AuthApi, NavInfo, QrState, QrTicket, WebAuth};
+pub use auth::{AuthApi, LoginCaptcha, LoginKey, NavInfo, QrState, QrTicket, SolvedCaptcha, WebAuth};
 pub use comment::{CommentApi, CommentPage, CommentSort, ThreadPreview, WebComment};
 pub use danmaku::{DanmakuApi, DanmakuView, SEGMENT_MS, SendDanmaku, WebDanmaku};
 pub use emote::{DEFAULT_PACKAGES, Emote, EmoteApi, WebEmote};

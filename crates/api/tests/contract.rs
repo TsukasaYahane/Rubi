@@ -83,3 +83,16 @@ async fn up_space() {
         Err(e) => panic!("arc/search: {e}"),
     }
 }
+
+#[tokio::test]
+#[ignore = "live API"]
+async fn login_handshake() {
+    // Only the read-only steps: nothing is submitted.
+    let http = guest().await;
+    let auth = WebAuth::new(http.clone());
+    let c = auth.login_captcha().await.expect("captcha");
+    assert!(!c.token.is_empty() && !c.gt.is_empty() && !c.challenge.is_empty());
+    let k = auth.login_key().await.expect("login key");
+    assert_eq!(k.hash.len(), 16);
+    assert!(k.key.contains("BEGIN PUBLIC KEY"));
+}

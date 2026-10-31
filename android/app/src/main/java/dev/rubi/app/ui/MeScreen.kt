@@ -65,7 +65,7 @@ fun MeScreen(app: RubiApp, nav: Nav) {
                 } else {
                     Text("游客", fontSize = 24.sp, fontWeight = FontWeight.SemiBold, color = c.fg)
                     Meta("未登录 · 历史与推荐画像仅保存在本机")
-                    AccentButton("扫码登录") { nav.push(Screen.Login) }
+                    AccentButton("登录") { nav.push(Screen.Login) }
                 }
             }
         }
@@ -90,6 +90,26 @@ fun MeScreen(app: RubiApp, nav: Nav) {
 
 @Composable
 fun LoginScreen(app: RubiApp, nav: Nav) {
+    var tab by remember { mutableStateOf(0) }
+    // Every method ends the same way: persist the session (Keystore) and go back.
+    val done: (String) -> Unit = { json ->
+        app.sessions.save(json)
+        nav.pop()
+    }
+    Column(Modifier.fillMaxSize()) {
+        PageHeader(nav, "登录")
+        Pivot(listOf("扫码", "短信", "密码"), tab, { tab = it }, MetroType.section)
+        when (tab) {
+            0 -> QrLogin(app, done)
+            1 -> SmsLogin(app, done)
+            else -> PasswordLogin(app, done)
+        }
+    }
+}
+
+/** QR login; polling runs only while this tab is shown. */
+@Composable
+private fun QrLogin(app: RubiApp, onLoggedIn: (String) -> Unit) {
     val c = LocalMetro.current
     var matrix by remember { mutableStateOf<BitMatrix?>(null) }
     var status by remember { mutableStateOf("正在获取二维码") }
@@ -106,33 +126,27 @@ fun LoginScreen(app: RubiApp, nav: Nav) {
                 FfiQrState.Scanned -> status = "已扫码，请在手机上确认"
                 FfiQrState.Expired -> { status = "二维码已过期"; return@LaunchedEffect }
                 is FfiQrState.Success -> {
-                    app.sessions.save(s.sessionJson)
-                    nav.pop()
+                    onLoggedIn(s.sessionJson)
                     return@LaunchedEffect
                 }
             }
         }
     }
 
-    Column(Modifier.fillMaxSize()) {
-        PageHeader(nav, "登录")
-        Pivot(listOf("扫码", "短信", "密码"), 0, {}, MetroType.section)
-        Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(14.dp)) {
-            Box(Modifier.background(Color.White).padding(14.dp)) {
-                val m = matrix
-                Canvas(Modifier.size(200.dp)) {
-                    if (m == null) return@Canvas
-                    val cell = size.width / m.width
-                    for (y in 0 until m.height) for (x in 0 until m.width) {
-                        if (m[x, y]) drawRect(Color.Black, Offset(x * cell, y * cell), Size(cell + 0.5f, cell + 0.5f))
-                    }
+    Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(14.dp)) {
+        Box(Modifier.background(Color.White).padding(14.dp)) {
+            val m = matrix
+            Canvas(Modifier.size(200.dp)) {
+                if (m == null) return@Canvas
+                val cell = size.width / m.width
+                for (y in 0 until m.height) for (x in 0 until m.width) {
+                    if (m[x, y]) drawRect(Color.Black, Offset(x * cell, y * cell), Size(cell + 0.5f, cell + 0.5f))
                 }
             }
-            Text("用手机端 App 扫描二维码", fontSize = 16.sp, color = c.fg)
-            Meta("$status · 凭证经 Keystore 加密仅存本机")
-            TextAction("刷新二维码", onClick = { round++ })
-            Meta("短信与密码登录在 1.1 版本提供")
         }
+        Text("用手机端 App 扫描二维码", fontSize = 16.sp, color = c.fg)
+        Meta("$status · 凭证经 Keystore 加密仅存本机")
+        TextAction("刷新二维码", onClick = { round++ })
     }
 }
 

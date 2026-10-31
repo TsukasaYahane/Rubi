@@ -151,6 +151,41 @@ impl RubiCore {
         })
     }
 
+    // ----- password / SMS login (Geetest solved by the user) -----
+
+    pub async fn login_captcha(&self) -> Res<FfiLoginCaptcha> {
+        let c = self.app.auth.login_captcha().await?;
+        Ok(FfiLoginCaptcha { token: c.token, gt: c.gt, challenge: c.challenge })
+    }
+
+    /// RSA key (PEM) and salt for the password; the app encrypts `hash + password` itself.
+    pub async fn login_key(&self) -> Res<FfiLoginKey> {
+        let k = self.app.auth.login_key().await?;
+        Ok(FfiLoginKey { hash: k.hash, public_key_pem: k.key })
+    }
+
+    /// `encrypted_password` is `base64(RSA-PKCS1(hash + password))`. Returns the session JSON
+    /// to persist, like a finished QR login.
+    pub async fn password_login(
+        &self,
+        username: String,
+        encrypted_password: String,
+        captcha: FfiSolvedCaptcha,
+    ) -> Res<String> {
+        let s = self.app.auth.password_login(&username, &encrypted_password, &captcha.into()).await?;
+        Ok(serde_json::to_string(&s)?)
+    }
+
+    /// Sends the SMS code; keep the returned key for [`sms_login`](Self::sms_login).
+    pub async fn sms_send(&self, cid: u32, tel: String, captcha: FfiSolvedCaptcha) -> Res<String> {
+        Ok(self.app.auth.sms_send(cid, &tel, &captcha.into()).await?)
+    }
+
+    pub async fn sms_login(&self, cid: u32, tel: String, code: String, captcha_key: String) -> Res<String> {
+        let s = self.app.auth.sms_login(cid, &tel, &code, &captcha_key).await?;
+        Ok(serde_json::to_string(&s)?)
+    }
+
     // ----- home feed -----
 
     pub async fn refresh_feed(&self, per_source: u32) -> Res<FfiRefreshReport> {

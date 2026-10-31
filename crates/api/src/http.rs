@@ -95,6 +95,15 @@ impl HttpClient {
         Ok(resp.headers().get(reqwest::header::LOCATION).and_then(|v| v.to_str().ok()).map(str::to_owned))
     }
 
+    /// POST form without a csrf token (login endpoints), keeping the `Set-Cookie` headers.
+    pub async fn post_form_public(&self, url: &str, form: Params) -> Result<Response> {
+        self.limiter.acquire().await;
+        let resp = self.decorate(self.client.post(url)).form(&form).send().await?;
+        let set_cookies =
+            resp.headers().get_all(SET_COOKIE).iter().filter_map(|v| v.to_str().ok().map(str::to_owned)).collect();
+        Ok(Response { data: unwrap_envelope(json_body(resp).await?)?, set_cookies })
+    }
+
     /// POST form with the `csrf` token added; requires a logged-in session.
     pub async fn post_form(&self, url: &str, mut form: Params) -> Result<Value> {
         let csrf = self.session().csrf().map(str::to_owned).ok_or(ApiError::NotLoggedIn)?;
