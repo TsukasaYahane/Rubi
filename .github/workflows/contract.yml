@@ -1,0 +1,16 @@
+name: Contract (guest, nightly)
+
+# Live, read-only checks that the Bilibili endpoints still answer in the shape the client parses.
+on:
+  schedule:
+    - cron: "30 19 * * *" # 03:30 Beijing time
+  workflow_dispatch:
+
+jobs:
+  contract:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      - run: cargo test -p rubi-api --test contract -- --ignored --test-threads=1

@@ -48,6 +48,7 @@ fun MeScreen(app: RubiApp, nav: Nav) {
     val c = LocalMetro.current
     var account by remember { mutableStateOf<FfiAccount?>(null) }
     var note by remember { mutableStateOf("") }
+    var backup by remember { mutableStateOf(false) }
     LaunchedEffect(nav.stack.size) { account = runCatching { app.core.account() }.getOrNull() }
 
     val list = rememberLazyListState()
@@ -74,11 +75,7 @@ fun MeScreen(app: RubiApp, nav: Nav) {
             "稍后再看" to { nav.push(Screen.WatchLater) },
             "被过滤内容" to { nav.push(Screen.Filtered) },
             "设置" to { nav.push(Screen.Settings) },
-            "导出配置" to {
-                val dir = app.getExternalFilesDir(null) ?: app.filesDir
-                val path = java.io.File(dir, "rubi-export.zip").absolutePath
-                note = runCatching { app.core.exportTo(path, false); "已导出到 $path（不含登录凭证）" }.getOrElse { "导出失败：${it.message}" }
-            },
+            "备份与迁移" to { backup = true },
         )
         items(rows) { (label, action) ->
             Row(
@@ -88,6 +85,7 @@ fun MeScreen(app: RubiApp, nav: Nav) {
         }
         item { if (note.isNotEmpty()) Meta(note, Modifier.padding(16.dp)) }
     }
+    if (backup) BackupSheet(app, onDismiss = { backup = false }) { note = it; backup = false }
 }
 
 @Composable
