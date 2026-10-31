@@ -3,6 +3,8 @@ package dev.rubi.app.ui
 import android.os.SystemClock
 import android.util.Log
 import android.view.LayoutInflater
+import android.view.View
+import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.background
 import androidx.compose.foundation.lazy.rememberLazyListState
@@ -81,6 +83,9 @@ fun PlayerScreen(app: RubiApp, nav: Nav, bvid: String, title: String) {
     var dmSheet by remember { mutableStateOf(false) }
     var detail by remember { mutableStateOf<FfiVideoDetail?>(null) }
     var detailOpen by remember { mutableStateOf(false) }
+    var fullscreen by remember { mutableStateOf(false) }
+    var controlsVisible by remember { mutableStateOf(true) }
+    var cid by remember { mutableStateOf<ULong?>(null) }
     val listState = rememberLazyListState()
     val scope = rememberCoroutineScope()
 
@@ -111,6 +116,7 @@ fun PlayerScreen(app: RubiApp, nav: Nav, bvid: String, title: String) {
             val playback = app.core.playback(bvid, 80u)
             Log.i(TAG, "playurl ready in ${SystemClock.elapsedRealtime() - t0} ms")
             PlayerHolder.play(ctx, playback, title)
+            cid = playback.cid
             val v = app.core.video(bvid).also { video = it }
             val durationMs = maxOf(v.durationS.toULong() * 1000u, playback.durationMs).toUInt()
             runCatching {
@@ -135,8 +141,11 @@ fun PlayerScreen(app: RubiApp, nav: Nav, bvid: String, title: String) {
         }.onFailure { error = it.message }
     }
 
+    FullscreenMode(fullscreen)
+    BackHandler(enabled = fullscreen) { fullscreen = false }
+
     Column(Modifier.fillMaxSize()) {
-        Row(Modifier.fillMaxWidth().padding(start = 4.dp, end = 16.dp), verticalAlignment = Alignment.CenterVertically) {
+        if (!fullscreen) Row(Modifier.fillMaxWidth().padding(start = 4.dp, end = 16.dp), verticalAlignment = Alignment.CenterVertically) {
             Box(Modifier.size(44.dp).clickable { nav.pop() }, contentAlignment = Alignment.Center) { GlyphIcon(Glyph.Back) }
             Meta(dmStatus, Modifier.weight(1f))
             Text(
@@ -154,17 +163,55 @@ fun PlayerScreen(app: RubiApp, nav: Nav, bvid: String, title: String) {
                 color = c.fg,
                 modifier = Modifier.size(44.dp, 44.dp).wrapContentSize(Alignment.CenterEnd).clickable { dmSheet = true },
             )
+            Text(
+                "全屏",
+                style = MetroType.meta.copy(fontSize = 12.sp),
+                color = c.fg,
+                modifier = Modifier.size(44.dp, 44.dp).wrapContentSize(Alignment.CenterEnd).clickable { fullscreen = true },
+            )
         }
-        Box(Modifier.fillMaxWidth().aspectRatio(16f / 9f).background(Color.Black)) {
+        // The same slot in both modes, so the PlayerView (and its frame) survives the switch.
+        Box(
+            (if (fullscreen) Modifier.fillMaxSize() else Modifier.fillMaxWidth().aspectRatio(16f / 9f)).background(Color.Black),
+        ) {
             AndroidView(
                 factory = {
-                    (LayoutInflater.from(it).inflate(R.layout.player_view, null) as PlayerView).apply { player = PlayerHolder.get(it) }
+                    (LayoutInflater.from(it).inflate(R.layout.player_view, null) as PlayerView).apply {
+                        player = PlayerHolder.get(it)
+                        setFullscreenButtonClickListener { on -> fullscreen = on }
+                        setControllerVisibilityListener(PlayerView.ControllerVisibilityListener { v -> controlsVisible = v == View.VISIBLE })
+                    }
                 },
+                update = { it.setFullscreenButtonState(fullscreen) },
                 modifier = Modifier.fillMaxSize(),
             )
             val set = danmaku
             if (display.enabled && set != null) DanmakuLayer(app.core, set, display, Modifier.fillMaxSize())
+            if (fullscreen) {
+                FullscreenOverlay(
+                    title = video?.title ?: title,
+                    controlsVisible = controlsVisible,
+                    danmakuOn = display.enabled,
+                    onExit = { fullscreen = false },
+                    onToggleDanmaku = {
+                        display = display.copy(enabled = !display.enabled)
+                        runCatching { DanmakuDisplay.save(app.core, display) }
+                    },
+                    onSettings = { dmSheet = true },
+                    send = { text, mode, color ->
+                        val id = cid ?: throw IllegalStateException("视频还没加载完")
+                        val at = PlayerHolder.get(ctx).currentPosition.toUInt()
+                        app.core.sendDanmaku(bvid, id, at, text, mode, color)
+                    },
+                    // Show it at once: the next segment fetch would not include it yet.
+                    onSent = { dm ->
+                        danmaku = danmaku?.let { it.copy(items = it.items + dm) } ?: FfiDanmakuSet(listOf(dm), emptyList(), emptyList())
+                    },
+                    modifier = Modifier.align(Alignment.TopStart),
+                )
+            }
         }
+        if (fullscreen) return@Column
         danmaku?.jumpMarks?.takeIf { it.isNotEmpty() }?.let { marks ->
             Row(Modifier.padding(horizontal = 16.dp, vertical = 4.dp), horizontalArrangement = Arrangement.spacedBy(16.dp)) {
                 Meta("空降点")

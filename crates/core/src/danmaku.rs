@@ -109,6 +109,10 @@ mod tests {
         async fn view(&self, _: u64) -> rubi_api::Result<DanmakuView> {
             Ok(DanmakuView { segment_count: 0, commands: vec![CommandDanmaku::default()] })
         }
+
+        async fn send(&self, _: &rubi_api::SendDanmaku) -> rubi_api::Result<u64> {
+            Ok(1)
+        }
     }
 
     #[tokio::test]

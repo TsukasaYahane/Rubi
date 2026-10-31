@@ -85,6 +85,7 @@
 |---|---|
 | `x/web-interface/archive/relation` | 🔶 |
 | `x/web-interface/archive/like` | 🔶 |
+| `x/v2/dm/post`（发送弹幕：type=1、oid=cid、msg、progress、mode、color、fontsize、rnd；返回 `dmid`） | 🔶 |
 | `x/web-interface/archive/like/triple`（一键三连：返回 like / coin / fav / multiply 各自成败） | 🔶 |
 | `x/web-interface/coin/add` | 🔶 |
 | `x/v3/fav/folder/created/list-all` · `x/v3/fav/resource/deal` · `x/v3/fav/resource/list` | 🔶 |

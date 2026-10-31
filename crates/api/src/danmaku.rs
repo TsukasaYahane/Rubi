@@ -11,6 +11,7 @@ use crate::proto::{DmSegMobileReply, DmWebViewReply};
 
 const SEG: &str = "https://api.bilibili.com/x/v2/dm/wbi/web/seg.so";
 const VIEW: &str = "https://api.bilibili.com/x/v2/dm/web/view";
+const POST: &str = "https://api.bilibili.com/x/v2/dm/post";
 /// Each segment covers six minutes.
 pub const SEGMENT_MS: u32 = 6 * 60 * 1000;
 
@@ -25,6 +26,19 @@ pub trait DanmakuApi: Send + Sync {
     /// Danmaku of one 6-minute segment; `index` starts at 1.
     async fn segment(&self, cid: u64, index: u32) -> Result<Vec<Danmaku>>;
     async fn view(&self, cid: u64) -> Result<DanmakuView>;
+    /// Posts a danmaku at `progress_ms`; returns its id. Login required.
+    async fn send(&self, req: &SendDanmaku) -> Result<u64>;
+}
+
+/// A danmaku to post. `mode`: 1 scroll, 4 bottom, 5 top; `color` is 0xRRGGBB.
+#[derive(Debug, Clone)]
+pub struct SendDanmaku {
+    pub bvid: String,
+    pub cid: u64,
+    pub progress_ms: u32,
+    pub text: String,
+    pub mode: u8,
+    pub color: u32,
 }
 
 pub struct WebDanmaku {
@@ -60,6 +74,24 @@ impl DanmakuApi for WebDanmaku {
                 attr: e.attr,
             })
             .collect())
+    }
+
+    async fn send(&self, req: &SendDanmaku) -> Result<u64> {
+        let form = params![
+            "type" => 1,
+            "oid" => req.cid,
+            "bvid" => &req.bvid,
+            "msg" => &req.text,
+            "progress" => req.progress_ms,
+            "mode" => req.mode,
+            "color" => req.color,
+            "fontsize" => 25,
+            "pool" => 0,
+            "plat" => 1,
+            "rnd" => rubi_model::now_secs(),
+        ];
+        let d = self.http.post_form(POST, form).await?;
+        Ok(d["dmid"].as_u64().or_else(|| d["dmid_str"].as_str().and_then(|s| s.parse().ok())).unwrap_or(0))
     }
 
     async fn view(&self, cid: u64) -> Result<DanmakuView> {

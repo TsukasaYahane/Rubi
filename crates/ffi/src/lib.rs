@@ -7,7 +7,7 @@ use std::collections::HashMap;
 use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
 
-use rubi_api::{ApiError, CommentSort, SearchOrder, Session, UpOrder};
+use rubi_api::{ApiError, CommentSort, SearchOrder, SendDanmaku, Session, UpOrder};
 use rubi_core::{App, CoreError, DanmakuSession, ExportOptions, export_bundle, import_bundle, load_danmaku};
 use rubi_filter::danmaku::layout::{EstimateMeasurer, Lane, LayoutConfig, layout};
 use rubi_model::{
@@ -244,6 +244,26 @@ impl RubiCore {
         };
         let p = self.app.video.playurl(&bvid, cid, qn).await?;
         Ok(FfiPlayback::of(cid, p, self.app.video.stream_headers()))
+    }
+
+    /// Posts a danmaku at `progress_ms` and returns it, ready to add to the shown set.
+    /// `mode`: 1 scroll, 4 bottom, 5 top; `color` is 0xRRGGBB. Login required.
+    pub async fn send_danmaku(
+        &self,
+        bvid: String,
+        cid: u64,
+        progress_ms: u32,
+        text: String,
+        mode: u8,
+        color: u32,
+    ) -> Res<FfiDanmaku> {
+        let text = text.trim().to_owned();
+        if text.is_empty() {
+            return Err(RubiError::Invalid { msg: "弹幕不能为空".into() });
+        }
+        let req = SendDanmaku { bvid, cid, progress_ms, text, mode, color };
+        let id = self.app.danmaku.send(&req).await?;
+        Ok(FfiDanmaku { id, progress_ms, mode, font_size: 25, color, content: req.text })
     }
 
     /// All danmaku at once. Prefer [`danmaku_session`](Self::danmaku_session) for playback.
