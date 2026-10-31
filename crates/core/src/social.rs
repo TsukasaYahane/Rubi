@@ -115,9 +115,16 @@ mod tests {
     #[test]
     fn promo_sessions_and_hot_words_are_hidden() {
         let rules = RuleSet::builtin();
-        let s = |msg_type| ChatSession { raw: json!({"last_msg": {"msg_type": msg_type}}), ..Default::default() };
-        let (kept, hidden) = filter_sessions(&rules, vec![s(1), s(10)]);
-        assert_eq!((kept.len(), hidden), (1, 1));
+        // Shapes from the 2026-10-31 capture of get_sessions.
+        let s = |msg_type, system, follow| ChatSession {
+            raw: json!({"last_msg": {"msg_type": msg_type}, "system_msg_type": system, "is_follow": follow}),
+            ..Default::default()
+        };
+        let official = s(10, 7, 1); // 服务通知 / 创作助手
+        let followed_card = s(10, 0, 1);
+        let promo = s(10, 0, 0);
+        let (kept, hidden) = filter_sessions(&rules, vec![s(1, 0, 0), official, followed_card, promo]);
+        assert_eq!((kept.len(), hidden), (3, 1));
         let w = |c: &str| HotWord { keyword: "k".into(), raw: json!({"is_commercial": c}) };
         assert_eq!(filter_hot_words(&rules, vec![w("0"), w("1")]).1, 1);
     }

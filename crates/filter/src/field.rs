@@ -41,16 +41,17 @@ pub enum Condition {
 }
 
 impl Condition {
+    /// A path with `*` segments matches when any of the values it reaches does.
     pub fn matches(&self, raw: &Value) -> bool {
         match self {
-            Condition::Eq { path, value } => lookup(raw, path).is_some_and(|v| loosely_equal(v, value)),
+            Condition::Eq { path, value } => lookup(raw, path).iter().any(|v| loosely_equal(v, value)),
             Condition::In { path, values } => {
-                lookup(raw, path).is_some_and(|v| values.iter().any(|x| loosely_equal(v, x)))
+                lookup(raw, path).iter().any(|v| values.iter().any(|x| loosely_equal(v, x)))
             }
-            Condition::Exists { path } => lookup(raw, path).is_some_and(is_present),
-            Condition::Missing { path } => !lookup(raw, path).is_some_and(is_present),
+            Condition::Exists { path } => lookup(raw, path).into_iter().any(is_present),
+            Condition::Missing { path } => !lookup(raw, path).into_iter().any(is_present),
             Condition::Contains { path, text } => {
-                lookup(raw, path).and_then(Value::as_str).is_some_and(|s| s.contains(text.as_str()))
+                lookup(raw, path).into_iter().filter_map(Value::as_str).any(|s| s.contains(text.as_str()))
             }
             Condition::All { of } => of.iter().all(|c| c.matches(raw)),
             Condition::Any { of } => of.iter().any(|c| c.matches(raw)),
@@ -59,12 +60,22 @@ impl Condition {
     }
 }
 
-/// Dotted path lookup; numeric segments index arrays (`a.0.b`).
-fn lookup<'a>(v: &'a Value, path: &str) -> Option<&'a Value> {
-    path.split('.').try_fold(v, |cur, seg| match cur {
-        Value::Object(m) => m.get(seg),
-        Value::Array(a) => seg.parse::<usize>().ok().and_then(|i| a.get(i)),
-        _ => None,
+/// Dotted path lookup; numeric segments index arrays (`a.0.b`) and `*` takes every value of
+/// an object or array (`content.jump_url.*.extra`), so one path can reach several values.
+fn lookup<'a>(v: &'a Value, path: &str) -> Vec<&'a Value> {
+    path.split('.').fold(vec![v], |found, seg| {
+        found
+            .into_iter()
+            .flat_map(|cur| -> Vec<&Value> {
+                match (cur, seg) {
+                    (Value::Object(m), "*") => m.values().collect(),
+                    (Value::Array(a), "*") => a.iter().collect(),
+                    (Value::Object(m), _) => m.get(seg).into_iter().collect(),
+                    (Value::Array(a), _) => seg.parse::<usize>().ok().and_then(|i| a.get(i)).into_iter().collect(),
+                    _ => Vec::new(),
+                }
+            })
+            .collect()
     })
 }
 
@@ -180,5 +191,15 @@ mod tests {
         assert!(Condition::Missing { path: "nope.deeper".into() }.matches(&raw));
         assert!(Condition::Eq { path: "list.0.x".into(), value: json!(1) }.matches(&raw));
         assert!(Condition::Not { cond: Box::new(Condition::Exists { path: "nope".into() }) }.matches(&raw));
+    }
+
+    #[test]
+    fn wildcard_segments_match_any_value() {
+        let raw = json!({"m": {"k1": {"x": 0}, "k2": {"x": 5}}, "a": [{"t": "淘宝"}, {"t": "b"}]});
+        assert!(Condition::Eq { path: "m.*.x".into(), value: json!(5) }.matches(&raw));
+        assert!(Condition::Exists { path: "m.*.x".into() }.matches(&raw));
+        assert!(Condition::Contains { path: "a.*.t".into(), text: "淘".into() }.matches(&raw));
+        assert!(Condition::Missing { path: "m.*.y".into() }.matches(&raw));
+        assert!(!Condition::Eq { path: "m.*.x".into(), value: json!(7) }.matches(&raw));
     }
 }

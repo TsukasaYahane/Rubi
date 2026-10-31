@@ -62,7 +62,9 @@ async fn comments_and_search() {
     let first = page.threads[0].root.rpid;
     assert_eq!(comments.root(card.aid, first).await.expect("thread root").rpid, first);
     let search = WebSearch::new(http.clone());
-    assert!(!search.hot_words(5).await.expect("hot words").is_empty());
+    let words = search.hot_words(5).await.expect("hot words");
+    // From s.search hotword (not the square fallback): it carries the commercial flag.
+    assert!(words.first().is_some_and(|w| w.raw["stat_datas"]["is_commercial"].is_string()));
     search.videos("bilibili", 1, rubi_api::SearchOrder::Relevance).await.expect("search");
 }
 

@@ -163,10 +163,13 @@ fn unwrap_envelope(body: Value) -> Result<Value> {
         let message = body["message"].as_str().unwrap_or_default().to_owned();
         return Err(ApiError::from_code(code, message));
     }
-    // Some endpoints use `result` instead of `data`.
+    // Some endpoints use `result` instead of `data`; a few (s.search hotword) put their
+    // payload next to `code`, so the body itself is the data.
     let mut body = body;
-    Ok(match body.get_mut("data") {
-        Some(d) => d.take(),
-        None => body.get_mut("result").map(Value::take).unwrap_or(Value::Null),
-    })
+    for key in ["data", "result"] {
+        if let Some(d) = body.get_mut(key) {
+            return Ok(d.take());
+        }
+    }
+    Ok(body)
 }

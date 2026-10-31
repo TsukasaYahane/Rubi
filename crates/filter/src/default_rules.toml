@@ -27,12 +27,16 @@ id = "ad.goto"
 name = "广告卡片 · goto"
 category = "ad"
 when = { op = "in", path = "goto", values = ["ad", "ad_av", "ad_web", "ad_web_s", "ad_player", "ad_inline_av"] }
+# 2026-10-31 抓包确认：网页推荐的广告卡 goto = "ad"，business_info.is_ad = true；普通视频卡 business_info 为 null。
+verified = true
 
 [[field_rules]]
 id = "ad.business_info"
 name = "广告卡片 · business_info"
 category = "ad"
 when = { op = "exists", path = "business_info" }
+# 2026-10-31 抓包确认：网页推荐的广告卡 goto = "ad"，business_info.is_ad = true；普通视频卡 business_info 为 null。
+verified = true
 
 [[field_rules]]
 id = "ad.app_card_goto"
@@ -86,16 +90,23 @@ id = "comment.pinned_goods"
 name = "置顶带货评论"
 category = "pinned_comment"
 target = "comment"
-when = { op = "any", of = [{ op = "exists", path = "content.jump_url" }, { op = "contains", path = "content.message", text = "淘宝" }, { op = "contains", path = "content.message", text = "京东" }, { op = "contains", path = "content.message", text = "拼多多" }, { op = "contains", path = "content.message", text = "购买链接" }] }
+# 2026-10-31 抓包：jump_url 也用于搜索词高亮（extra.is_word_search）和番剧链接，不能整体判为带货；
+# 商品链接一项的 extra 带 goods_prefetched_cache，正文常是 b23.tv/cm-… 商业短链。
+when = { op = "any", of = [{ op = "exists", path = "content.jump_url.*.extra.goods_prefetched_cache" }, { op = "contains", path = "content.message", text = "b23.tv/cm-" }, { op = "contains", path = "content.message", text = "淘宝" }, { op = "contains", path = "content.message", text = "京东" }, { op = "contains", path = "content.message", text = "拼多多" }, { op = "contains", path = "content.message", text = "购买链接" }] }
+verified = true
 
 # ---------- 消息中心 ----------
 
 [[field_rules]]
 id = "notice.official_promo"
-name = "系统推广通知 / 营销私信"
+name = "营销私信（未关注账号的通知卡片）"
 category = "ad"
 target = "notice"
-when = { op = "any", of = [{ op = "eq", path = "msg_type", value = 10 }, { op = "eq", path = "last_msg.msg_type", value = 10 }] }
+# 2026-10-31 抓包：msg_type = 10 是通知卡片，服务通知 / 社区中心 / 创作助手等官方账号也用它
+# （system_msg_type = 7，带 account_info），不能整体隐藏。营销推送是非系统账号（system_msg_type = 0）、
+# 未关注（is_follow = 0）的通知卡片，B 站自己也标为可折叠（can_fold = 1）。
+when = { op = "all", of = [{ op = "eq", path = "last_msg.msg_type", value = 10 }, { op = "eq", path = "system_msg_type", value = 0 }, { op = "eq", path = "is_follow", value = 0 }] }
+verified = true
 
 # ---------- 热搜 ----------
 
@@ -104,4 +115,5 @@ id = "hot_word.commercial"
 name = "推广热搜词"
 category = "ad"
 target = "hot_word"
-when = { op = "any", of = [{ op = "eq", path = "is_commercial", value = "1" }, { op = "exists", path = "ad_info" }] }
+# 2026-10-31 抓包：s.search 热搜每条都有 stat_datas.is_commercial（字符串 "0"）；未见到 "1" 的样本。
+when = { op = "any", of = [{ op = "eq", path = "stat_datas.is_commercial", value = "1" }, { op = "eq", path = "is_commercial", value = "1" }, { op = "exists", path = "ad_info" }] }

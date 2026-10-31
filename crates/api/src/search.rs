@@ -10,7 +10,10 @@ use crate::params;
 use crate::parse::{duration_of, str_of, u64_of};
 
 const SEARCH_TYPE: &str = "https://api.bilibili.com/x/web-interface/wbi/search/type";
-const HOT: &str = "https://api.bilibili.com/x/web-interface/search/square";
+/// Hot words with their commercial flag (`stat_datas.is_commercial`).
+const HOT: &str = "https://s.search.bilibili.com/main/hotword";
+/// The same words without any flag; used only when `HOT` fails.
+const HOT_SQUARE: &str = "https://api.bilibili.com/x/web-interface/search/square";
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum SearchOrder {
@@ -151,11 +154,18 @@ impl SearchApi for WebSearch {
     }
 
     async fn hot_words(&self, limit: u32) -> Result<Vec<HotWord>> {
-        let d = self.http.get_json(HOT, params!["limit" => limit], false).await?;
-        Ok(d["trending"]["list"]
-            .as_array()
-            .map(|a| a.iter().map(|w| HotWord { keyword: str_of(&w["keyword"]), raw: w.clone() }).collect())
-            .unwrap_or_default())
+        let words = |list: &Value| -> Vec<HotWord> {
+            list.as_array()
+                .map(|a| a.iter().map(|w| HotWord { keyword: str_of(&w["keyword"]), raw: w.clone() }).collect())
+                .unwrap_or_default()
+        };
+        match self.http.get_json(HOT, params!["limit" => limit], false).await {
+            Ok(d) if d["list"].is_array() => Ok(words(&d["list"])),
+            _ => {
+                let d = self.http.get_json(HOT_SQUARE, params!["limit" => limit], false).await?;
+                Ok(words(&d["trending"]["list"]))
+            }
+        }
     }
 }
 

@@ -34,11 +34,11 @@
 | 规则 | 状态 |
 |---|---|
 | `goto` ∈ ad* | ✅ 推荐流中实测出现 `goto=ad`（卡片无标题） |
-| `business_info` 非空 | ❓ |
-| 必火推广标记 | ❓ |
-| 商业合作稿件标记 | ❓ |
-| 置顶带货评论（`content.jump_url` 等） | ❓ |
-| 系统推广通知（`msg_type`） | ❓ |
+| `business_info` 非空 | ✅ 2026-10-31 抓包：广告卡 `business_info.is_ad = true`、`business_mark.text = "广告"`；普通视频卡为 `null` |
+| 必火推广标记 | ❓ 网页推荐 180 条中未见（无带推广标记的 av 卡），可能只在 App 推荐流出现 |
+| 商业合作稿件标记 | ❓ 未取得样本 |
+| 置顶带货评论 | ✅ 2026-10-31 抓包：商品项 `content.jump_url.*.extra.goods_prefetched_cache`、正文 `b23.tv/cm-…`；`jump_url` 也用于搜索词高亮与番剧链接，不能整体判定 |
+| 系统推广通知 | — 客户端未展示系统通知，暂不需要 |
 
 ## 视频与弹幕
 
@@ -58,7 +58,8 @@
 | `b23.tv/<code>`（分享短链，302 `Location` 指向目标页；契约测试用 `b23.tv/<BV号>` 验证跳转） | ✅ | 不跟随跳转，只读 `Location` |
 | `x/v2/reply/reply` | ✅ | 2026-10-30 实测；二级回复为扁平列表，按 `parent` 重建对话树（`rubi_model::flatten_thread`）；`data.root` 为根评论（2026-10-31 契约测试确认），用于从通知打开不在已加载页上的对话树 |
 | `x/web-interface/wbi/search/type` | ✅ | 2026-10-30 游客实测；标题含 `<em>` 高亮与 `&#x27;` 等实体，已解码 |
-| `x/web-interface/search/square` | ✅ | 2026-10-30 实测；推广热搜标记字段（`is_commercial`）❓ |
+| `s.search.bilibili.com/main/hotword` | ✅ | 2026-10-31 起用作热搜；返回体无 `data` 包装；每条带 `stat_datas.is_commercial`（字符串，样本均为 "0"，"1" 未见） |
+| `x/web-interface/search/square` | ✅ | 热搜兜底；无推广标记字段 |
 
 ## 消息中心与私信（需登录，均未实测）
 
@@ -71,7 +72,7 @@
 | `api.vc…/svr_sync/v1/svr_sync/fetch_session_msgs` | 🔶 | `content` 是 JSON 字符串；msg_type 1 文本 / 2 图片 / 5 撤回 |
 | `api.vc…/web_im/v1/web_im/send_msg` | 🔶 | 表单 `msg[...]` + `csrf` + `csrf_token`，`dev_id` 为 UUID 格式 |
 | `api.vc…/session_svr/v1/session_svr/update_ack` | 🔶 | 标记已读 |
-| 营销私信识别（`last_msg.msg_type = 10`） | ❓ | |
+| 营销私信识别 | ✅ | 2026-10-31 抓包：`msg_type = 10` 是通知卡片，官方账号（`system_msg_type = 7`，带 `account_info`）也用；营销 = 通知卡片 + `system_msg_type = 0` + `is_follow = 0`（`can_fold = 1`） |
 
 ## UP 主页
 

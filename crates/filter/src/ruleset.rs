@@ -277,6 +277,46 @@ mod tests {
         assert_eq!(live.blocked_by.unwrap().category, Category::Promotion);
     }
 
+    /// Shapes from the 2026-10-31 capture of the web home feed (x/web-interface/index/top/feed/rcmd).
+    #[test]
+    fn captured_feed_cards() {
+        let p = RuleSet::builtin().card_pipeline(None, || 0).unwrap();
+        let ad = json!({"goto": "ad", "id": 0, "bvid": "", "rcmd_reason": null, "business_info": {
+            "is_ad": true, "cm_mark": 1, "creative_type": 2, "business_mark": {"text": "广告", "type": 2}}});
+        let hit = p.judge(&card(ad, "")).blocked_by.unwrap();
+        assert_eq!((hit.rule_id.as_str(), hit.category), ("ad.goto", Category::Ad));
+        let video = json!({"goto": "av", "business_info": null, "room_info": null, "ogv_info": null,
+            "av_feature": null, "rcmd_reason": {"reason_type": 0}});
+        assert!(!p.judge(&card(video, "BV1kRna67Eza")).is_blocked());
+    }
+
+    /// Pinned comments from the 2026-10-31 capture of x/v2/reply/main (ranking videos).
+    #[test]
+    fn captured_pinned_comments() {
+        let p = RuleSet::builtin().raw_pipeline(Target::Comment);
+        let goods = json!({"content": {"message": "https://b23.tv/cm-yaoyue", "jump_url": {
+            "https://b23.tv/cm-yaoyue": {"title": "爱回收严选D100｜真低价，不怕比！", "pc_url": "https://m.aihuishou.com/activity/x",
+                "extra": {"goods_prefetched_cache": "{\"request_id\":\"1\"}"}}}}});
+        assert!(p.judge(&goods).is_blocked());
+        let word = json!({"content": {"message": "本视频由updream制作", "jump_url": {"updream": {"title": "updream",
+            "pc_url": "//search.bilibili.com/all?keyword=updream",
+            "extra": {"goods_show_type": 0, "is_word_search": true, "goods_cm_control": 0}}}}});
+        assert!(!p.judge(&word).is_blocked());
+        let bangumi = json!({"content": {"message": "来都来了，那就看看正片吧~", "jump_url": {
+            "https://www.bilibili.com/bangumi/play/ss46632": {"title": "西游记", "pc_url": ""}}}});
+        assert!(!p.judge(&bangumi).is_blocked());
+    }
+
+    /// Shape from the 2026-10-31 capture of s.search.bilibili.com/main/hotword.
+    #[test]
+    fn captured_hot_words() {
+        let p = RuleSet::builtin().raw_pipeline(Target::HotWord);
+        let plain = json!({"keyword": "韩立", "word_type": 6, "goto_type": 0, "stat_datas": {"is_commercial": "0"}});
+        assert!(!p.judge(&plain).is_blocked());
+        let paid = json!({"keyword": "x", "stat_datas": {"is_commercial": "1"}});
+        assert!(p.judge(&paid).is_blocked());
+    }
+
     #[test]
     fn toggles_switch_rules_off() {
         let mut rs = RuleSet::builtin();
