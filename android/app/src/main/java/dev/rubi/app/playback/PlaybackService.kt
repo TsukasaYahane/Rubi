@@ -60,12 +60,12 @@ object PlayerHolder {
                 }
         }
 
-    /** Plays the DASH pair (video + audio) chosen from [playback]. */
-    fun play(context: Context, playback: FfiPlayback, title: String) {
+    /** Plays the DASH pair (video + audio) chosen from [playback], from `positionMs`. */
+    fun play(context: Context, playback: FfiPlayback, title: String, positionMs: Long = 0L) {
         val video = pickVideo(playback) ?: return
         val c = Current(playback, title, video, pickAudio(playback))
         current = c
-        load(context, c, 0L)
+        load(context, c, positionMs)
         bindService(context)
     }
 

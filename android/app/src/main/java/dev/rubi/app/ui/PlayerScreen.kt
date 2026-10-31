@@ -20,6 +20,7 @@ import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.aspectRatio
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.wrapContentSize
@@ -62,6 +63,7 @@ import dev.rubi.core.FfiCommentRef
 import dev.rubi.core.FfiCommentRow
 import dev.rubi.core.FfiCommentThread
 import dev.rubi.core.FfiDanmakuSet
+import dev.rubi.core.FfiPlayback
 import dev.rubi.core.FfiSignal
 import dev.rubi.core.FfiVideoCard
 import kotlinx.coroutines.Dispatchers
@@ -90,6 +92,10 @@ fun PlayerScreen(app: RubiApp, nav: Nav, bvid: String, title: String, focus: Ffi
     var fullscreen by remember { mutableStateOf(false) }
     var controlsVisible by remember { mutableStateOf(true) }
     var cid by remember { mutableStateOf<ULong?>(null) }
+    var playback by remember { mutableStateOf<FfiPlayback?>(null) }
+    var qualitySheet by remember { mutableStateOf(false) }
+    var playerView by remember { mutableStateOf<PlayerView?>(null) }
+    val holdSpeed = remember { PlaybackPrefs.longPressSpeed(app.core) }
     val listState = rememberLazyListState()
     val scope = rememberCoroutineScope()
 
@@ -117,14 +123,15 @@ fun PlayerScreen(app: RubiApp, nav: Nav, bvid: String, title: String, focus: Ffi
         PlayerHolder.clear()
         runCatching {
             val t0 = SystemClock.elapsedRealtime()
-            val playback = app.core.playback(bvid, 80u)
+            val pb = app.core.playback(bvid, PlaybackPrefs.preferredQuality(app.core))
+            playback = pb
             Log.i(TAG, "playurl ready in ${SystemClock.elapsedRealtime() - t0} ms")
-            PlayerHolder.play(ctx, playback, title)
-            cid = playback.cid
+            PlayerHolder.play(ctx, pb, title)
+            cid = pb.cid
             val v = app.core.video(bvid).also { video = it }
-            val durationMs = maxOf(v.durationS.toULong() * 1000u, playback.durationMs).toUInt()
+            val durationMs = maxOf(v.durationS.toULong() * 1000u, pb.durationMs).toUInt()
             runCatching {
-                val session = app.core.danmakuSession(playback.cid, durationMs)
+                val session = app.core.danmakuSession(pb.cid, durationMs)
                 val total = session.segmentCount()
                 // The segment being watched first, then the rest from nearest to farthest.
                 val here = session.segmentAt(PlayerHolder.get(ctx).currentPosition.toUInt())
@@ -134,7 +141,8 @@ fun PlayerScreen(app: RubiApp, nav: Nav, bvid: String, title: String, focus: Ffi
                     val set = session.load(batch)
                     done += batch.size
                     danmaku = set
-                    dmStatus = "弹幕 ${set.items.size} · 空降点 ${set.jumpMarks.size}" +
+                    dmStatus = "弹幕 ${set.items.size}" +
+                        (if (set.jumpMarks.isNotEmpty()) " · 空降点 ${set.jumpMarks.size}" else "") +
                         if (done < total.toInt()) " · 加载中 $done/$total" else ""
                 }
                 Log.i(TAG, "danmaku loaded: ${danmaku?.items?.size} items in $total segments")
@@ -167,6 +175,14 @@ fun PlayerScreen(app: RubiApp, nav: Nav, bvid: String, title: String, focus: Ffi
                 color = c.fg,
                 modifier = Modifier.size(44.dp, 44.dp).wrapContentSize(Alignment.CenterEnd).clickable { dmSheet = true },
             )
+            playback?.let { p ->
+                Text(
+                    qualityLabel(p),
+                    style = MetroType.meta.copy(fontSize = 12.sp),
+                    color = c.fg,
+                    modifier = Modifier.height(44.dp).padding(start = 12.dp).wrapContentSize(Alignment.CenterEnd).clickable { qualitySheet = true },
+                )
+            }
             Text(
                 "全屏",
                 style = MetroType.meta.copy(fontSize = 12.sp),
@@ -184,6 +200,7 @@ fun PlayerScreen(app: RubiApp, nav: Nav, bvid: String, title: String, focus: Ffi
                         player = PlayerHolder.get(it)
                         setFullscreenButtonClickListener { on -> fullscreen = on }
                         setControllerVisibilityListener(PlayerView.ControllerVisibilityListener { v -> controlsVisible = v == View.VISIBLE })
+                        playerView = this
                     }
                 },
                 update = { it.setFullscreenButtonState(fullscreen) },
@@ -191,6 +208,8 @@ fun PlayerScreen(app: RubiApp, nav: Nav, bvid: String, title: String, focus: Ffi
             )
             val set = danmaku
             if (display.enabled && set != null) DanmakuLayer(app.core, set, display, Modifier.fillMaxSize())
+            // Only while the controls are hidden: their buttons must get their own taps.
+            if (fullscreen && !controlsVisible) FullscreenGestures(PlayerHolder.get(ctx), playerView, holdSpeed)
             if (fullscreen) {
                 FullscreenOverlay(
                     title = video?.title ?: title,
@@ -202,6 +221,8 @@ fun PlayerScreen(app: RubiApp, nav: Nav, bvid: String, title: String, focus: Ffi
                         runCatching { DanmakuDisplay.save(app.core, display) }
                     },
                     onSettings = { dmSheet = true },
+                    quality = playback?.let(::qualityLabel).orEmpty(),
+                    onQuality = { qualitySheet = true },
                     send = { text, mode, color ->
                         val id = cid ?: throw IllegalStateException("视频还没加载完")
                         val at = PlayerHolder.get(ctx).currentPosition.toUInt()
@@ -289,6 +310,21 @@ fun PlayerScreen(app: RubiApp, nav: Nav, bvid: String, title: String, focus: Ffi
                         CommentSection(app, v.aid, focus) { scope.launch { listState.scrollToItem(TABS_INDEX) } }
                     }
                 }
+            }
+        }
+    }
+
+    val current = playback
+    if (qualitySheet && current != null) {
+        QualitySheet(current.accept, current.quality, onDismiss = { qualitySheet = false }) { q ->
+            qualitySheet = false
+            PlaybackPrefs.setPreferredQuality(app.core, q.qn)
+            scope.launch {
+                // Same video, other streams: carry on from where it was.
+                val at = PlayerHolder.get(ctx).currentPosition
+                runCatching { app.core.playback(bvid, q.qn) }
+                    .onSuccess { p -> playback = p; PlayerHolder.play(ctx, p, video?.title ?: title, at) }
+                    .onFailure { error = "切换清晰度失败：${it.message}" }
             }
         }
     }
@@ -462,3 +498,6 @@ private fun CommentRow(row: FfiCommentRow, open: BooleanArray, pinnedLabel: Bool
         Meta("赞 ${row.likes}")
     }
 }
+
+/** The label of the quality being played ("1080P 高清"), or its qn when the list lacks it. */
+private fun qualityLabel(p: FfiPlayback): String = p.accept.firstOrNull { it.qn == p.quality }?.label ?: "${p.quality}"

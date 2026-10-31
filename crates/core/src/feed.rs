@@ -45,6 +45,10 @@ pub struct Settings {
     /// Keep playing when the app goes to the background. Off: pause instead.
     pub background_play: bool,
     pub preview: PreviewSettings,
+    /// Playback speed while the fullscreen player is held down.
+    pub long_press_speed: f32,
+    /// Quality (qn) asked for when a video opens; the server caps it to what the account may play.
+    pub preferred_quality: u32,
 }
 
 /// 大图预览: the card in the middle of the single-column feed plays a short preview.
@@ -112,6 +116,8 @@ impl Default for Settings {
             danmaku_display: DanmakuDisplay::default(),
             background_play: false,
             preview: PreviewSettings::default(),
+            long_press_speed: 1.5,
+            preferred_quality: 80,
         }
     }
 }

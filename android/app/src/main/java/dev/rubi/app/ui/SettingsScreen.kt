@@ -1,5 +1,6 @@
 package dev.rubi.app.ui
 
+import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
@@ -24,6 +25,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import dev.rubi.app.RubiApp
+import dev.rubi.app.data.PlaybackPrefs
 import dev.rubi.app.ui.theme.LocalMetro
 import org.json.JSONArray
 import org.json.JSONObject
@@ -81,6 +83,24 @@ fun SettingsScreen(app: RubiApp, nav: Nav) {
                 ToggleRow("后台播放", "切到后台后继续播放；关闭时自动暂停", settings.optBoolean("background_play", false)) {
                     settings.put("background_play", it)
                     save()
+                }
+                val speed = settings.optDouble("long_press_speed", 1.5).toFloat()
+                Column(Modifier.padding(horizontal = 16.dp, vertical = 8.dp)) {
+                    Text("长按倍速", fontSize = 16.sp, color = c.fg)
+                    Meta("全屏时按住画面临时倍速播放，松手恢复")
+                    Row(horizontalArrangement = Arrangement.spacedBy(20.dp)) {
+                        PlaybackPrefs.SPEEDS.forEach { v ->
+                            val on = kotlin.math.abs(v - speed) < 0.01f
+                            Text(
+                                "${v}×",
+                                fontSize = 16.sp,
+                                color = if (on) c.fg else c.fg2,
+                                fontWeight = if (on) FontWeight.SemiBold else FontWeight.Normal,
+                                modifier = Modifier.heightIn(min = 44.dp).clickable { settings.put("long_press_speed", v.toDouble()); save() }.padding(top = 12.dp),
+                            )
+                        }
+                    }
+                    Meta("默认清晰度：在播放页右上角切换后记住")
                 }
             }
             item(key = "preview-$version") {

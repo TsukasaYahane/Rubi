@@ -40,6 +40,18 @@ struct SettingsFile {
     background_play: bool,
     #[serde(default)]
     preview: crate::feed::PreviewSettings,
+    #[serde(default = "default_speed")]
+    long_press_speed: f32,
+    #[serde(default = "default_quality")]
+    preferred_quality: u32,
+}
+
+fn default_speed() -> f32 {
+    Settings::default().long_press_speed
+}
+
+fn default_quality() -> u32 {
+    Settings::default().preferred_quality
 }
 
 pub fn export_bundle<W: Write + Seek>(
@@ -69,6 +81,8 @@ pub fn export_bundle<W: Write + Seek>(
         danmaku_display: settings.danmaku_display.clone(),
         background_play: settings.background_play,
         preview: settings.preview.clone(),
+        long_press_speed: settings.long_press_speed,
+        preferred_quality: settings.preferred_quality,
     };
     zip.start_file("settings.json", o)?;
     zip.write_all(&serde_json::to_vec_pretty(&sf)?)?;
@@ -121,6 +135,8 @@ pub fn import_bundle<R: Read + Seek>(input: R) -> Result<Imported> {
         settings.danmaku_display = sf.danmaku_display;
         settings.background_play = sf.background_play;
         settings.preview = sf.preview;
+        settings.long_press_speed = sf.long_press_speed;
+        settings.preferred_quality = sf.preferred_quality;
     }
     let profile = read("profile.json")?.map(|p| serde_json::from_str(&p)).transpose()?.unwrap_or_default();
     let history = read("history.jsonl")?

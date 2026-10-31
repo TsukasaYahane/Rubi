@@ -47,7 +47,7 @@ import dev.rubi.core.FfiDanmaku
 import dev.rubi.core.RubiException
 import kotlinx.coroutines.launch
 
-private fun Context.activity(): Activity? = when (this) {
+internal fun Context.activity(): Activity? = when (this) {
     is Activity -> this
     is ContextWrapper -> baseContext.activity()
     else -> null
@@ -92,6 +92,8 @@ fun FullscreenOverlay(
     onExit: () -> Unit,
     onToggleDanmaku: () -> Unit,
     onSettings: () -> Unit,
+    quality: String,
+    onQuality: () -> Unit,
     send: suspend (text: String, mode: UByte, color: UInt) -> FfiDanmaku,
     onSent: (FfiDanmaku) -> Unit,
     modifier: Modifier = Modifier,
@@ -135,6 +137,7 @@ fun FullscreenOverlay(
             Text(title, style = MetroType.body, color = Color.White, maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.weight(1f))
             Text(if (danmakuOn) "弹 开" else "弹 关", style = label, modifier = Modifier.clickable(onClick = onToggleDanmaku).padding(8.dp))
             Text("弹幕设置", style = label, modifier = Modifier.clickable(onClick = onSettings).padding(8.dp))
+            if (quality.isNotEmpty()) Text(quality, style = label, modifier = Modifier.clickable(onClick = onQuality).padding(8.dp))
             Text(
                 if (composing) "收起" else "发弹幕",
                 style = label.copy(fontWeight = FontWeight.SemiBold),

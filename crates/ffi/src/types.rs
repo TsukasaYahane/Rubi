@@ -215,13 +215,22 @@ pub struct FfiPlayback {
     pub headers: Vec<FfiHeader>,
 }
 
+/// Highest qn a non-member account may play (1080P). Above it (1080P+, 1080P60, 4K, HDR,
+/// Dolby, 8K) is 大会员 only, which Rubi does not offer.
+pub const MAX_FREE_QN: u32 = 80;
+
 impl FfiPlayback {
     pub fn of(cid: u64, p: PlayUrl, headers: Vec<(String, String)>) -> Self {
         Self {
             cid,
             duration_ms: p.duration_ms,
             quality: p.quality,
-            accept: p.accept.into_iter().map(|(qn, label)| FfiQuality { qn, label }).collect(),
+            accept: p
+                .accept
+                .into_iter()
+                .filter(|(qn, _)| *qn <= MAX_FREE_QN)
+                .map(|(qn, label)| FfiQuality { qn, label })
+                .collect(),
             video: p.video.into_iter().map(Into::into).collect(),
             audio: p.audio.into_iter().map(Into::into).collect(),
             headers: headers.into_iter().map(|(name, value)| FfiHeader { name, value }).collect(),
