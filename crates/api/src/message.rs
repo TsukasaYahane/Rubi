@@ -4,7 +4,9 @@ use std::sync::Arc;
 use std::sync::atomic::{AtomicU64, Ordering};
 
 use async_trait::async_trait;
-use rubi_model::{ChatMessage, ChatSession, Notice, NoticeKind, SharedVideo, UnreadCounts, VideoRef, find_video_ref};
+use rubi_model::{
+    ChatMessage, ChatSession, CommentRef, Notice, NoticeKind, SharedVideo, UnreadCounts, VideoRef, find_video_ref,
+};
 use serde_json::Value;
 
 use crate::error::{ApiError, Result};
@@ -108,7 +110,19 @@ pub(crate) fn notice_of(kind: NoticeKind, v: &Value) -> Notice {
     let item = &v["item"];
     let mut notice = notice_body(kind, v, item);
     notice.video = [&item["uri"], &item["native_uri"]].into_iter().find_map(|u| find_video_ref(&str_of(u)));
+    notice.comment = notice.video.as_ref().and_then(|_| comment_ref_of(kind, item));
     notice
+}
+
+/// Where the comment of a notice sits. Replies and @s name the reply and its thread root;
+/// a liked comment only names itself, taken as a root (a liked sub-reply then is not found).
+fn comment_ref_of(kind: NoticeKind, item: &Value) -> Option<CommentRef> {
+    let (rpid, root) = match kind {
+        NoticeKind::Reply | NoticeKind::At => (u64_of(&item["source_id"]), u64_of(&item["root_id"])),
+        NoticeKind::Like if str_of(&item["type"]) == "reply" => (u64_of(&item["item_id"]), 0),
+        NoticeKind::Like => return None,
+    };
+    (rpid > 0).then_some(CommentRef { rpid, root: if root > 0 { root } else { rpid } })
 }
 
 fn notice_body(kind: NoticeKind, v: &Value, item: &Value) -> Notice {
@@ -125,6 +139,7 @@ fn notice_body(kind: NoticeKind, v: &Value, item: &Value) -> Notice {
                 uri: str_of(&item["uri"]),
                 at: u64_of(&v["reply_time"]) as i64,
                 video: None,
+                comment: None,
             }
         }
         NoticeKind::At => Notice {
@@ -136,6 +151,7 @@ fn notice_body(kind: NoticeKind, v: &Value, item: &Value) -> Notice {
             uri: str_of(&item["uri"]),
             at: u64_of(&v["at_time"]) as i64,
             video: None,
+            comment: None,
         },
         NoticeKind::Like => {
             let users = v["users"].as_array().cloned().unwrap_or_default();
@@ -150,6 +166,7 @@ fn notice_body(kind: NoticeKind, v: &Value, item: &Value) -> Notice {
                 uri: str_of(&item["uri"]),
                 at: u64_of(&v["like_time"]) as i64,
                 video: None,
+                comment: None,
             }
         }
     }
@@ -315,6 +332,19 @@ mod tests {
         let dynamic =
             json!({"item": {"uri": "https://t.bilibili.com/1", "native_uri": "bilibili://following/detail/1"}});
         assert_eq!(notice_of(NoticeKind::At, &dynamic).video, None);
+    }
+
+    #[test]
+    fn locates_the_comment_of_a_notice() {
+        let uri = "https://www.bilibili.com/video/BV17x411w7KC";
+        let reply = json!({"item": {"uri": uri, "source_id": 30, "root_id": 10}});
+        assert_eq!(notice_of(NoticeKind::Reply, &reply).comment, Some(CommentRef { rpid: 30, root: 10 }));
+        let root_reply = json!({"item": {"uri": uri, "source_id": 30, "root_id": 0}});
+        assert_eq!(notice_of(NoticeKind::At, &root_reply).comment, Some(CommentRef { rpid: 30, root: 30 }));
+        let liked = json!({"item": {"uri": uri, "type": "reply", "item_id": 5}});
+        assert_eq!(notice_of(NoticeKind::Like, &liked).comment, Some(CommentRef { rpid: 5, root: 5 }));
+        let liked_video = json!({"item": {"uri": uri, "type": "video", "item_id": 5}});
+        assert_eq!(notice_of(NoticeKind::Like, &liked_video).comment, None);
     }
 
     #[test]

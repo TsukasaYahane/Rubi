@@ -25,6 +25,17 @@ pub struct Notice {
     /// The video this notice is about, when it is about one.
     #[serde(default)]
     pub video: Option<crate::VideoRef>,
+    /// The comment to scroll to when the notice is opened, when it is about one.
+    #[serde(default)]
+    pub comment: Option<CommentRef>,
+}
+
+/// Locates a comment under a video: `rpid` itself and the root of its thread.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub struct CommentRef {
+    pub rpid: u64,
+    /// Equal to `rpid` when the comment is a root.
+    pub root: u64,
 }
 
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]

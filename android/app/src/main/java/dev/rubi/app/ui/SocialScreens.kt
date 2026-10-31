@@ -153,7 +153,7 @@ fun InboxScreen(app: RubiApp, nav: Nav) {
                 items(notices, key = { it.id.toString() }) { n ->
                     val video = n.video
                     val open = Modifier.let { m ->
-                        if (video == null) m else m.clickable { nav.openVideo(scope, app, video, n.context, onError = { note = it }) }
+                        if (video == null) m else m.clickable { nav.openVideo(scope, app, video, n.context, focus = n.comment, onError = { note = it }) }
                     }
                     Column(open.fillMaxWidth().padding(horizontal = 16.dp, vertical = 12.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
                         Text(n.from, fontSize = 15.sp, fontWeight = FontWeight.SemiBold, color = c.fg)

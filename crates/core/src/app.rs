@@ -6,12 +6,14 @@ use rubi_api::{
     HotWord, HttpClient, LibraryApi, NoticeApi, SearchApi, SearchOrder, Session, SpaceApi, Triple, UpOrder, VideoApi,
     WebAccount, WebAuth, WebComment, WebDanmaku, WebEmote, WebFeed, WebMessages, WebSearch, WebSpace, WebVideo,
 };
-use rubi_model::{ChatSession, Comment, FeedbackEvent, ItemRef, Signal, UpProfile, VideoCard, now_secs};
+use rubi_model::{
+    ChatSession, Comment, FeedbackEvent, ItemRef, Signal, UpProfile, VideoCard, VideoRef, find_video_ref, now_secs,
+};
 use rubi_recommend::Source;
 use rubi_store::SqliteStore;
 use tokio::sync::Mutex as AsyncMutex;
 
-use crate::error::Result;
+use crate::error::{CoreError, Result};
 use crate::feed::{FeedService, Seeded};
 use crate::social::{self, FilteredComments};
 use crate::sources::{
@@ -173,6 +175,26 @@ impl App {
 
     pub async fn up_profile(&self, mid: u64) -> Result<UpProfile> {
         Ok(self.space.profile(mid).await?)
+    }
+
+    /// The BV id a video pointer stands for: av numbers are looked up, short links followed
+    /// (one hop, the target page itself is never fetched).
+    pub async fn resolve_video(&self, video: VideoRef) -> Result<String> {
+        match video {
+            VideoRef::Bvid(bvid) => Ok(bvid),
+            VideoRef::Aid(aid) => Ok(self.video.bvid_of(aid).await?),
+            VideoRef::Short(url) => {
+                let target = self.video.expand_short(&url).await?.unwrap_or_default();
+                match find_video_ref(&target) {
+                    Some(VideoRef::Bvid(bvid)) => Ok(bvid),
+                    Some(VideoRef::Aid(aid)) => Ok(self.video.bvid_of(aid).await?),
+                    _ => Err(CoreError::Invalid(format!(
+                        "短链指向的不是视频：{}",
+                        if target.is_empty() { &url } else { &target }
+                    ))),
+                }
+            }
+        }
     }
 
     /// One page of an UP's uploads without 充电专属 videos; also returns the total count and

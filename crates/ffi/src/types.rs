@@ -376,6 +376,20 @@ pub struct FfiNotice {
     pub at: i64,
     /// The video this notice is about; open it with `RubiCore::resolve_video`.
     pub video: Option<FfiVideoRef>,
+    /// The comment to show when opening the video; load it with `RubiCore::focus_thread`.
+    pub comment: Option<FfiCommentRef>,
+}
+
+#[derive(Debug, Clone, Copy, uniffi::Record)]
+pub struct FfiCommentRef {
+    pub rpid: u64,
+    pub root: u64,
+}
+
+impl From<rubi_model::CommentRef> for FfiCommentRef {
+    fn from(c: rubi_model::CommentRef) -> Self {
+        Self { rpid: c.rpid, root: c.root }
+    }
 }
 
 impl From<Notice> for FfiNotice {
@@ -388,15 +402,24 @@ impl From<Notice> for FfiNotice {
             uri: n.uri,
             at: n.at,
             video: n.video.map(Into::into),
+            comment: n.comment.map(Into::into),
         }
     }
 }
 
-/// A video pointer: a BV id, or an av number that needs `resolve_video` first.
+/// A video pointer: a BV id, or an av number / short link that needs `resolve_video` first.
 #[derive(Debug, Clone, uniffi::Enum)]
 pub enum FfiVideoRef {
-    Bvid { bvid: String },
-    Aid { aid: u64 },
+    Bvid {
+        bvid: String,
+    },
+    Aid {
+        aid: u64,
+    },
+    /// A share short link; `resolve_video` follows it.
+    Short {
+        url: String,
+    },
 }
 
 impl From<VideoRef> for FfiVideoRef {
@@ -404,6 +427,7 @@ impl From<VideoRef> for FfiVideoRef {
         match v {
             VideoRef::Bvid(bvid) => FfiVideoRef::Bvid { bvid },
             VideoRef::Aid(aid) => FfiVideoRef::Aid { aid },
+            VideoRef::Short(url) => FfiVideoRef::Short { url },
         }
     }
 }

@@ -28,6 +28,8 @@ macro_rules! params {
 /// The transport shared by every API implementation: cookies, WBI, rate limit.
 pub struct HttpClient {
     client: reqwest::Client,
+    /// Same client without redirect following, to read where a short link points.
+    no_redirect: reqwest::Client,
     session: RwLock<Session>,
     wbi: Mutex<Option<(WbiKeys, i64)>>,
     limiter: RateLimiter,
@@ -41,7 +43,15 @@ pub struct Response {
 impl HttpClient {
     pub fn new(session: Session) -> Result<Self> {
         let client = reqwest::Client::builder().user_agent(UA).gzip(true).brotli(true).deflate(true).build()?;
-        Ok(Self { client, session: RwLock::new(session), wbi: Mutex::new(None), limiter: RateLimiter::new(6, 3.0) })
+        let no_redirect =
+            reqwest::Client::builder().user_agent(UA).redirect(reqwest::redirect::Policy::none()).build()?;
+        Ok(Self {
+            client,
+            no_redirect,
+            session: RwLock::new(session),
+            wbi: Mutex::new(None),
+            limiter: RateLimiter::new(6, 3.0),
+        })
     }
 
     pub fn session(&self) -> Session {
@@ -73,6 +83,16 @@ impl HttpClient {
     pub async fn get_bytes(&self, url: &str, params: Params, sign: bool) -> Result<Vec<u8>> {
         let resp = self.send_get(url, params, sign).await?.error_for_status()?;
         Ok(resp.bytes().await?.to_vec())
+    }
+
+    /// Where `url` redirects to (its `Location`), without fetching the target.
+    pub async fn redirect_target(&self, url: &str) -> Result<Option<String>> {
+        self.limiter.acquire().await;
+        let resp = self.no_redirect.get(url).header(REFERER, REFERER_URL).send().await?;
+        if !resp.status().is_redirection() {
+            return Ok(None);
+        }
+        Ok(resp.headers().get(reqwest::header::LOCATION).and_then(|v| v.to_str().ok()).map(str::to_owned))
     }
 
     /// POST form with the `csrf` token added; requires a logged-in session.

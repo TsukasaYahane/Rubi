@@ -4,7 +4,7 @@ use async_trait::async_trait;
 use rubi_model::Comment;
 use serde_json::Value;
 
-use crate::error::Result;
+use crate::error::{ApiError, Result};
 use crate::http::HttpClient;
 use crate::params;
 use crate::parse::{str_of, u64_of};
@@ -42,6 +42,8 @@ pub trait CommentApi: Send + Sync {
     async fn page(&self, aid: u64, sort: CommentSort, offset: Option<&str>) -> Result<CommentPage>;
     /// One page of every reply under `root`, flat; rebuild the tree from `parent`.
     async fn replies(&self, aid: u64, root: u64, pn: u32, ps: u32) -> Result<(Vec<Comment>, u32)>;
+    /// The root comment of a thread, for opening a thread that is not on a loaded page.
+    async fn root(&self, aid: u64, root: u64) -> Result<Comment>;
 }
 
 pub struct WebComment {
@@ -129,6 +131,17 @@ impl CommentApi for WebComment {
             .await?;
         let up_mid = u64_of(&d["upper"]["mid"]);
         Ok((list(&d["replies"], up_mid), u64_of(&d["page"]["count"]) as u32))
+    }
+
+    async fn root(&self, aid: u64, root: u64) -> Result<Comment> {
+        let d = self
+            .http
+            .get_json(REPLIES, params!["oid" => aid, "type" => 1, "root" => root, "pn" => 1, "ps" => 1], false)
+            .await?;
+        if d["root"].is_null() {
+            return Err(ApiError::Decode("reply/reply has no root comment".into()));
+        }
+        Ok(comment_of(&d["root"], u64_of(&d["upper"]["mid"])))
     }
 }
 

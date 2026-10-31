@@ -6,12 +6,36 @@ use serde::{Deserialize, Serialize};
 pub enum VideoRef {
     Bvid(String),
     Aid(u64),
+    /// A share short link (`https://b23.tv/xxxx`); where it points is only known after
+    /// following its redirect, and it may turn out not to be a video.
+    Short(String),
 }
 
-/// Finds the first video reference in `text`: a `BV1…` id anywhere, or an av number in
-/// the forms `/video/av123`, `bilibili://video/123`, `aid=123` or a bare `av123`.
+/// Hosts of Bilibili's share short links.
+const SHORT_HOSTS: [&str; 2] = ["b23.tv/", "bili2233.cn/"];
+
+/// Finds the first video reference in `text`: a `BV1…` id anywhere, an av number in the
+/// forms `/video/av123`, `bilibili://video/123`, `aid=123` or a bare `av123`, or else a share
+/// short link.
 pub fn find_video_ref(text: &str) -> Option<VideoRef> {
-    find_bvid(text).map(VideoRef::Bvid).or_else(|| find_aid(text).map(VideoRef::Aid))
+    find_bvid(text)
+        .map(VideoRef::Bvid)
+        .or_else(|| find_aid(text).map(VideoRef::Aid))
+        .or_else(|| find_short_link(text).map(VideoRef::Short))
+}
+
+/// The first share short link in `text`, normalised to `https://<host><code>`.
+pub fn find_short_link(text: &str) -> Option<String> {
+    let lower = text.to_ascii_lowercase();
+    SHORT_HOSTS
+        .iter()
+        .filter_map(|host| {
+            let start = lower.find(host)?;
+            let code: String = text[start + host.len()..].chars().take_while(char::is_ascii_alphanumeric).collect();
+            (code.len() >= 4).then(|| (start, format!("https://{host}{code}")))
+        })
+        .min_by_key(|(start, _)| *start)
+        .map(|(_, url)| url)
 }
 
 fn find_bvid(text: &str) -> Option<String> {
@@ -62,6 +86,18 @@ mod tests {
         assert_eq!(find_video_ref("bilibili://video/170001?comment_root_id=1"), Some(VideoRef::Aid(170001)));
         assert_eq!(find_video_ref("https://www.bilibili.com/video/av170001"), Some(VideoRef::Aid(170001)));
         assert_eq!(find_video_ref("av170001"), Some(VideoRef::Aid(170001)));
+    }
+
+    #[test]
+    fn finds_short_links() {
+        assert_eq!(
+            find_video_ref("【标题-哔哩哔哩】 https://b23.tv/AbC12xy"),
+            Some(VideoRef::Short("https://b23.tv/AbC12xy".into()))
+        );
+        assert_eq!(find_short_link("看这个 bili2233.cn/9dKk3Fq 吧"), Some("https://bili2233.cn/9dKk3Fq".into()));
+        assert_eq!(find_video_ref("https://b23.tv/BV17x411w7KC"), Some(VideoRef::Bvid("BV17x411w7KC".into())));
+        assert_eq!(find_short_link("https://b23.tv/ab"), None);
+        assert_eq!(find_short_link("no link here"), None);
     }
 
     #[test]

@@ -46,6 +46,9 @@ async fn video_playback_and_danmaku() {
     let danmaku = WebDanmaku::new(http.clone());
     danmaku.view(detail.cid).await.expect("danmaku view");
     danmaku.segment(detail.cid, 1).await.expect("danmaku segment");
+    // b23.tv answers any BV id with a redirect, like a real share code: checks the hop only.
+    let target = video.expand_short(&format!("https://b23.tv/{}", card.bvid)).await.expect("short link");
+    assert!(target.is_some_and(|t| t.contains(&card.bvid)));
 }
 
 #[tokio::test]
@@ -53,8 +56,11 @@ async fn video_playback_and_danmaku() {
 async fn comments_and_search() {
     let http = guest().await;
     let card = sample(&http).await;
-    let page = WebComment::new(http.clone()).page(card.aid, CommentSort::Hot, None).await.expect("comments");
+    let comments = WebComment::new(http.clone());
+    let page = comments.page(card.aid, CommentSort::Hot, None).await.expect("comments");
     assert!(!page.threads.is_empty());
+    let first = page.threads[0].root.rpid;
+    assert_eq!(comments.root(card.aid, first).await.expect("thread root").rpid, first);
     let search = WebSearch::new(http.clone());
     assert!(!search.hot_words(5).await.expect("hot words").is_empty());
     search.videos("bilibili", 1, rubi_api::SearchOrder::Relevance).await.expect("search");

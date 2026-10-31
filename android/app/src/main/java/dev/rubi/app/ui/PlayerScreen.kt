@@ -55,6 +55,7 @@ import dev.rubi.app.data.PlaybackPrefs
 import dev.rubi.app.playback.PlayerHolder
 import dev.rubi.app.ui.theme.LocalMetro
 import dev.rubi.app.ui.theme.MetroType
+import dev.rubi.core.FfiCommentRef
 import dev.rubi.core.FfiCommentRow
 import dev.rubi.core.FfiCommentThread
 import dev.rubi.core.FfiDanmakuSet
@@ -71,13 +72,13 @@ private const val TABS_INDEX = 2
 
 @OptIn(ExperimentalFoundationApi::class)
 @Composable
-fun PlayerScreen(app: RubiApp, nav: Nav, bvid: String, title: String) {
+fun PlayerScreen(app: RubiApp, nav: Nav, bvid: String, title: String, focus: FfiCommentRef? = null) {
     val c = LocalMetro.current
     val ctx = LocalContext.current
     var video by remember { mutableStateOf<FfiVideoCard?>(null) }
     var danmaku by remember { mutableStateOf<FfiDanmakuSet?>(null) }
     var error by remember { mutableStateOf<String?>(null) }
-    var tab by remember { mutableStateOf(0) }
+    var tab by remember { mutableStateOf(if (focus != null) 1 else 0) }
     var display by remember { mutableStateOf(DanmakuDisplay.load(app.core)) }
     var dmStatus by remember { mutableStateOf("弹幕加载中…") }
     var dmSheet by remember { mutableStateOf(false) }
@@ -267,7 +268,12 @@ fun PlayerScreen(app: RubiApp, nav: Nav, bvid: String, title: String) {
             if (tab == 0) {
                 item(key = "related") { RelatedList(app, nav, bvid) }
             } else {
-                video?.let { v -> item(key = "comments") { CommentSection(app, v.aid) } }
+                video?.let { v ->
+                    item(key = "comments") {
+                        // Opened from a notice: bring the comment list up under the player.
+                        CommentSection(app, v.aid, focus) { scope.launch { listState.scrollToItem(TABS_INDEX) } }
+                    }
+                }
             }
         }
     }
@@ -306,7 +312,7 @@ private fun RelatedList(app: RubiApp, nav: Nav, current: String) {
 }
 
 @Composable
-private fun CommentSection(app: RubiApp, aid: ULong) {
+private fun CommentSection(app: RubiApp, aid: ULong, focus: FfiCommentRef?, onFocusShown: () -> Unit) {
     val c = LocalMetro.current
     val scope = rememberCoroutineScope()
     var byTime by remember { mutableStateOf(false) }
@@ -315,6 +321,16 @@ private fun CommentSection(app: RubiApp, aid: ULong) {
     val threads = remember { mutableStateListOf<FfiCommentThread>() }
     val collapsed = remember { mutableStateMapOf<ULong, Boolean>() }
     var error by remember { mutableStateOf<String?>(null) }
+    // The thread holding the notice's comment, shown first and kept across sort changes.
+    var focusThread by remember { mutableStateOf<FfiCommentThread?>(null) }
+    var focusNote by remember { mutableStateOf<String?>(null) }
+
+    LaunchedEffect(aid, focus) {
+        if (focus == null) return@LaunchedEffect
+        runCatching { app.core.focusThread(aid, focus) }
+            .onSuccess { focusThread = it; onFocusShown() }
+            .onFailure { focusNote = "无法定位到消息里的评论（可能已被删除或折叠）" }
+    }
 
     LaunchedEffect(aid, byTime) {
         runCatching { app.core.comments(aid, byTime, null) }
@@ -341,15 +357,22 @@ private fun CommentSection(app: RubiApp, aid: ULong) {
             }
         }
         error?.let { Text(it, color = c.fg2, fontSize = 13.sp) }
+        focusNote?.let { Meta(it) }
         pinned.forEach { CommentRow(it, open = BooleanArray(0), pinnedLabel = true) }
-        threads.forEachIndexed { index, thread ->
+        val focused = focusThread
+        val shownThreads = listOfNotNull(focused) + threads.filter { it.rootRpid != focused?.rootRpid }
+        fun replace(t: FfiCommentThread) {
+            if (t.rootRpid == focused?.rootRpid) focusThread = t
+            else threads.indexOfFirst { it.rootRpid == t.rootRpid }.takeIf { it >= 0 }?.let { threads[it] = t }
+        }
+        shownThreads.forEach { thread ->
             val isCollapsed = collapsed[thread.rootRpid] == true
             val rows = if (isCollapsed) thread.rows.take(1) else thread.rows
             Column(Modifier.padding(vertical = 10.dp)) {
                 val open = BooleanArray(16)
                 rows.forEach { row ->
                     // Snapshot: drawing happens later, after `open` has moved on.
-                    CommentRow(row, open.copyOf())
+                    CommentRow(row, open.copyOf(), highlight = thread === focused && row.rpid == focus?.rpid)
                     if (row.depth.toInt() in 1 until open.size) open[row.depth.toInt()] = row.hasLaterSibling
                 }
                 val shown = (thread.rows.size - 1).toUInt()
@@ -359,7 +382,7 @@ private fun CommentSection(app: RubiApp, aid: ULong) {
                         if (thread.hidden > 0u) add("再看 5 条 · 剩 ${thread.hidden}" to {
                             scope.launch {
                                 runCatching { app.core.commentThread(aid, thread.rootRpid, shown + 5u) }
-                                    .onSuccess { threads[index] = it }
+                                    .onSuccess { replace(it) }
                             }
                             Unit
                         })
@@ -381,7 +404,7 @@ private fun CommentSection(app: RubiApp, aid: ULong) {
  * below this row, so its vertical line is drawn through.
  */
 @Composable
-private fun CommentRow(row: FfiCommentRow, open: BooleanArray, pinnedLabel: Boolean = false) {
+private fun CommentRow(row: FfiCommentRow, open: BooleanArray, pinnedLabel: Boolean = false, highlight: Boolean = false) {
     val c = LocalMetro.current
     val depth = row.depth.toInt()
     val indent = if (depth == 0) 0.dp else ((depth - 1) * 20 + 22).dp
@@ -404,7 +427,13 @@ private fun CommentRow(row: FfiCommentRow, open: BooleanArray, pinnedLabel: Bool
     ) {
         Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
             if (pinnedLabel) Tag("置顶")
-            Text(row.name, fontSize = if (depth == 0) 14.sp else 13.sp, fontWeight = FontWeight.SemiBold, color = c.fg)
+            if (highlight) Tag("消息")
+            Text(
+                row.name,
+                fontSize = if (depth == 0) 14.sp else 13.sp,
+                fontWeight = FontWeight.SemiBold,
+                color = if (highlight) c.accent else c.fg,
+            )
             if (row.isUp) Tag("UP")
             Meta(formatAge(row.ctime))
         }

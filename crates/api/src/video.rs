@@ -56,6 +56,8 @@ pub trait VideoApi: Send + Sync {
     async fn view(&self, bvid: &str) -> Result<VideoDetail>;
     /// Looks up the BV id of an av number (old links and share cards still use them).
     async fn bvid_of(&self, aid: u64) -> Result<String>;
+    /// Where a share short link points (`None` when it does not redirect).
+    async fn expand_short(&self, url: &str) -> Result<Option<String>>;
     async fn tags(&self, bvid: &str) -> Result<Vec<String>>;
     async fn playurl(&self, bvid: &str, cid: u64, qn: u32) -> Result<PlayUrl>;
     /// Headers the player must send with stream requests.
@@ -137,6 +139,10 @@ impl VideoApi for WebVideo {
         let d = self.http.get_json(VIEW, params!["aid" => aid], false).await?;
         let bvid = str_of(&d["bvid"]);
         if bvid.is_empty() { Err(ApiError::Decode(format!("av{aid} has no bvid"))) } else { Ok(bvid) }
+    }
+
+    async fn expand_short(&self, url: &str) -> Result<Option<String>> {
+        self.http.redirect_target(url).await
     }
 
     async fn tags(&self, bvid: &str) -> Result<Vec<String>> {

@@ -34,6 +34,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import dev.rubi.app.RubiApp
+import dev.rubi.core.FfiCommentRef
 import dev.rubi.core.FfiVideoRef
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.launch
@@ -41,7 +42,8 @@ import dev.rubi.app.ui.theme.LocalMetro
 import dev.rubi.app.ui.theme.MetroType
 
 sealed interface Screen {
-    data class Player(val bvid: String, val title: String) : Screen
+    /** `focus`: a comment to open the 评论 tab on (from a notice). */
+    data class Player(val bvid: String, val title: String, val focus: FfiCommentRef? = null) : Screen
     data object Search : Screen
     data object Inbox : Screen
     data class Chat(val mid: ULong, val name: String) : Screen
@@ -72,10 +74,17 @@ class Nav {
     fun pop() = stack.removeLastOrNull()
 
     /** Opens a video from a notice or message; av numbers are resolved to a BV id first. */
-    fun openVideo(scope: CoroutineScope, app: RubiApp, ref: FfiVideoRef, title: String, onError: (String) -> Unit = {}) {
+    fun openVideo(
+        scope: CoroutineScope,
+        app: RubiApp,
+        ref: FfiVideoRef,
+        title: String,
+        focus: FfiCommentRef? = null,
+        onError: (String) -> Unit = {},
+    ) {
         scope.launch {
             runCatching { app.core.resolveVideo(ref) }
-                .onSuccess { push(Screen.Player(it, title)) }
+                .onSuccess { push(Screen.Player(it, title, focus)) }
                 .onFailure { onError("无法打开视频：${it.message}") }
         }
     }
@@ -111,7 +120,7 @@ fun RubiRoot(app: RubiApp) {
                 BottomNav(nav)
             }
             // A fresh composition per video: no danmaku, comments or tab state carried over.
-            is Screen.Player -> key(top) { PlayerScreen(app, nav, top.bvid, top.title) }
+            is Screen.Player -> key(top) { PlayerScreen(app, nav, top.bvid, top.title, top.focus) }
             Screen.Search -> SearchScreen(app, nav)
             Screen.Inbox -> InboxScreen(app, nav)
             is Screen.Chat -> ChatScreen(app, nav, top.mid, top.name)

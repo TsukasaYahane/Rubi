@@ -13,7 +13,7 @@ pub use comment::{Comment, ThreadRow, flatten_thread};
 pub use danmaku::{CommandDanmaku, Danmaku, DanmakuMode, JumpMark};
 pub use feedback::{DislikeReason, FeedbackEvent, ItemRef, Signal};
 pub use library::{FavFolder, HistoryEntry, VideoRelation};
-pub use message::{ChatMessage, ChatSession, Notice, NoticeKind, SharedVideo, UnreadCounts};
+pub use message::{ChatMessage, ChatSession, CommentRef, Notice, NoticeKind, SharedVideo, UnreadCounts};
 pub use space::UpProfile;
 pub use video::{Owner, SourceKind, Stats, VideoCard, Zone};
 pub use video_ref::{VideoRef, find_video_ref};

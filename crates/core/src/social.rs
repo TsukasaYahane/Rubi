@@ -93,6 +93,10 @@ mod tests {
             let c = Comment { rpid: u64::from(pn), ..Default::default() };
             Ok((vec![c], 2))
         }
+
+        async fn root(&self, _: u64, root: u64) -> rubi_api::Result<Comment> {
+            Ok(Comment { rpid: root, ..Default::default() })
+        }
     }
 
     #[tokio::test]

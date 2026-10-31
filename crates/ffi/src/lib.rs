@@ -11,8 +11,8 @@ use rubi_api::{ApiError, CommentSort, SearchOrder, SendDanmaku, Session, UpOrder
 use rubi_core::{App, CoreError, DanmakuSession, ExportOptions, export_bundle, import_bundle, load_danmaku};
 use rubi_filter::danmaku::layout::{EstimateMeasurer, Lane, LayoutConfig, layout};
 use rubi_model::{
-    Comment, Danmaku, DislikeReason, FeedbackEvent, ItemRef, NoticeKind, Signal, ThreadRow, VideoCard, flatten_thread,
-    now_secs,
+    Comment, Danmaku, DislikeReason, FeedbackEvent, ItemRef, NoticeKind, Signal, ThreadRow, VideoCard, VideoRef,
+    flatten_thread, now_secs,
 };
 
 pub use types::*;
@@ -226,12 +226,14 @@ impl RubiCore {
         Ok(FfiVideoDetail::of(&card, detail.pages.len().max(1) as u32))
     }
 
-    /// The BV id to open for a video pointer (av numbers are looked up).
+    /// The BV id to open for a video pointer (av numbers are looked up, short links followed).
     pub async fn resolve_video(&self, video: FfiVideoRef) -> Res<String> {
-        match video {
-            FfiVideoRef::Bvid { bvid } => Ok(bvid),
-            FfiVideoRef::Aid { aid } => Ok(self.app.video.bvid_of(aid).await?),
-        }
+        let video = match video {
+            FfiVideoRef::Bvid { bvid } => VideoRef::Bvid(bvid),
+            FfiVideoRef::Aid { aid } => VideoRef::Aid(aid),
+            FfiVideoRef::Short { url } => VideoRef::Short(url),
+        };
+        Ok(self.app.resolve_video(video).await?)
     }
 
     /// Stream URLs for `qn` (the server caps it to what the account may play).
@@ -367,6 +369,16 @@ impl RubiCore {
         let replies = self.app.thread(aid, root_rpid, THREAD_MAX_PAGES).await?;
         let total = root.reply_count.max(replies.len() as u32);
         Ok(thread_of(&root, &replies, limit as usize, total))
+    }
+
+    /// The whole thread holding a comment from a notice, root first, even when it is not on
+    /// any loaded page. "再看 5 条" then works on it like on any other thread.
+    pub async fn focus_thread(&self, aid: u64, comment: FfiCommentRef) -> Res<FfiCommentThread> {
+        let root = self.app.comments.root(aid, comment.root).await?;
+        self.roots.lock().unwrap_or_else(|e| e.into_inner()).insert(root.rpid, root.clone());
+        let replies = self.app.thread(aid, root.rpid, THREAD_MAX_PAGES).await?;
+        let total = root.reply_count.max(replies.len() as u32);
+        Ok(thread_of(&root, &replies, usize::MAX, total))
     }
 
     // ----- search -----
