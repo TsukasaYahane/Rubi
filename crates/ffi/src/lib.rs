@@ -158,6 +158,12 @@ impl RubiCore {
         Ok(FfiRefreshReport { kept: r.kept as u32, blocked: r.blocked as u32, errors: r.errors })
     }
 
+    /// Call before rebuilding the home list (pull to refresh) so earlier cards may come back.
+    pub fn new_feed_session(&self) {
+        self.app.feed.new_session();
+    }
+
+    /// The next `n` cards not yet shown since `new_feed_session`; empty when the pool is used up.
     pub fn next_page(&self, n: u32) -> Res<Vec<FfiVideoCard>> {
         let ranked = self.app.feed.next_page(n as usize)?;
         let cards: Vec<VideoCard> = ranked.iter().map(|r| r.card.clone()).collect();
@@ -487,6 +493,41 @@ impl RubiCore {
             hidden_charging: page.hidden_charging as u32,
             has_more: page.has_more,
         })
+    }
+
+    // ----- library -----
+
+    /// Watch history; pass the returned cursor back for the next page.
+    pub async fn history(&self, cursor: Option<String>) -> Res<FfiHistoryPage> {
+        let (items, cursor) = self.app.library.history(cursor.as_deref()).await?;
+        self.remember(&items.iter().map(|h| h.card.clone()).collect::<Vec<_>>());
+        let items = items
+            .iter()
+            .map(|h| FfiHistoryItem {
+                card: FfiVideoCard::of(&h.card, None),
+                progress_s: h.progress_s,
+                viewed_at: h.viewed_at,
+            })
+            .collect();
+        Ok(FfiHistoryPage { items, cursor })
+    }
+
+    pub async fn watch_later_list(&self) -> Res<Vec<FfiVideoCard>> {
+        let cards = self.app.library.watch_later_list().await?;
+        self.remember(&cards);
+        Ok(cards.iter().map(|c| FfiVideoCard::of(c, None)).collect())
+    }
+
+    /// The user's own favourite folders.
+    pub async fn my_fav_folders(&self) -> Res<Vec<FfiFavFolder>> {
+        Ok(self.app.actions.fav_folders(0).await?.into_iter().map(Into::into).collect())
+    }
+
+    /// Page `pn` (from 1) of a favourite folder.
+    pub async fn fav_items(&self, folder_id: u64, pn: u32) -> Res<FfiFavPage> {
+        let (cards, has_more) = self.app.library.fav_items(folder_id, pn.max(1)).await?;
+        self.remember(&cards);
+        Ok(FfiFavPage { items: cards.iter().map(|c| FfiVideoCard::of(c, None)).collect(), has_more })
     }
 
     pub async fn sync_followings(&self) -> Res<u32> {

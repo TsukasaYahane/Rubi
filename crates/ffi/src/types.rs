@@ -619,3 +619,23 @@ pub struct FfiUpUploads {
     pub hidden_charging: u32,
     pub has_more: bool,
 }
+
+#[derive(Debug, Clone, uniffi::Record)]
+pub struct FfiHistoryItem {
+    pub card: FfiVideoCard,
+    /// Seconds watched; -1 means finished.
+    pub progress_s: i64,
+    pub viewed_at: i64,
+}
+
+#[derive(Debug, Clone, uniffi::Record)]
+pub struct FfiHistoryPage {
+    pub items: Vec<FfiHistoryItem>,
+    pub cursor: Option<String>,
+}
+
+#[derive(Debug, Clone, uniffi::Record)]
+pub struct FfiFavPage {
+    pub items: Vec<FfiVideoCard>,
+    pub has_more: bool,
+}

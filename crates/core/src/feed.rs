@@ -127,6 +127,9 @@ pub struct FeedService<S: AppStore> {
     settings: RwLock<Settings>,
     profile: Mutex<InterestProfile>,
     last_fetch: Mutex<HashMap<SourceKind, Instant>>,
+    /// Cards handed out by `next_page` since the last `new_session`: the visible list, which
+    /// later pages must not repeat.
+    shown: Mutex<HashSet<String>>,
 }
 
 fn category_name(c: Category) -> String {
@@ -158,6 +161,7 @@ impl<S: AppStore> FeedService<S> {
             settings: RwLock::new(settings),
             profile: Mutex::new(profile),
             last_fetch: Mutex::new(HashMap::new()),
+            shown: Mutex::new(HashSet::new()),
         })
     }
 
@@ -255,20 +259,28 @@ impl<S: AppStore> FeedService<S> {
         Ok(report)
     }
 
-    /// Ranks the pool and returns the next `n` cards, recording them as shown.
+    /// Starts a new visible list (pull to refresh): earlier pages may be ranked again.
+    pub fn new_session(&self) {
+        self.shown.lock().unwrap_or_else(|e| e.into_inner()).clear();
+    }
+
+    /// Ranks the pool and returns the next `n` cards not yet shown in this session, recording
+    /// them as shown. Empty when the pool has nothing new; refresh to fetch more.
     pub fn next_page(&self, n: usize) -> Result<Vec<Ranked>> {
-        let ranked = self.rank_pool(n)?;
-        let shown: Vec<String> = ranked.iter().map(|r| r.card.bvid.clone()).collect();
-        self.store.record_impressions(&shown, now_secs())?;
+        let exclude = self.shown.lock().unwrap_or_else(|e| e.into_inner()).clone();
+        let ranked = self.rank_pool(n, &exclude)?;
+        let ids: Vec<String> = ranked.iter().map(|r| r.card.bvid.clone()).collect();
+        self.store.record_impressions(&ids, now_secs())?;
+        self.shown.lock().unwrap_or_else(|e| e.into_inner()).extend(ids);
         Ok(ranked)
     }
 
     /// The score breakdown of a pooled card, for "为什么推荐".
     pub fn explain(&self, bvid: &str) -> Result<Option<ScoreBreakdown>> {
-        Ok(self.rank_pool(usize::MAX)?.into_iter().find(|r| r.card.bvid == bvid).map(|r| r.score))
+        Ok(self.rank_pool(usize::MAX, &HashSet::new())?.into_iter().find(|r| r.card.bvid == bvid).map(|r| r.score))
     }
 
-    fn rank_pool(&self, n: usize) -> Result<Vec<Ranked>> {
+    fn rank_pool(&self, n: usize, exclude: &HashSet<String>) -> Result<Vec<Ranked>> {
         let settings = self.settings();
         // Re-judge: rules may have changed and the user may have watched some since.
         let pipeline = settings.rules.card_pipeline(Some(self.watched()), now_secs)?;
@@ -277,6 +289,7 @@ impl<S: AppStore> FeedService<S> {
             .store
             .fresh_candidates(now)?
             .into_iter()
+            .filter(|(card, _)| !exclude.contains(&card.bvid))
             .filter_map(|(card, penalty)| {
                 let d = pipeline.judge(&card);
                 (!d.is_blocked()).then(|| Candidate { penalty: penalty.min(d.multiplier), card })
@@ -412,6 +425,19 @@ mod tests {
 
         let again = svc.refresh(10).await.unwrap();
         assert_eq!(again.skipped.len(), 2, "sources are cooling down");
+    }
+
+    #[tokio::test]
+    async fn pages_do_not_repeat_within_a_session() {
+        let svc = service();
+        svc.refresh(10).await.unwrap();
+        let first: Vec<String> = svc.next_page(2).unwrap().into_iter().map(|r| r.card.bvid).collect();
+        let second: Vec<String> = svc.next_page(2).unwrap().into_iter().map(|r| r.card.bvid).collect();
+        assert_eq!(first.len() + second.len(), 3);
+        assert!(second.iter().all(|b| !first.contains(b)));
+        assert!(svc.next_page(2).unwrap().is_empty(), "pool used up");
+        svc.new_session();
+        assert_eq!(svc.next_page(10).unwrap().len(), 3);
     }
 
     #[tokio::test]

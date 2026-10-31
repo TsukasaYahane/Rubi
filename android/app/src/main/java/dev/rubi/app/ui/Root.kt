@@ -1,5 +1,8 @@
 package dev.rubi.app.ui
 
+import androidx.compose.foundation.verticalScroll
+import androidx.compose.foundation.rememberScrollState
+import kotlinx.coroutines.flow.MutableSharedFlow
 import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
@@ -46,6 +49,10 @@ sealed interface Screen {
     data object Login : Screen
     data object Filtered : Screen
     data object Settings : Screen
+    data object History : Screen
+    data object WatchLater : Screen
+    data object FavFolders : Screen
+    data class FavFolder(val id: ULong, val title: String) : Screen
 }
 
 enum class Tab(val label: String) { Home("首页"), Follow("关注"), Me("我的") }
@@ -54,6 +61,13 @@ enum class Tab(val label: String) { Home("首页"), Follow("关注"), Me("我的
 class Nav {
     var tab by mutableStateOf(Tab.Home)
     val stack = mutableStateListOf<Screen>()
+    /** A tap on the tab that is already selected: that tab scrolls back to the top. */
+    val reselected = MutableSharedFlow<Tab>(extraBufferCapacity = 1)
+
+    fun select(t: Tab) {
+        if (tab == t) reselected.tryEmit(t) else tab = t
+    }
+
     fun push(s: Screen) = stack.add(s)
     fun pop() = stack.removeLastOrNull()
 
@@ -90,7 +104,7 @@ fun RubiRoot(app: RubiApp) {
                 Box(Modifier.weight(1f)) {
                     when (nav.tab) {
                         Tab.Home -> HomeScreen(app, nav, home)
-                        Tab.Follow -> FollowScreen(app)
+                        Tab.Follow -> FollowScreen(app, nav)
                         Tab.Me -> MeScreen(app, nav)
                     }
                 }
@@ -105,6 +119,10 @@ fun RubiRoot(app: RubiApp) {
             Screen.Login -> LoginScreen(app, nav)
             Screen.Filtered -> FilteredScreen(app, nav)
             Screen.Settings -> SettingsScreen(app, nav)
+            Screen.History -> HistoryScreen(app, nav)
+            Screen.WatchLater -> WatchLaterScreen(app, nav)
+            Screen.FavFolders -> FavFoldersScreen(app, nav)
+            is Screen.FavFolder -> key(top) { FavFolderScreen(app, nav, top.id, top.title) }
         }
     }
     }
@@ -149,7 +167,7 @@ private fun BottomNav(nav: Nav) {
     Row(Modifier.fillMaxWidth().height(56.dp)) {
         Tab.entries.forEach { t ->
             val on = nav.tab == t
-            Box(Modifier.weight(1f).fillMaxSize().clickable { nav.tab = t }, contentAlignment = Alignment.Center) {
+            Box(Modifier.weight(1f).fillMaxSize().clickable { nav.select(t) }, contentAlignment = Alignment.Center) {
                 Text(t.label, fontSize = 15.sp, color = if (on) c.fg else c.fg2, fontWeight = if (on) FontWeight.SemiBold else FontWeight.Normal)
             }
         }
@@ -168,10 +186,12 @@ fun PageHeader(nav: Nav, title: String?) {
 }
 
 @Composable
-fun FollowScreen(app: RubiApp) {
+fun FollowScreen(app: RubiApp, nav: Nav) {
     val c = LocalMetro.current
     var note by remember { mutableStateOf("动态是第二阶段功能。这里可以先把关注列表同步给推荐算法。") }
-    Column(Modifier.fillMaxSize().padding(16.dp), verticalArrangement = Arrangement.spacedBy(16.dp)) {
+    val scroll = rememberScrollState()
+    LaunchedEffect(Unit) { nav.reselected.collect { if (it == Tab.Follow) scroll.animateScrollTo(0) } }
+    Column(Modifier.fillMaxSize().verticalScroll(scroll).padding(16.dp), verticalArrangement = Arrangement.spacedBy(16.dp)) {
         Text("关注", style = MetroType.pivot, color = c.fg)
         Text(note, color = c.fg2, fontSize = 14.sp)
         var busy by remember { mutableStateOf(false) }

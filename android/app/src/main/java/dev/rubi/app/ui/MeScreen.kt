@@ -14,6 +14,7 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
@@ -49,7 +50,9 @@ fun MeScreen(app: RubiApp, nav: Nav) {
     var note by remember { mutableStateOf("") }
     LaunchedEffect(nav.stack.size) { account = runCatching { app.core.account() }.getOrNull() }
 
-    LazyColumn(Modifier.fillMaxSize()) {
+    val list = rememberLazyListState()
+    LaunchedEffect(Unit) { nav.reselected.collect { if (it == Tab.Me) list.animateScrollToItem(0) } }
+    LazyColumn(Modifier.fillMaxSize(), state = list) {
         item {
             Text("我的", style = MetroType.pivot, color = c.fg, modifier = Modifier.padding(horizontal = 16.dp))
             Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
@@ -66,6 +69,9 @@ fun MeScreen(app: RubiApp, nav: Nav) {
             }
         }
         val rows = listOf<Pair<String, () -> Unit>>(
+            "历史记录" to { nav.push(Screen.History) },
+            "收藏夹" to { nav.push(Screen.FavFolders) },
+            "稍后再看" to { nav.push(Screen.WatchLater) },
             "被过滤内容" to { nav.push(Screen.Filtered) },
             "设置" to { nav.push(Screen.Settings) },
             "导出配置" to {

@@ -33,6 +33,7 @@ pub trait ActionApi: Send + Sync {
     async fn coin(&self, bvid: &str, count: u32, also_like: bool) -> Result<()>;
     /// 一键三连: like, the remaining coins (up to 2) and the default favourite folder at once.
     async fn triple(&self, bvid: &str) -> Result<Triple>;
+    /// The user's own folders; with `aid > 0` each is marked if it holds that video.
     async fn fav_folders(&self, aid: u64) -> Result<Vec<FavFolder>>;
     async fn set_fav(&self, aid: u64, add: &[u64], remove: &[u64]) -> Result<()>;
     async fn watch_later(&self, bvid: &str) -> Result<()>;
@@ -158,7 +159,11 @@ impl ActionApi for WebAccount {
 
     async fn fav_folders(&self, aid: u64) -> Result<Vec<FavFolder>> {
         let mid = self.my_mid()?;
-        let d = self.http.get_json(FAV_FOLDERS, params!["up_mid" => mid, "type" => 2, "rid" => aid], false).await?;
+        let mut p = params!["up_mid" => mid, "type" => 2];
+        if aid > 0 {
+            p.push(("rid".into(), aid.to_string()));
+        }
+        let d = self.http.get_json(FAV_FOLDERS, p, false).await?;
         Ok(d["list"]
             .as_array()
             .map(|a| {

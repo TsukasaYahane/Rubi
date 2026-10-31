@@ -41,6 +41,8 @@ import dev.rubi.core.FfiUpOrder
 import dev.rubi.core.FfiUpProfile
 import dev.rubi.core.FfiVideoCard
 import dev.rubi.core.RubiException
+import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.Job
 import kotlinx.coroutines.launch
 
 private val ORDERS = listOf("最新" to FfiUpOrder.NEWEST, "最多播放" to FfiUpOrder.MOST_VIEWED, "最多收藏" to FfiUpOrder.MOST_FAVORITED)
@@ -62,30 +64,39 @@ fun UpScreen(app: RubiApp, nav: Nav, mid: ULong, name: String) {
     var confirmUnfollow by remember { mutableStateOf(false) }
     val grid = rememberLazyGridState()
 
-    suspend fun more() {
+    var job by remember { mutableStateOf<Job?>(null) }
+
+    /**
+     * Loads the next page in the screen scope (an effect restart must not cancel it half way).
+     * `reset` starts over for a new order, dropping any page still in flight.
+     */
+    fun more(reset: Boolean = false) {
+        if (reset) {
+            job?.cancel()
+            cards.clear(); page = 1u; hasMore = true; hiddenCharging = 0u; error = null; loading = false
+        }
         if (loading || !hasMore) return
         loading = true
-        val asked = order
-        runCatching { app.core.upVideos(mid, page, asked) }
-            .onSuccess { got ->
-                if (asked != order) return@onSuccess
+        job = scope.launch {
+            try {
+                val got = app.core.upVideos(mid, page, order)
                 cards.addAll(got.items.filter { n -> cards.none { it.bvid == n.bvid } })
                 hiddenCharging += got.hiddenCharging
                 hasMore = got.hasMore
                 page++
                 error = null
+                loading = false
+            } catch (e: CancellationException) {
+                throw e
+            } catch (e: Exception) {
+                error = if (e is RubiException.RiskControl) "被 B 站风控拦截（请求过于频繁或未登录），稍等片刻再重试" else "加载失败：${e.message}"
+                loading = false
             }
-            .onFailure {
-                error = if (it is RubiException.RiskControl) "被 B 站风控拦截（请求过于频繁或未登录），稍等片刻再重试" else "加载失败：${it.message}"
-            }
-        loading = false
+        }
     }
 
     LaunchedEffect(mid, nav.stack.size) { profile = runCatching { app.core.upProfile(mid) }.getOrNull() ?: profile }
-    LaunchedEffect(mid, order) {
-        cards.clear(); page = 1u; hasMore = true; hiddenCharging = 0u
-        more()
-    }
+    LaunchedEffect(mid, order) { more(reset = true) }
     val nearEnd by remember { derivedStateOf { (grid.layoutInfo.visibleItemsInfo.lastOrNull()?.index ?: 0) >= cards.size - 4 } }
     LaunchedEffect(nearEnd, cards.size) { if (nearEnd && cards.isNotEmpty() && error == null) more() }
 
@@ -164,7 +175,7 @@ fun UpScreen(app: RubiApp, nav: Nav, mid: ULong, name: String) {
                     if (hiddenCharging > 0u) Meta("已隐藏充电专属视频 $hiddenCharging 个")
                     error?.let { e ->
                         Text(e, color = c.fg2, fontSize = 13.sp)
-                        TextAction("重试", onClick = { scope.launch { more() } })
+                        TextAction("重试", onClick = { more() })
                     }
                 }
             }

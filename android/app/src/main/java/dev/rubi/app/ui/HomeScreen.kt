@@ -35,6 +35,7 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
+import androidx.compose.runtime.snapshotFlow
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
@@ -49,6 +50,7 @@ import dev.rubi.app.ui.theme.MetroType
 import dev.rubi.core.FfiBreakdown
 import dev.rubi.core.FfiSignal
 import dev.rubi.core.FfiVideoCard
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
@@ -62,6 +64,8 @@ class FeedList {
     var page by mutableStateOf(1u)
     var loading by mutableStateOf(false)
     var error by mutableStateOf<String?>(null)
+    /** The last attempt brought nothing new; stop loading at the end until asked again. */
+    var ended by mutableStateOf(false)
 }
 
 /**
@@ -88,9 +92,9 @@ fun HomeScreen(app: RubiApp, nav: Nav, home: HomeState) {
     var why by remember { mutableStateOf<FfiVideoCard?>(null) }
 
     /** `reset` = user pulled to refresh; otherwise append the next page from the pool. */
-    suspend fun load(reset: Boolean) {
-        if (feed.loading) return
-        feed.loading = true
+    suspend fun loadPage(reset: Boolean) {
+        // A rebuilt list may show earlier cards again; an appended page must not repeat them.
+        if (reset || cards.isEmpty()) app.core.newFeedSession()
         var report = if (reset || cards.isEmpty()) runCatching { app.core.refreshFeed(20u) } else null
         suspend fun next() = withContext(Dispatchers.IO) { runCatching { app.core.nextPage(PAGE) }.getOrDefault(emptyList()) }
         var page = next()
@@ -99,21 +103,42 @@ fun HomeScreen(app: RubiApp, nav: Nav, home: HomeState) {
             report = runCatching { app.core.refreshFeed(20u) }
             page = next()
         }
+        // Leaving the screen mid-refresh is not a failure worth reporting.
+        (report?.exceptionOrNull() as? CancellationException)?.let { throw it }
         if (reset) cards.clear()
-        cards.addAll(page.filter { p -> cards.none { it.bvid == p.bvid } })
+        val fresh = page.filter { p -> cards.none { it.bvid == p.bvid } }
+        cards.addAll(fresh)
+        feed.ended = fresh.isEmpty()
         report?.let {
             home.status = it.fold(
                 { r -> "↻ 本次保留 ${r.kept} · 过滤 ${r.blocked}" + if (r.errors.isNotEmpty()) " · ${r.errors.size} 个来源失败" else "" },
                 { e -> "刷新失败：${e.message}" },
             )
         }
-        feed.loading = false
+    }
+
+    suspend fun load(reset: Boolean) {
+        if (feed.loading) return
+        feed.loading = true
+        try { loadPage(reset) } finally { feed.loading = false }
     }
 
     // First visit only: an existing list is kept as is when returning to this screen.
     LaunchedEffect(Unit) { if (cards.isEmpty()) load(reset = false) }
     val nearEnd by remember { derivedStateOf { (grid.layoutInfo.visibleItemsInfo.lastOrNull()?.index ?: 0) >= cards.size - 4 } }
-    LaunchedEffect(nearEnd) { if (nearEnd && cards.isNotEmpty()) load(reset = false) }
+    // One long-lived collector: it fires again whenever a page lands and the end is still in
+    // view, and nothing restarts (and so cancels) it while scrolling.
+    LaunchedEffect(feed) {
+        snapshotFlow { nearEnd && cards.isNotEmpty() && !feed.loading && !feed.ended }.collect { if (it) load(reset = false) }
+    }
+    LaunchedEffect(Unit) {
+        nav.reselected.collect { t ->
+            if (t == Tab.Home) {
+                val target = when (home.pivot) { 1 -> home.hot.grid; 2 -> home.rank.grid; else -> grid }
+                target.animateScrollToItem(0)
+            }
+        }
+    }
     val refreshing = feed.loading
     val dual = home.dual
     val pivot = home.pivot
@@ -150,6 +175,13 @@ fun HomeScreen(app: RubiApp, nav: Nav, home: HomeState) {
                 }
                 if (cards.isEmpty() && !refreshing) {
                     item(span = { GridItemSpan(maxLineSpan) }) { Text("候选池为空，下拉刷新", color = c.fg2) }
+                } else if (feed.ended && !refreshing) {
+                    item(span = { GridItemSpan(maxLineSpan) }) {
+                        Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                            Meta("暂时没有新的推荐（推荐源 30 秒内不重复请求）· 下拉刷新换一批")
+                            TextAction("再试一次", onClick = { feed.ended = false })
+                        }
+                    }
                 }
             }
         }
@@ -174,20 +206,27 @@ private fun HotRankList(app: RubiApp, nav: Nav, list: FeedList, ranking: Boolean
     suspend fun more() {
         if (list.loading) return
         list.loading = true
-        runCatching { if (ranking) app.core.ranking() else app.core.popular(list.page) }
-            .onSuccess { got ->
-                cards.addAll(got.filter { n -> cards.none { it.bvid == n.bvid } })
-                list.page++
-                list.error = null
-            }
-            .onFailure { list.error = it.message }
-        list.loading = false
+        try {
+            val got = if (ranking) app.core.ranking() else app.core.popular(list.page)
+            cards.addAll(got.filter { n -> cards.none { it.bvid == n.bvid } })
+            list.page++
+            list.error = null
+        } catch (e: CancellationException) {
+            throw e
+        } catch (e: Exception) {
+            list.error = e.message
+        } finally {
+            list.loading = false
+        }
     }
 
     LaunchedEffect(list) { if (cards.isEmpty()) more() }
     if (!ranking) {
         val nearEnd by remember(list) { derivedStateOf { (grid.layoutInfo.visibleItemsInfo.lastOrNull()?.index ?: 0) >= cards.size - 4 } }
-        LaunchedEffect(nearEnd) { if (nearEnd && cards.isNotEmpty() && list.page <= 10u) more() }
+        LaunchedEffect(list) {
+            snapshotFlow { nearEnd && cards.isNotEmpty() && !list.loading && list.error == null && list.page <= 10u }
+                .collect { if (it) more() }
+        }
     }
 
     LazyVerticalGrid(
