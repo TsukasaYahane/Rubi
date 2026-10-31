@@ -21,8 +21,11 @@ import dev.rubi.core.FfiEmote
 /** The default emote set (`[doge]` → url), loaded once at startup. */
 val LocalEmotes = staticCompositionLocalOf<Map<String, String>> { emptyMap() }
 
-/** A `[xxx]` emote token (comments, danmaku). */
-internal val EMOTE_TOKEN = Regex("""\[[^\[\]\s]{1,24}]""")
+/**
+ * A `[xxx]` emote token (comments, danmaku). Spaces are allowed: decoration emotes are named
+ * like `[香奈美·追寻那道光 应援装扮_啊]`. Only tokens with a known image are replaced.
+ */
+internal val EMOTE_TOKEN = Regex("""\[[^\[\]\n]{1,40}]""")
 
 /**
  * Text with bilibili emote tokens drawn as inline images. Tokens with no known image
