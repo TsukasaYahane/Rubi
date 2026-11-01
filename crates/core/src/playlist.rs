@@ -1,13 +1,15 @@
 //! The custom play list: videos added from anywhere, played in order, looped or shuffled, as
 //! video or as audio only (听视频). Kept in the local database and part of the export.
 
-use std::sync::Arc;
+use std::sync::{Arc, Mutex};
 
 use rubi_model::{VideoCard, now_secs};
-use rubi_store::{KvRepo, PlaylistRepo};
+use rubi_store::{KvRepo, PlaylistRepo, SqliteStore};
 use serde::{Deserialize, Serialize};
 
 use crate::error::Result;
+use crate::queue::ListenQueue;
+use crate::videos::{CardCache, Videos};
 
 const MODE_KEY: &str = "playlist_mode";
 
@@ -25,12 +27,13 @@ pub enum PlaylistMode {
     Shuffle,
 }
 
-pub struct Playlist<S> {
+/// The stored list and its mode.
+pub(crate) struct Playlist<S> {
     store: Arc<S>,
 }
 
 impl<S: PlaylistRepo + KvRepo> Playlist<S> {
-    pub fn new(store: Arc<S>) -> Self {
+    pub(crate) fn new(store: Arc<S>) -> Self {
         Self { store }
     }
 
@@ -101,22 +104,16 @@ impl<S: PlaylistRepo + KvRepo> Playlist<S> {
         let items = self.items()?;
         Ok(next_in(&items, current, self.mode()?, random_below).cloned())
     }
-
-    /// What 上一首 goes to: the item before `current` in list order, wrapping round. Shuffle
-    /// history is kept by the caller, which knows what was actually heard.
-    pub fn previous_before(&self, current: &str) -> Result<Option<VideoCard>> {
-        let items = self.items()?;
-        Ok(previous_in(&items, current).cloned())
-    }
 }
 
-fn previous_in<'a>(items: &'a [VideoCard], current: &str) -> Option<&'a VideoCard> {
+/// The item before `current` in list order, wrapping round.
+pub(crate) fn previous_in<'a>(items: &'a [VideoCard], current: &str) -> Option<&'a VideoCard> {
     let Some(at) = items.iter().position(|c| c.bvid == current) else { return items.first() };
     items.get((at + items.len() - 1) % items.len())
 }
 
 /// The pick, with the randomness passed in so it can be tested.
-fn next_in<'a>(
+pub(crate) fn next_in<'a>(
     items: &'a [VideoCard],
     current: &str,
     mode: PlaylistMode,
@@ -133,6 +130,105 @@ fn next_in<'a>(
             items.get(if r >= at { r + 1 } else { r })
         }
         PlaylistMode::Shuffle => items.get(at),
+    }
+}
+
+/// The play list as the app uses it: editing it, playing it as video, and hearing it (听视频).
+pub struct Playlists {
+    list: Arc<Playlist<SqliteStore>>,
+    videos: Arc<Videos>,
+    cards: Arc<CardCache>,
+    listening: Mutex<ListenQueue>,
+}
+
+impl Playlists {
+    pub(crate) fn new(list: Arc<Playlist<SqliteStore>>, videos: Arc<Videos>, cards: Arc<CardCache>) -> Self {
+        Self { list, videos, cards, listening: Mutex::default() }
+    }
+
+    pub fn items(&self) -> Result<Vec<VideoCard>> {
+        let items = self.list.items()?;
+        self.cards.remember(&items);
+        Ok(items)
+    }
+
+    pub fn contains(&self, bvid: &str) -> Result<bool> {
+        self.list.contains(bvid)
+    }
+
+    /// Adds a video (looked up when it was not shown); false when it was already listed.
+    pub async fn add(&self, bvid: &str) -> Result<bool> {
+        let card = self.videos.card(bvid).await?;
+        self.list.add(card)
+    }
+
+    pub fn remove(&self, bvid: &str) -> Result<()> {
+        self.list.remove(bvid)
+    }
+
+    pub fn move_item(&self, from: usize, to: usize) -> Result<()> {
+        self.list.move_item(from, to)
+    }
+
+    pub fn clear(&self) -> Result<()> {
+        self.list.clear()
+    }
+
+    pub fn mode(&self) -> Result<PlaylistMode> {
+        self.list.mode()
+    }
+
+    pub fn set_mode(&self, mode: PlaylistMode) -> Result<()> {
+        self.list.set_mode(mode)
+    }
+
+    /// Where 播放全部 / 听全部 starts.
+    pub fn first(&self) -> Result<Option<VideoCard>> {
+        self.list.first()
+    }
+
+    /// The video to play after `current` ended on the video page; `None` stops.
+    pub fn next_after(&self, current: &str) -> Result<Option<VideoCard>> {
+        self.list.next_after(current)
+    }
+
+    // ----- 听视频 -----
+
+    /// What is being heard; `None` when not listening.
+    pub fn listening(&self) -> Option<VideoCard> {
+        self.queue().current()
+    }
+
+    /// Starts hearing the list from `bvid`.
+    pub async fn listen_from(&self, bvid: &str) -> Result<VideoCard> {
+        let card = self.videos.card(bvid).await?;
+        Ok(self.queue().start(card))
+    }
+
+    /// Switches to `bvid` picked from the list.
+    pub async fn listen_jump(&self, bvid: &str) -> Result<VideoCard> {
+        let card = self.videos.card(bvid).await?;
+        Ok(self.queue().jump(card))
+    }
+
+    /// 下一首 (`by_user`) or the item having ended; `None` means listening stopped.
+    pub fn listen_next(&self, by_user: bool) -> Result<Option<VideoCard>> {
+        let (items, mode) = (self.list.items()?, self.list.mode()?);
+        Ok(self.queue().next(&items, mode, by_user, random_below))
+    }
+
+    /// 上一首.
+    pub fn listen_previous(&self) -> Result<Option<VideoCard>> {
+        let (items, mode) = (self.list.items()?, self.list.mode()?);
+        Ok(self.queue().previous(&items, mode))
+    }
+
+    pub fn listen_stop(&self) {
+        self.queue().stop();
+    }
+
+    fn queue(&self) -> std::sync::MutexGuard<'_, ListenQueue> {
+        self.listening.lock().unwrap_or_else(|e| e.into_inner())
     }
 }
 

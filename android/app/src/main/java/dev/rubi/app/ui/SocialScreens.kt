@@ -1,7 +1,6 @@
 package dev.rubi.app.ui
 
-import kotlinx.coroutines.ensureActive
-import kotlinx.coroutines.CancellationException
+import dev.rubi.core.RubiCore
 import androidx.compose.ui.platform.LocalFocusManager
 import androidx.compose.ui.platform.LocalSoftwareKeyboardController
 import androidx.compose.foundation.lazy.LazyListState
@@ -80,20 +79,31 @@ private fun MetroField(value: String, onChange: (String) -> Unit, hint: String, 
  * One search page's state, kept by its [Screen.Search] entry: opening a result disposes the
  * page, and coming back must show the same results at the same place.
  */
-class SearchState {
+class SearchState(private val core: RubiCore) {
     var query by mutableStateOf("")
-    var results by mutableStateOf<List<FfiVideoCard>?>(null)
     var hot by mutableStateOf(emptyList<String>())
-    var note by mutableStateOf("")
-    // Paging of the current search: the next page loads as the end of the list comes near.
+    var hotHidden by mutableStateOf(0u)
+    /** The term the results are for; empty while 热搜 shows. */
     var searched by mutableStateOf("")
-    var page by mutableStateOf(1u)
-    var hasMore by mutableStateOf(false)
-    var loading by mutableStateOf(false)
-    var failed by mutableStateOf(false)
-    var hiddenTotal by mutableStateOf(0u)
+        private set
     val list = LazyListState()
+
+    /** Result pages; one that comes back empty (all filtered) still moves on, up to B站's 50. */
+    val results = Paged<FfiVideoCard, UInt>(key = { it.bvid }) { pn ->
+        val at = pn ?: 1u
+        val r = core.search(searched, at)
+        val more = (r.cards.isNotEmpty() || r.hidden > 0u) && at < MAX_SEARCH_PAGES
+        Page(r.cards, if (more) at + 1u else null, r.hidden)
+    }
+
+    fun search(term: String) {
+        query = term
+        searched = term
+        results.reset()
+    }
 }
+
+private const val MAX_SEARCH_PAGES = 50u
 
 @Composable
 fun SearchScreen(app: RubiApp, nav: Nav, state: SearchState) {
@@ -101,76 +111,36 @@ fun SearchScreen(app: RubiApp, nav: Nav, state: SearchState) {
     val scope = rememberCoroutineScope()
     val keyboard = LocalSoftwareKeyboardController.current
     val focus = LocalFocusManager.current
-    var query by state::query
-    var results by state::results
-    var hot by state::hot
-    var note by state::note
-    var searched by state::searched
-    var page by state::page
-    var hasMore by state::hasMore
-    var loading by state::loading
-    var failed by state::failed
-    var hiddenTotal by state::hiddenTotal
+    val results = state.results
     val list = state.list
 
     LaunchedEffect(Unit) {
-        if (hot.isEmpty()) runCatching { app.core.hotWords() }.onSuccess { hot = it.words; if (results == null) note = "已过滤推广热搜词 ${it.hidden} 条" }
-    }
-    fun loadPage() {
-        if (loading || (!hasMore && page > 1u)) return
-        loading = true
-        val q = searched
-        scope.launch {
-            // A load cut off by leaving the page is not a failure; it runs again on return.
-            try {
-                runCatching { app.core.search(q, page).also { ensureActive() } }
-                    .onSuccess { r ->
-                        if (q != searched) return@onSuccess
-                    val have = results.orEmpty()
-                    results = have + r.cards.filter { n -> have.none { it.bvid == n.bvid } }
-                    hiddenTotal += r.hidden
-                    // A page that came back empty (all filtered or past the end) still moves on,
-                    // up to the API's 50 pages.
-                    hasMore = (r.cards.isNotEmpty() || r.hidden > 0u) && page < 50u
-                    page++
-                    failed = false
-                    note = "结果 ${results.orEmpty().size} · 已过滤 $hiddenTotal"
-                }
-                    .onFailure { if (it !is CancellationException) { failed = true; note = "搜索失败：${it.message}" } }
-            } finally {
-                loading = false
-            }
-        }
+        if (state.hot.isEmpty()) runCatching { app.core.hotWords() }.onSuccess { state.hot = it.words; state.hotHidden = it.hidden }
     }
     fun search(q: String) {
         // The search is under way: put the keyboard away and leave the field.
         keyboard?.hide()
         focus.clearFocus()
-        query = q
-        searched = q
-        results = emptyList()
-        page = 1u
-        hasMore = true
-        hiddenTotal = 0u
-        failed = false
-        loading = false
+        state.search(q)
         scope.launch { list.scrollToItem(0) }
-        loadPage()
     }
-    val nearEnd by remember { derivedStateOf { (list.layoutInfo.visibleItemsInfo.lastOrNull()?.index ?: 0) >= (results?.size ?: 0) - 3 } }
-    LaunchedEffect(nearEnd, results?.size) { if (nearEnd && results != null && hasMore && !failed) loadPage() }
+    if (state.searched.isNotEmpty()) LoadMoreNearEnd(list, results, ahead = 3)
+    val note = when {
+        state.searched.isEmpty() -> if (state.hotHidden > 0u) "已过滤推广热搜词 ${state.hotHidden} 条" else ""
+        results.error != null -> errorText(results.error!!)
+        else -> "结果 ${results.items.size} · 已过滤 ${results.hidden}"
+    }
 
     Column(Modifier.fillMaxSize()) {
         Row(Modifier.fillMaxWidth().padding(end = 16.dp), verticalAlignment = Alignment.CenterVertically) {
             Box(Modifier.size(44.dp).clickable { nav.pop() }, contentAlignment = Alignment.Center) { GlyphIcon(Glyph.Back) }
-            MetroField(query, { query = it }, "搜索视频、UP 主", Modifier.weight(1f)) { if (query.isNotBlank()) search(query) }
+            MetroField(state.query, { state.query = it }, "搜索视频、UP 主", Modifier.weight(1f)) { if (state.query.isNotBlank()) search(state.query) }
         }
         Meta(note, Modifier.padding(horizontal = 16.dp, vertical = 8.dp))
         LazyColumn(Modifier.weight(1f), state = list) {
-            val r = results
-            if (r == null) {
+            if (state.searched.isEmpty()) {
                 item { SectionTitle("热搜") }
-                items(hot.withIndex().toList()) { (i, w) ->
+                items(state.hot.withIndex().toList()) { (i, w) ->
                     Row(
                         Modifier.fillMaxWidth().height(48.dp).clickable { search(w) }.padding(horizontal = 16.dp),
                         verticalAlignment = Alignment.CenterVertically,
@@ -180,7 +150,7 @@ fun SearchScreen(app: RubiApp, nav: Nav, state: SearchState) {
                     }
                 }
             } else {
-                items(r, key = { it.bvid }) { card ->
+                items(results.items, key = { it.bvid }) { card ->
                     Box(Modifier.padding(horizontal = 16.dp, vertical = 12.dp)) {
                         VideoCardView(card, big = true, onOpen = { nav.push(Screen.Player(card.bvid, card.title)) })
                     }
@@ -188,10 +158,10 @@ fun SearchScreen(app: RubiApp, nav: Nav, state: SearchState) {
                 item {
                     Column(Modifier.padding(16.dp)) {
                         when {
-                            loading -> Meta("加载中…")
-                            failed -> TextAction("重试", onClick = { failed = false; loadPage() })
-                            !hasMore && r.isNotEmpty() -> Meta("没有更多了")
-                            r.isEmpty() && !hasMore -> Meta("没有找到相关视频")
+                            results.loading -> Meta("加载中…")
+                            results.error != null -> TextAction("重试", onClick = results::retry)
+                            results.ended && results.items.isNotEmpty() -> Meta("没有更多了")
+                            results.ended -> Meta("没有找到相关视频")
                         }
                     }
                 }

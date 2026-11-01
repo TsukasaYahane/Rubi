@@ -1,25 +1,48 @@
-//! The composition root. Builds every service from its parts and is the only place
-//! that knows concrete types; the FFI layer and the CLI talk to [`App`].
+//! Rubi's application layer. [`Services`] wires every service once; each service owns one
+//! area (account, videos, comments, lists…), keeps its collaborators private, and talks to
+//! others only through narrow traits. The FFI layer and the CLI only convert and call.
 
+mod account;
+mod actions;
 mod app;
+mod comments;
 mod danmaku;
+mod discover;
+mod emotes;
 mod error;
 mod export;
 mod feed;
+mod following;
+mod home;
+mod library;
+mod messages;
 mod playlist;
+mod ports;
+mod preferences;
+mod queue;
+mod recent;
 mod social;
 mod sources;
+mod space;
 mod stein;
+mod videos;
 mod zones;
 
-pub use app::{App, UpUploads};
-pub use danmaku::{DanmakuSession, load_danmaku};
+pub use account::Account;
+pub use actions::Actions;
+pub use app::Services;
+pub use comments::{Comments, CommentsPage, ThreadView};
+pub use danmaku::{DanmakuSession, Danmakus};
+pub use discover::Discover;
+pub use emotes::Emotes;
 pub use error::{CoreError, Result};
-pub use export::{ExportOptions, Imported, export_bundle, import_bundle};
-pub use feed::{AppStore, DanmakuDisplay, FeedService, PreviewSettings, RefreshReport, Seeded, Settings};
-pub use playlist::{Playlist, PlaylistMode};
-pub use social::{FilteredComments, filter_hot_words, filter_sessions, is_blocked_pinned, load_comments, load_thread};
-pub use sources::{
-    BiliRecommendSource, FollowedUpsSource, PopularSource, PreferredZoneSource, RankingSource, RelatedSource,
-};
-pub use stein::{SteinSession, apply_action, eval_condition};
+pub use feed::{DanmakuDisplay, PreviewSettings, RefreshReport, Settings};
+pub use following::{FollowedPage, Following};
+pub use home::Home;
+pub use library::Library;
+pub use messages::Messages;
+pub use playlist::{PlaylistMode, Playlists};
+pub use preferences::Preferences;
+pub use space::{Space, UpUploads};
+pub use stein::{Stein, SteinSession};
+pub use videos::{MAX_FREE_QN, Playback, Videos};

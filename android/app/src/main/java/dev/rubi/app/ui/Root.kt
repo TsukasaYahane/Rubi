@@ -60,7 +60,7 @@ sealed interface Screen {
     ) : Screen
     data object Listen : Screen
     /** Each entry carries its own state, so results survive opening a video from them. */
-    class Search(val state: SearchState = SearchState()) : Screen
+    class Search(val state: SearchState) : Screen
     data object Inbox : Screen
     data class Chat(val mid: ULong, val name: String) : Screen
     data class Up(val mid: ULong, val name: String) : Screen
@@ -76,6 +76,9 @@ sealed interface Screen {
 
 enum class Tab(val label: String) { Home("首页"), Follow("关注"), Me("我的") }
 
+/** Video pages kept to go back through in one chain. */
+private const val MAX_VIDEO_DEPTH = 20
+
 /** Navigation: three tabs plus a stack of full-screen pages on top. */
 class Nav {
     var tab by mutableStateOf(Tab.Home)
@@ -89,13 +92,31 @@ class Nav {
         if (tab == t) reselected.tryEmit(t) else tab = t
     }
 
-    fun push(s: Screen) = stack.add(s)
+    /**
+     * Opens a page. A long chain of videos keeps only its latest [MAX_VIDEO_DEPTH] pages to go
+     * back through; older ones are dropped so the chain does not grow without end.
+     */
+    fun push(s: Screen) {
+        stack.add(s)
+        if (s is Screen.Player && stack.count { it is Screen.Player } > MAX_VIDEO_DEPTH) {
+            stack.removeAt(stack.indexOfFirst { it is Screen.Player })
+        }
+    }
 
     /** Swaps the top page (the play list moving on to its next video). */
     fun replaceTop(s: Screen) {
         if (stack.isEmpty()) stack.add(s) else stack[stack.lastIndex] = s
     }
     fun pop() = stack.removeLastOrNull()
+
+    /** Leaves every page on top (a whole chain of videos) for the 首页 tab. */
+    fun home() {
+        stack.clear()
+        tab = Tab.Home
+    }
+
+    /** Whether any video page is open; when this turns false the user has left the video chain. */
+    val inVideos: Boolean get() = stack.any { it is Screen.Player }
 
     /** Opens a video from a notice or message; av numbers are resolved to a BV id first. */
     fun openVideo(
@@ -119,7 +140,8 @@ fun RubiRoot(app: RubiApp) {
     val c = LocalMetro.current
     val nav = remember { Nav() }
     val home = remember { HomeState(app.ui) }
-    val follow = remember { FollowState() }
+    val rootScope = rememberCoroutineScope()
+    val follow = remember { FollowState(app.core, rootScope) }
     var unread by remember { mutableStateOf(0u) }
     var emotes by remember { mutableStateOf(emptyMap<String, String>()) }
 
@@ -129,6 +151,14 @@ fun RubiRoot(app: RubiApp) {
         unread = runCatching { app.core.unread().let { it.reply + it.at + it.like + it.chat } }.getOrDefault(0u)
     }
     BackHandler(enabled = nav.stack.isNotEmpty()) { nav.pop() }
+    // Leaving the last video page frees what the chain of videos piled up.
+    LaunchedEffect(nav) {
+        var watching = false
+        snapshotFlow { nav.inVideos }.collect { now ->
+            if (watching && !now) app.releaseVideoCaches()
+            watching = now
+        }
+    }
     val listenRequested by AudioQueue.pageRequested
     LaunchedEffect(listenRequested) {
         if (!listenRequested) return@LaunchedEffect
@@ -136,7 +166,6 @@ fun RubiRoot(app: RubiApp) {
         if (AudioQueue.current.value != null && nav.stack.lastOrNull() != Screen.Listen) nav.push(Screen.Listen)
     }
 
-    val rootScope = rememberCoroutineScope()
     CompositionLocalProvider(
         LocalEmotes provides emotes,
         LocalAddToPlaylist provides { card -> addToPlaylist(app, rootScope, card) },
@@ -145,7 +174,7 @@ fun RubiRoot(app: RubiApp) {
     Box(if (edgeToEdge) Modifier.fillMaxSize().background(Color.Black) else Modifier.fillMaxSize().background(c.bg).safeDrawingPadding()) {
         when (val top = nav.stack.lastOrNull()) {
             null -> Column(Modifier.fillMaxSize()) {
-                TopBar(nav, unread)
+                TopBar(nav, unread) { nav.push(Screen.Search(SearchState(app.core))) }
                 // The three tabs side by side: swipe between them, or tap the bottom bar.
                 val pager = rememberPagerState(initialPage = nav.tab.ordinal) { Tab.entries.size }
                 LaunchedEffect(nav.tab) { if (pager.targetPage != nav.tab.ordinal) pager.animateScrollToPage(nav.tab.ordinal) }
@@ -180,7 +209,7 @@ fun RubiRoot(app: RubiApp) {
 }
 
 @Composable
-private fun TopBar(nav: Nav, unread: UInt) {
+private fun TopBar(nav: Nav, unread: UInt, onSearch: () -> Unit) {
     val c = LocalMetro.current
     Row(
         Modifier.fillMaxWidth().height(56.dp).padding(horizontal = 16.dp),
@@ -189,7 +218,7 @@ private fun TopBar(nav: Nav, unread: UInt) {
     ) {
         Text("RUBI", style = MetroType.brand, color = c.fg)
         Row(
-            Modifier.weight(1f).height(44.dp).clickable { nav.push(Screen.Search()) }
+            Modifier.weight(1f).height(44.dp).clickable(onClick = onSearch)
                 .border(width = 0.dp, color = Color.Transparent),
             verticalAlignment = Alignment.CenterVertically,
             horizontalArrangement = Arrangement.spacedBy(8.dp),

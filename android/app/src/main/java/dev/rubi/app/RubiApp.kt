@@ -1,6 +1,8 @@
 package dev.rubi.app
 
 import android.app.Application
+import android.content.ComponentCallbacks2
+import coil3.SingletonImageLoader
 import dev.rubi.app.data.SessionStore
 import androidx.compose.runtime.mutableStateOf
 import dev.rubi.app.data.UiPrefs
@@ -45,6 +47,21 @@ class RubiApp : Application() {
         if (stored != null) {
             ui.lastAccount?.let { (name, mid) -> account.value = FfiAccount(true, mid.toULong(), name) }
         }
+    }
+
+    /**
+     * Frees what watching videos piled up: the core's cached cards and comments, and decoded
+     * images in memory (they reload from the disk cache when needed again).
+     */
+    fun releaseVideoCaches() {
+        core.releaseCaches()
+        SingletonImageLoader.get(this).memoryCache?.clear()
+    }
+
+    /** Going to the background or running low: let the caches go. */
+    override fun onTrimMemory(level: Int) {
+        super.onTrimMemory(level)
+        if (level >= ComponentCallbacks2.TRIM_MEMORY_UI_HIDDEN) releaseVideoCaches()
     }
 
     /** Persists whatever session the core holds now (after login or device-id activation). */

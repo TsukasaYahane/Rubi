@@ -5,8 +5,8 @@ use std::fs;
 use std::path::{Path, PathBuf};
 
 use rubi_api::{QrState, Session};
-use rubi_core::{App, ExportOptions, export_bundle, import_bundle, load_danmaku};
-use rubi_model::{DislikeReason, FeedbackEvent, ItemRef, Signal, now_secs};
+use rubi_core::Services;
+use rubi_model::{DislikeReason, Signal};
 
 pub(crate) type Res<T> = Result<T, Box<dyn std::error::Error>>;
 
@@ -77,9 +77,9 @@ async fn run() -> Res<()> {
     };
     let dir = data_dir();
     fs::create_dir_all(&dir)?;
-    let app = App::open(dir.join("rubi.db"), load_session(&dir))?;
-    app.auth.ensure_device_ids().await?;
-    save_session(&dir, &app.http.session())?;
+    let app = Services::open(dir.join("rubi.db"), load_session(&dir))?;
+    app.account.ensure_device_ids().await?;
+    save_session(&dir, &app.account.session())?;
     let arg = |i: usize| args.get(i).map(String::as_str);
 
     match cmd {
@@ -91,32 +91,18 @@ async fn run() -> Res<()> {
         "play" => play(&app, arg(1).ok_or("缺少 bvid")?).await,
         "login" => login(&app, &dir).await,
         "whoami" => {
-            let nav = app.auth.nav().await?;
+            let nav = app.account.whoami().await?;
             println!("{}", if nav.is_login { format!("已登录: {} ({})", nav.uname, nav.mid) } else { "游客".into() });
             Ok(())
         }
         "export" => {
             let path = arg(1).ok_or("缺少文件路径")?;
-            let include_history = args.iter().any(|a| a == "--history");
-            let events = if include_history { app.feed.history()? } else { Vec::new() };
-            export_bundle(
-                fs::File::create(path)?,
-                &app.feed.settings(),
-                &app.feed.profile(),
-                &events,
-                &app.playlist.items()?,
-                ExportOptions { include_history },
-            )?;
+            app.preferences.export_to(path, args.iter().any(|a| a == "--history"))?;
             println!("已导出到 {path}（不含登录凭证）");
             Ok(())
         }
         "import" => {
-            let imported = import_bundle(fs::File::open(arg(1).ok_or("缺少文件路径")?)?)?;
-            app.feed.set_settings(imported.settings)?;
-            app.feed.set_profile(imported.profile)?;
-            for ev in imported.history {
-                app.feed.record(ev)?;
-            }
+            app.preferences.import_from(arg(1).ok_or("缺少文件路径")?)?;
             println!("已导入");
             Ok(())
         }
@@ -129,8 +115,8 @@ async fn run() -> Res<()> {
     }
 }
 
-async fn feed(app: &App, n: usize) -> Res<()> {
-    let r = app.feed.refresh(20).await?;
+async fn feed(app: &Services, n: usize) -> Res<()> {
+    let r = app.home.refresh(20).await?;
     println!(
         "刷新: 拉取 {} · 保留 {} · 过滤 {} · 冷却跳过 {:?}",
         r.fetched.iter().map(|(k, n)| format!("{k:?}={n}")).collect::<Vec<_>>().join(" "),
@@ -142,7 +128,7 @@ async fn feed(app: &App, n: usize) -> Res<()> {
         println!("  ! {e}");
     }
     println!();
-    for (i, item) in app.feed.next_page(n)?.iter().enumerate() {
+    for (i, item) in app.home.next_page(n)?.iter().enumerate() {
         let c = &item.card;
         let top = item
             .score
@@ -165,8 +151,8 @@ async fn feed(app: &App, n: usize) -> Res<()> {
     Ok(())
 }
 
-fn why(app: &App, bvid: &str) -> Res<()> {
-    let Some(s) = app.feed.explain(bvid)? else {
+fn why(app: &Services, bvid: &str) -> Res<()> {
+    let Some(s) = app.home.explain(bvid)? else {
         println!("{bvid} 不在候选池里");
         return Ok(());
     };
@@ -184,17 +170,15 @@ fn why(app: &App, bvid: &str) -> Res<()> {
     Ok(())
 }
 
-fn log(app: &App, n: usize) -> Res<()> {
-    for e in app.feed.filter_log(n)? {
+fn log(app: &Services, n: usize) -> Res<()> {
+    for e in app.home.filter_log(n)? {
         println!("{:<14} {:<26} {:<16} {}", e.category, e.rule_id, e.source, short(&e.title, 30));
     }
     Ok(())
 }
 
-async fn signal(app: &App, bvid: &str, kind: &str) -> Res<()> {
-    let detail = app.video.view(bvid).await?;
-    let mut item = ItemRef::of(&detail.card);
-    item.tags = app.video.tags(bvid).await.unwrap_or_default();
+async fn signal(app: &Services, bvid: &str, kind: &str) -> Res<()> {
+    let card = app.videos.card(bvid).await?;
     let signal = match kind {
         "click" => Signal::Click,
         "like" => Signal::Like,
@@ -209,17 +193,15 @@ async fn signal(app: &App, bvid: &str, kind: &str) -> Res<()> {
         k if k.starts_with("done:") => Signal::Completion { ratio: k[5..].parse()? },
         _ => return Err(format!("未知信号 {kind}").into()),
     };
-    app.feed.record(FeedbackEvent { signal, item: Some(item.clone()), at: now_secs() })?;
-    println!("已记录 {kind} → {}（标签 {:?}）", short(&item.title, 30), item.tags);
+    app.home.record(bvid, signal).await?;
+    println!("已记录 {kind} → {}（标签 {:?}）", short(&card.title, 30), card.tags);
     Ok(())
 }
 
-async fn dm(app: &App, bvid: &str) -> Res<()> {
-    let detail = app.video.view(bvid).await?;
-    let duration_ms = detail.card.duration_s * 1000;
-    let opts = app.feed.settings().rules.danmaku_options()?;
-    let out = load_danmaku(app.danmaku.clone(), detail.cid, duration_ms, &opts).await?;
-    println!("{} · 时长 {}s", detail.card.title, detail.card.duration_s);
+async fn dm(app: &Services, bvid: &str) -> Res<()> {
+    let (card, _) = app.videos.detail(bvid).await?;
+    let out = app.danmaku.all(card.cid.unwrap_or_default(), card.duration_s * 1000).await?;
+    println!("{} · 时长 {}s", card.title, card.duration_s);
     println!("保留 {} 条", out.kept.len());
     for (cat, n) in &out.removed {
         println!("  移除 {cat:?}: {n}");
@@ -233,10 +215,11 @@ async fn dm(app: &App, bvid: &str) -> Res<()> {
     Ok(())
 }
 
-async fn play(app: &App, bvid: &str) -> Res<()> {
-    let detail = app.video.view(bvid).await?;
-    let p = app.video.playurl(bvid, detail.cid, 80).await?;
-    println!("{} · 当前画质 {} · 可选 {:?}", detail.card.title, p.quality, p.accept);
+async fn play(app: &Services, bvid: &str) -> Res<()> {
+    let card = app.videos.card(bvid).await?;
+    let playback = app.videos.playback(bvid, 80).await?;
+    let p = &playback.url;
+    println!("{} · 当前画质 {} · 可选 {:?}", card.title, p.quality, p.accept);
     for v in &p.video {
         let host = |u: &str| u.split('/').nth(2).unwrap_or_default().to_owned();
         let backups: Vec<String> = v.backup_urls.iter().map(|u| host(u)).collect();
@@ -254,18 +237,18 @@ async fn play(app: &App, bvid: &str) -> Res<()> {
     for a in &p.audio {
         println!("  音频 {} {} {}kbps", a.id, a.codecs, a.bandwidth / 1000);
     }
-    println!("  请求头 {:?}", app.video.stream_headers());
+    println!("  请求头 {:?}", playback.headers);
     Ok(())
 }
 
-async fn login(app: &App, dir: &Path) -> Res<()> {
-    let ticket = app.auth.qr_generate().await?;
+async fn login(app: &Services, dir: &Path) -> Res<()> {
+    let ticket = app.account.qr_generate().await?;
     let code = qrcode::QrCode::new(ticket.url.as_bytes())?;
     println!("{}", code.render::<qrcode::render::unicode::Dense1x2>().quiet_zone(true).build());
     println!("用手机端 App 扫码登录（180 秒内有效）");
     loop {
         tokio::time::sleep(std::time::Duration::from_secs(2)).await;
-        match app.auth.qr_poll(&ticket.key).await? {
+        match app.account.qr_poll(&ticket.key).await? {
             QrState::Waiting => {}
             QrState::Scanned => println!("已扫码，请在手机上确认"),
             QrState::Expired => return Err("二维码已过期".into()),

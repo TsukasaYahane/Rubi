@@ -84,9 +84,6 @@ import kotlinx.coroutines.withContext
 
 private const val TAG = "RubiPlayer"
 
-/** Lines a comment shows before 展开全文. */
-private const val COMMENT_LINES = 6
-
 /** Index of the sticky 推荐 / 评论 bar in the player's list (after head and detail). */
 private const val TABS_INDEX = 2
 
@@ -129,15 +126,7 @@ fun PlayerScreen(
     // Fullscreen and picture-in-picture both show the video alone.
     val compact = fullscreen || inPip
     val activity = remember(ctx) { ctx.activity() }
-    DisposableEffect(Unit) {
-        Pip.onPlayer = true
-        Pip.autoEnter = PlaybackPrefs.autoPip(app.core)
-        activity?.let(Pip::sync)
-        onDispose {
-            Pip.onPlayer = false
-            activity?.let(Pip::sync)
-        }
-    }
+    PlayerPageLifecycle(app)
     val listState = rememberLazyListState()
     val scope = rememberCoroutineScope()
 
@@ -146,76 +135,9 @@ fun PlayerScreen(
     // Recording the click is bookkeeping; never let it delay playback.
     LaunchedEffect(bvid) { runCatching { app.core.record(bvid, FfiSignal.Click) } }
 
-    // Leaving the page stops playback. Going to the background does not dispose the page;
-    // there playback pauses unless 后台播放 is on (read each time, so the toggle applies at once).
-    DisposableEffect(Unit) { onDispose { PlayerHolder.clear() } }
-    // A video page takes the player over from 听视频.
-    LaunchedEffect(Unit) { AudioQueue.stop() }
-    val lifecycle = LocalLifecycleOwner.current.lifecycle
-    DisposableEffect(lifecycle) {
-        val observer = LifecycleEventObserver { _, event ->
-            if (event == Lifecycle.Event.ON_STOP && !PlaybackPrefs.backgroundPlay(app.core)) {
-                PlayerHolder.get(ctx).pause()
-            }
-        }
-        lifecycle.addObserver(observer)
-        onDispose { lifecycle.removeObserver(observer) }
-    }
-
-    // 历史记录: a heartbeat when a part starts, every 15 s while it plays, and when it is left
-    // (another branch or the page closing). Positions are sampled every second so the last
-    // report carries this part's own progress.
-    val watched = remember { longArrayOf(0L, 0L) } // played s, real s
-    LaunchedEffect(cid) {
-        val part = cid ?: return@LaunchedEffect
-        val player = PlayerHolder.get(ctx)
-        val started = SystemClock.elapsedRealtime()
-        watched[0] = 0L
-        watched[1] = 0L
-        runCatching { app.core.reportWatch(bvid, part, 0u, 0u, 1u) }
-        var tick = 0
-        while (true) {
-            delay(1_000)
-            if (player.isPlaying) watched[0] = player.currentPosition / 1000
-            watched[1] = (SystemClock.elapsedRealtime() - started) / 1000
-            if (++tick % 15 == 0 && player.isPlaying) {
-                runCatching { app.core.reportWatch(bvid, part, watched[0].toULong(), watched[1].toULong(), 0u) }
-            }
-        }
-    }
-    DisposableEffect(cid) {
-        val part = cid
-        onDispose {
-            if (part != null) {
-                val played = watched[0].toULong()
-                val real = watched[1].toULong()
-                app.scope.launch { runCatching { app.core.reportWatch(bvid, part, played, real, 2u) } }
-            }
-        }
-    }
-
-    // From the play list: when this video ends (interactive ones follow their own story),
-    // move on by the list's mode.
-    DisposableEffect(fromPlaylist, stein) {
-        if (!fromPlaylist || stein != null) return@DisposableEffect onDispose {}
-        val player = PlayerHolder.get(ctx)
-        val listener = object : androidx.media3.common.Player.Listener {
-            override fun onPlaybackStateChanged(state: Int) {
-                if (state != androidx.media3.common.Player.STATE_ENDED) return
-                scope.launch {
-                    val next = runCatching { app.core.playlistNext(bvid) }.getOrNull() ?: return@launch
-                    if (next.bvid == bvid) {
-                        player.seekTo(0)
-                        player.play()
-                    } else {
-                        nav.replaceTop(Screen.Player(next.bvid, next.title, fromPlaylist = true))
-                    }
-                }
-            }
-        }
-        player.addListener(listener)
-        onDispose { player.removeListener(listener) }
-    }
+    ReportWatching(app, bvid, cid)
+    // Interactive videos follow their own story instead of the list.
+    ContinuePlaylistOnEnd(app, nav, bvid, enabled = fromPlaylist && stein == null)
 
     LaunchedEffect(bvid, partCid) {
         // Drop the previous video (or branch) before fetching the next one.
@@ -241,25 +163,9 @@ fun PlayerScreen(
             } else {
                 pb.durationMs.toUInt()
             }
-            runCatching {
-                val session = app.core.danmakuSession(pb.cid, durationMs)
-                val total = session.segmentCount()
-                // The segment being watched first, then the rest from nearest to farthest.
-                val here = session.segmentAt(PlayerHolder.get(ctx).currentPosition.toUInt())
-                val order = (1u..total).sortedBy { kotlin.math.abs(it.toInt() - here.toInt()) }
-                var done = 0
-                for (batch in listOf(order.take(1)) + order.drop(1).chunked(3)) {
-                    val set = session.load(batch)
-                    done += batch.size
-                    danmaku = set
-                    dmStatus = "弹幕 ${set.items.size}" +
-                        (if (set.jumpMarks.isNotEmpty()) " · 空降点 ${set.jumpMarks.size}" else "") +
-                        if (done < total.toInt()) " · 加载中 $done/$total" else ""
-                }
-                Log.i(TAG, "danmaku loaded: ${danmaku?.items?.size} items in $total segments")
-            }.onFailure { e ->
-                dmStatus = if (danmaku == null) "弹幕加载失败：${e.message}" else "部分弹幕加载失败：${e.message}"
-                Log.w(TAG, "danmaku load failed", e)
+            loadDanmakuNearFirst(app, pb.cid, durationMs, PlayerHolder.get(ctx).currentPosition) { set, status ->
+                if (set != null) danmaku = set
+                dmStatus = status
             }
         }.onFailure {
             error = playbackError(it)
@@ -273,6 +179,10 @@ fun PlayerScreen(
     Column(Modifier.fillMaxSize()) {
         if (!compact) Row(Modifier.fillMaxWidth().padding(start = 4.dp, end = 16.dp), verticalAlignment = Alignment.CenterVertically) {
             Box(Modifier.size(44.dp).clickable { nav.pop() }, contentAlignment = Alignment.Center) { GlyphIcon(Glyph.Back) }
+            // Deep in a chain of videos (or opened from another page): straight back to 首页.
+            if (nav.stack.size > 1) {
+                Box(Modifier.size(44.dp).clickable { nav.home() }, contentAlignment = Alignment.Center) { GlyphIcon(Glyph.Home) }
+            }
             Meta(dmStatus, Modifier.weight(1f))
             Text(
                 if (display.enabled) "弹 开" else "弹 关",
@@ -485,274 +395,6 @@ fun PlayerScreen(
             onDismiss = { dmSheet = false },
             side = fullscreen,
         )
-    }
-}
-
-@Composable
-private fun RelatedList(app: RubiApp, nav: Nav, current: String) {
-    val c = LocalMetro.current
-    val cards = remember { mutableStateListOf<FfiVideoCard>() }
-    var note by remember { mutableStateOf("") }
-    LaunchedEffect(current) {
-        runCatching { app.core.related(current) }
-            .onSuccess { list -> cards.addAll(list.filter { it.bvid != current }) }
-            .onFailure { e ->
-                // Fall back to the local pool so the tab is never empty.
-                note = "相关推荐加载失败，显示本地推荐：${e.message}"
-                val page = withContext(Dispatchers.IO) { runCatching { app.core.nextPage(6u) }.getOrDefault(emptyList()) }
-                cards.addAll(page.filter { it.bvid != current })
-            }
-    }
-    Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(24.dp)) {
-        if (note.isNotEmpty()) Text(note, color = c.fg2, fontSize = 12.sp)
-        cards.forEach { card -> VideoCardView(card, big = false, onOpen = { nav.push(Screen.Player(card.bvid, card.title)) }) }
-    }
-}
-
-@Composable
-private fun CommentSection(
-    app: RubiApp,
-    aid: ULong,
-    focus: FfiCommentRef?,
-    onOpenVideo: (FfiVideoLink) -> Unit,
-    onFocusShown: () -> Unit,
-) {
-    val c = LocalMetro.current
-    val scope = rememberCoroutineScope()
-    var byTime by remember { mutableStateOf(false) }
-    var pinned by remember { mutableStateOf(emptyList<FfiCommentRow>()) }
-    var hiddenPinned by remember { mutableStateOf(0u) }
-    val threads = remember { mutableStateListOf<FfiCommentThread>() }
-    val collapsed = remember { mutableStateMapOf<ULong, Boolean>() }
-    var error by remember { mutableStateOf<String?>(null) }
-    // The thread holding the notice's comment, shown first and kept across sort changes.
-    var focusThread by remember { mutableStateOf<FfiCommentThread?>(null) }
-    var focusNote by remember { mutableStateOf<String?>(null) }
-
-    LaunchedEffect(aid, focus) {
-        if (focus == null) return@LaunchedEffect
-        runCatching { app.core.focusThread(aid, focus) }
-            .onSuccess { focusThread = it; onFocusShown() }
-            .onFailure { focusNote = "无法定位到消息里的评论（可能已被删除或折叠）" }
-    }
-
-    // Pages after the first follow the API's cursor; `round` restarts from the top (tapping
-    // the active sort again).
-    var next by remember { mutableStateOf<String?>(null) }
-    var hasMore by remember { mutableStateOf(true) }
-    var loadingMore by remember { mutableStateOf(false) }
-    var round by remember { mutableStateOf(0) }
-    // When the last page request went out: pages are spaced so scrolling fast does not fire a
-    // burst of requests (which B站 answers with HTTP 412).
-    var lastLoad by remember { mutableStateOf(0L) }
-    var waiting by remember { mutableStateOf(false) }
-
-    fun loadMore() {
-        // Only after the first page is in: before that there is no cursor to follow.
-        if (loadingMore || !hasMore || next == null) return
-        val now = SystemClock.elapsedRealtime()
-        if (now - lastLoad < COMMENT_PAGE_GAP_MS) {
-            // Too soon: try once more when the gap has passed, in case the list stops moving.
-            if (!waiting) {
-                waiting = true
-                scope.launch {
-                    delay(COMMENT_PAGE_GAP_MS - (now - lastLoad))
-                    waiting = false
-                    loadMore()
-                }
-            }
-            return
-        }
-        lastLoad = now
-        loadingMore = true
-        scope.launch {
-            runCatching { app.core.comments(aid, byTime, next) }
-                .onSuccess { page ->
-                    threads.addAll(page.threads.filter { t -> threads.none { it.rootRpid == t.rootRpid } })
-                    next = page.nextOffset
-                    hasMore = page.nextOffset != null && page.threads.isNotEmpty()
-                    error = null
-                }
-                .onFailure { error = commentError(it) }
-            loadingMore = false
-        }
-    }
-
-    LaunchedEffect(aid, byTime, round) {
-        loadingMore = true
-        runCatching { app.core.comments(aid, byTime, null) }
-            .onSuccess { page ->
-                pinned = page.pinned
-                hiddenPinned = page.hiddenPinned
-                threads.clear()
-                threads.addAll(page.threads)
-                next = page.nextOffset
-                hasMore = page.nextOffset != null && page.threads.isNotEmpty()
-                error = null
-            }
-            .onFailure { error = commentError(it) }
-        lastLoad = SystemClock.elapsedRealtime()
-        loadingMore = false
-    }
-
-    Column(Modifier.padding(horizontal = 16.dp)) {
-        Row(verticalAlignment = Alignment.CenterVertically) {
-            Meta("已隐藏置顶带货评论 $hiddenPinned 条", Modifier.weight(1f))
-            listOf("按热度" to false, "按时间" to true).forEach { (label, t) ->
-                Text(
-                    label,
-                    style = MetroType.meta.copy(fontSize = 12.sp),
-                    color = if (byTime == t) c.fg else c.fg2,
-                    fontWeight = if (byTime == t) FontWeight.SemiBold else FontWeight.Normal,
-                    modifier = Modifier.padding(start = 16.dp).size(width = 56.dp, height = 44.dp).clickable {
-                        if (byTime == t) round++ else byTime = t
-                    },
-                )
-            }
-        }
-        error?.let {
-            Text(it, color = c.fg2, fontSize = 13.sp)
-            if (threads.isEmpty()) TextAction("重试", onClick = { error = null; round++ })
-        }
-        focusNote?.let { Meta(it) }
-        pinned.forEach { CommentRow(it, open = BooleanArray(0), pinnedLabel = true, onLink = onOpenVideo) }
-        val focused = focusThread
-        val shownThreads = listOfNotNull(focused) + threads.filter { it.rootRpid != focused?.rootRpid }
-        fun replace(t: FfiCommentThread) {
-            if (t.rootRpid == focused?.rootRpid) focusThread = t
-            else threads.indexOfFirst { it.rootRpid == t.rootRpid }.takeIf { it >= 0 }?.let { threads[it] = t }
-        }
-        shownThreads.forEach { thread ->
-            val isCollapsed = collapsed[thread.rootRpid] == true
-            val rows = if (isCollapsed) thread.rows.take(1) else thread.rows
-            Column(Modifier.padding(vertical = 10.dp)) {
-                val open = BooleanArray(16)
-                rows.forEach { row ->
-                    // Snapshot: drawing happens later, after `open` has moved on.
-                    CommentRow(row, open.copyOf(), highlight = thread === focused && row.rpid == focus?.rpid, onLink = onOpenVideo)
-                    if (row.depth.toInt() in 1 until open.size) open[row.depth.toInt()] = row.hasLaterSibling
-                }
-                val shown = (thread.rows.size - 1).toUInt()
-                val actions = buildList {
-                    if (isCollapsed) add("展开 ${thread.totalReplies} 条回复" to { collapsed[thread.rootRpid] = false })
-                    else {
-                        if (thread.hidden > 0u) add("再看 5 条 · 剩 ${thread.hidden}" to {
-                            scope.launch {
-                                runCatching { app.core.commentThread(aid, thread.rootRpid, shown + 5u) }
-                                    .onSuccess { replace(it) }
-                            }
-                            Unit
-                        })
-                        if (thread.rows.size > 1) add("折叠" to { collapsed[thread.rootRpid] = true })
-                    }
-                }
-                if (actions.isNotEmpty()) {
-                    Row(Modifier.padding(start = 22.dp), horizontalArrangement = Arrangement.spacedBy(20.dp)) {
-                        actions.forEach { (label, act) -> TextAction(label, onClick = act) }
-                    }
-                }
-            }
-        }
-        // The whole section is one list item, so the end is noticed by where this row is:
-        // once it scrolls into the window, the next page loads.
-        val screenH = with(LocalDensity.current) { LocalConfiguration.current.screenHeightDp.dp.toPx() }
-        Column(
-            Modifier.fillMaxWidth().padding(vertical = 16.dp).onGloballyPositioned { coords ->
-                if (coords.boundsInWindow().top < screenH && error == null) loadMore()
-            },
-        ) {
-            when {
-                loadingMore -> Meta("评论加载中…")
-                error != null && threads.isNotEmpty() -> TextAction("加载更多评论", onClick = { error = null; lastLoad = 0L; loadMore() })
-                !hasMore && threads.isNotEmpty() -> Meta("没有更多评论了")
-                else -> {}
-            }
-        }
-    }
-}
-
-/** Least time between two comment page requests. */
-private const val COMMENT_PAGE_GAP_MS = 1_500L
-
-private fun commentError(e: Throwable): String =
-    if (e is dev.rubi.core.RubiException.RiskControl) "评论被 B 站风控拦截（请求过于频繁），稍等片刻再重试" else "评论加载失败：${e.message}"
-
-/**
- * One fishbone row. `open[l]` tells whether the ancestor branch at depth `l` continues
- * below this row, so its vertical line is drawn through.
- */
-@Composable
-private fun CommentRow(
-    row: FfiCommentRow,
-    open: BooleanArray,
-    pinnedLabel: Boolean = false,
-    highlight: Boolean = false,
-    onLink: (FfiVideoLink) -> Unit = {},
-) {
-    val c = LocalMetro.current
-    val depth = row.depth.toInt()
-    val indent = if (depth == 0) 0.dp else ((depth - 1) * 20 + 22).dp
-    Column(
-        Modifier.fillMaxWidth()
-            .drawBehind {
-                if (depth == 0) return@drawBehind
-                val stroke = 1.dp.toPx()
-                val tick = 16.dp.toPx()
-                fun x(l: Int) = ((l - 1) * 20 + 6).dp.toPx()
-                for (l in 1 until depth) {
-                    if (l < open.size && open[l]) drawLine(c.spine, Offset(x(l), 0f), Offset(x(l), size.height), stroke)
-                }
-                val xd = x(depth)
-                drawLine(c.spine, Offset(xd, 0f), Offset(xd, if (row.hasLaterSibling) size.height else tick), stroke)
-                drawLine(c.spine, Offset(xd, tick), Offset(xd + 10.dp.toPx(), tick), stroke)
-            }
-            .padding(start = indent, top = 6.dp, bottom = 6.dp),
-        verticalArrangement = Arrangement.spacedBy(2.dp),
-    ) {
-        Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-            if (pinnedLabel) Tag("置顶")
-            if (highlight) Tag("消息")
-            Text(
-                row.name,
-                fontSize = if (depth == 0) 14.sp else 13.sp,
-                fontWeight = FontWeight.SemiBold,
-                color = if (highlight) c.accent else c.fg,
-            )
-            if (row.isUp) Tag("UP")
-            if (row.noteCvid > 0u) Tag("笔记")
-            Meta(formatAge(row.ctime))
-        }
-        // Long comments fold to six lines.
-        var expanded by remember(row.rpid) { mutableStateOf(false) }
-        var overflows by remember(row.rpid) { mutableStateOf(false) }
-        EmoteText(
-            (row.replyTo?.let { "回复 @$it：" } ?: "") + row.text,
-            color = c.fg,
-            fontSize = 14.sp,
-            lineHeight = 21.sp,
-            maxLines = if (expanded) Int.MAX_VALUE else COMMENT_LINES,
-            extra = row.emotes,
-            links = row.videoLinks,
-            onLink = onLink,
-            onTextLayout = { if (!expanded) overflows = it.hasVisualOverflow },
-        )
-        if (overflows || expanded) {
-            Text(
-                if (expanded) "收起" else "展开全文",
-                fontSize = 13.sp,
-                color = c.accent,
-                modifier = Modifier.clickable { expanded = !expanded }.padding(vertical = 2.dp),
-            )
-        }
-        if (row.pictures.isNotEmpty()) CommentPictures(row.pictures)
-        if (row.noteCvid > 0u) {
-            val ctx = LocalContext.current
-            // Rubi has no article reader yet (文字专栏 is phase 2): the full note opens in the browser.
-            TextAction("查看完整笔记", onClick = {
-                ctx.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse("https://www.bilibili.com/read/cv${row.noteCvid}")))
-            })
-        }
-        Meta("赞 ${row.likes}")
     }
 }
 

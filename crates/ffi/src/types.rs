@@ -1,6 +1,6 @@
 //! Flat, FFI-friendly records. Each mirrors a core type with only what the UI draws.
 
-use rubi_api::{PlayUrl, Stream};
+use rubi_api::Stream;
 use rubi_model::{
     ChatMessage, ChatSession, Comment, Danmaku, JumpMark, Notice, ThreadRow, UnreadCounts, VideoCard, VideoRef,
 };
@@ -215,25 +215,16 @@ pub struct FfiPlayback {
     pub headers: Vec<FfiHeader>,
 }
 
-/// Highest qn a non-member account may play (1080P). Above it (1080P+, 1080P60, 4K, HDR,
-/// Dolby, 8K) is 大会员 only, which Rubi does not offer.
-pub const MAX_FREE_QN: u32 = 80;
-
-impl FfiPlayback {
-    pub fn of(cid: u64, p: PlayUrl, headers: Vec<(String, String)>) -> Self {
+impl From<rubi_core::Playback> for FfiPlayback {
+    fn from(p: rubi_core::Playback) -> Self {
         Self {
-            cid,
-            duration_ms: p.duration_ms,
-            quality: p.quality,
-            accept: p
-                .accept
-                .into_iter()
-                .filter(|(qn, _)| *qn <= MAX_FREE_QN)
-                .map(|(qn, label)| FfiQuality { qn, label })
-                .collect(),
-            video: p.video.into_iter().map(Into::into).collect(),
-            audio: p.audio.into_iter().map(Into::into).collect(),
-            headers: headers.into_iter().map(|(name, value)| FfiHeader { name, value }).collect(),
+            cid: p.cid,
+            duration_ms: p.url.duration_ms,
+            quality: p.url.quality,
+            accept: p.url.accept.into_iter().map(|(qn, label)| FfiQuality { qn, label }).collect(),
+            video: p.url.video.into_iter().map(Into::into).collect(),
+            audio: p.url.audio.into_iter().map(Into::into).collect(),
+            headers: p.headers.into_iter().map(|(name, value)| FfiHeader { name, value }).collect(),
         }
     }
 }
@@ -923,6 +914,17 @@ impl FfiDynamic {
             published_at: d.published_at,
             body: FfiDynamicBody::of(d),
             orig: d.orig.as_deref().map(FfiDynamicBody::of),
+        }
+    }
+}
+
+impl From<&rubi_core::ThreadView> for FfiCommentThread {
+    fn from(t: &rubi_core::ThreadView) -> Self {
+        Self {
+            root_rpid: t.root_rpid,
+            rows: t.rows.iter().map(|(row, c)| FfiCommentRow::of(row, c)).collect(),
+            hidden: t.hidden,
+            total_replies: t.total_replies,
         }
     }
 }

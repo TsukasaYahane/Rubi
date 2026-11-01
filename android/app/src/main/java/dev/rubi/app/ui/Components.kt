@@ -108,7 +108,7 @@ fun MetroToggle(on: Boolean) {
 }
 
 /** Geometric stroke icons drawn in code (no icon font, no emoji). */
-enum class Glyph { Search, Mail, Back, More }
+enum class Glyph { Search, Mail, Back, More, Home }
 
 @Composable
 fun GlyphIcon(glyph: Glyph, color: Color = LocalMetro.current.fg, size: Dp = 20.dp) {
@@ -129,6 +129,11 @@ fun GlyphIcon(glyph: Glyph, color: Color = LocalMetro.current.fg, size: Dp = 20.
             Glyph.Back -> { line(13f, 5f, 6f, 12f); line(6f, 12f, 13f, 19f); line(6f, 12f, 20f, 12f) }
             Glyph.More -> listOf(4f, 10.75f, 17.5f).forEach {
                 drawRect(color, Offset(it * s, 11 * s), androidx.compose.ui.geometry.Size(2.5f * s, 2.5f * s))
+            }
+            Glyph.Home -> {
+                line(3f, 11f, 12f, 3.5f); line(12f, 3.5f, 21f, 11f)
+                line(5.5f, 9.5f, 5.5f, 20f); line(18.5f, 9.5f, 18.5f, 20f); line(5.5f, 20f, 18.5f, 20f)
+                line(10f, 20f, 10f, 14f); line(10f, 14f, 14f, 14f); line(14f, 14f, 14f, 20f)
             }
         }
     }

@@ -47,62 +47,22 @@ import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.launch
 
-/**
- * A paged list: `load(page)` returns the items and whether more follow. Shared by history and
- * favourite folders; the next page loads near the end and stops after an error until 重试.
- *
- * Loads run in the screen's scope, not in the effect that asked for them: that effect restarts
- * whenever the list grows, and restarting must not cancel a page half way.
- */
-private class Pager<T>(private val scope: CoroutineScope, private val load: suspend (Int) -> Pair<List<T>, Boolean>) {
-    val items = mutableStateListOf<T>()
-    var page by mutableStateOf(1)
-    var hasMore by mutableStateOf(true)
-    var loading by mutableStateOf(false)
-    var error by mutableStateOf<Throwable?>(null)
-
-    fun more() {
-        if (loading || !hasMore) return
-        loading = true
-        scope.launch {
-            try {
-                val (got, more) = load(page)
-                items.addAll(got)
-                hasMore = more && got.isNotEmpty()
-                page++
-                error = null
-            } catch (e: CancellationException) {
-                throw e
-            } catch (e: Exception) {
-                error = e
-            } finally {
-                loading = false
-            }
-        }
-    }
-}
-
-private fun describe(e: Throwable): String = when (e) {
-    is RubiException.NotLoggedIn -> "登录后可查看"
-    is RubiException.RiskControl -> "被 B 站风控拦截，稍等片刻再重试"
-    else -> "加载失败：${e.message}"
-}
-
 /** Status rows at the end of a list: loading, error with 重试, empty or 没有更多了. */
-private fun LazyListScope.listFooter(nav: Nav, empty: Boolean, loading: Boolean, hasMore: Boolean, error: Throwable?, retry: () -> Unit) {
+private fun <T, C> LazyListScope.listFooter(nav: Nav, paged: Paged<T, C>) {
+    val error = paged.error
     // No key: a keyed footer is what the list would hold on to while the first page is
     // inserted above it, opening the list at the bottom instead of the newest entry.
     item {
         Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
             when {
                 error != null -> {
-                    Meta(describe(error))
+                    Meta(errorText(error))
                     if (error is RubiException.NotLoggedIn) AccentButton("登录") { nav.push(Screen.Login) }
-                    else TextAction("重试", onClick = retry)
+                    else TextAction("重试", onClick = paged::retry)
                 }
-                loading -> Meta("加载中…")
-                empty -> Meta("这里还是空的")
-                !hasMore -> Meta("没有更多了")
+                paged.loading -> Meta("加载中…")
+                paged.items.isEmpty() -> Meta("这里还是空的")
+                paged.ended -> Meta("没有更多了")
             }
         }
     }
@@ -111,17 +71,14 @@ private fun LazyListScope.listFooter(nav: Nav, empty: Boolean, loading: Boolean,
 @Composable
 fun HistoryScreen(app: RubiApp, nav: Nav) {
     val scope = rememberCoroutineScope()
-    var cursor by remember { mutableStateOf<String?>(null) }
     val pager = remember {
-        Pager<FfiHistoryItem>(scope) { _ ->
+        Paged<FfiHistoryItem, String>(scope, key = { it.card.bvid + it.viewedAt }) { cursor ->
             val page = app.core.history(cursor)
-            cursor = page.cursor
-            page.items to (page.cursor != null)
+            Page(page.items, page.cursor)
         }
     }
     val list = rememberLazyListState()
-    val nearEnd by remember { derivedStateOf { (list.layoutInfo.visibleItemsInfo.lastOrNull()?.index ?: 0) >= pager.items.size - 4 } }
-    LaunchedEffect(nearEnd, pager.items.size) { if (nearEnd && pager.error == null) pager.more() }
+    LoadMoreNearEnd(list, pager)
 
     Column(Modifier.fillMaxSize()) {
         PageHeader(nav, "历史记录")
@@ -134,7 +91,7 @@ fun HistoryScreen(app: RubiApp, nav: Nav) {
                 }
                 VideoRow(h.card, "$progress · ${formatAge(h.viewedAt)}") { nav.push(Screen.Player(h.card.bvid, h.card.title)) }
             }
-            listFooter(nav, pager.items.isEmpty(), pager.loading, pager.hasMore, pager.error) { pager.more() }
+            listFooter(nav, pager)
         }
     }
 }
@@ -142,7 +99,7 @@ fun HistoryScreen(app: RubiApp, nav: Nav) {
 @Composable
 fun WatchLaterScreen(app: RubiApp, nav: Nav) {
     val scope = rememberCoroutineScope()
-    val pager = remember { Pager<FfiVideoCard>(scope) { _ -> app.core.watchLaterList() to false } }
+    val pager = remember { Paged<FfiVideoCard, Unit>(scope, key = { it.bvid }) { Page(app.core.watchLaterList(), null) } }
     LaunchedEffect(Unit) { pager.more() }
     Column(Modifier.fillMaxSize()) {
         PageHeader(nav, "稍后再看")
@@ -150,7 +107,7 @@ fun WatchLaterScreen(app: RubiApp, nav: Nav) {
             items(pager.items, key = { it.bvid }) { card ->
                 VideoRow(card, "${formatCount(card.views)} 播放 · ${formatAge(card.pubdate)}") { nav.push(Screen.Player(card.bvid, card.title)) }
             }
-            listFooter(nav, pager.items.isEmpty(), pager.loading, pager.hasMore, pager.error) { pager.more() }
+            listFooter(nav, pager)
         }
     }
 }
@@ -159,7 +116,7 @@ fun WatchLaterScreen(app: RubiApp, nav: Nav) {
 fun FavFoldersScreen(app: RubiApp, nav: Nav) {
     val c = LocalMetro.current
     val scope = rememberCoroutineScope()
-    val pager = remember { Pager<FfiFavFolder>(scope) { _ -> app.core.myFavFolders() to false } }
+    val pager = remember { Paged<FfiFavFolder, Unit>(scope, key = { it.id }) { Page(app.core.myFavFolders(), null) } }
     LaunchedEffect(Unit) { pager.more() }
     Column(Modifier.fillMaxSize()) {
         PageHeader(nav, "收藏夹")
@@ -173,7 +130,7 @@ fun FavFoldersScreen(app: RubiApp, nav: Nav) {
                     Meta("${f.count} 个视频")
                 }
             }
-            listFooter(nav, pager.items.isEmpty(), pager.loading, pager.hasMore, pager.error) { pager.more() }
+            listFooter(nav, pager)
         }
     }
 }
@@ -182,21 +139,21 @@ fun FavFoldersScreen(app: RubiApp, nav: Nav) {
 fun FavFolderScreen(app: RubiApp, nav: Nav, id: ULong, title: String) {
     val scope = rememberCoroutineScope()
     val pager = remember {
-        Pager<FfiVideoCard>(scope) { pn ->
-            val page = app.core.favItems(id, pn.toUInt())
-            page.items to page.hasMore
+        Paged<FfiVideoCard, Int>(scope, key = { it.bvid.ifEmpty { it.aid.toString() } }) { pn ->
+            val at = pn ?: 1
+            val page = app.core.favItems(id, at.toUInt())
+            Page(page.items, if (page.hasMore && page.items.isNotEmpty()) at + 1 else null)
         }
     }
     val list = rememberLazyListState()
-    val nearEnd by remember { derivedStateOf { (list.layoutInfo.visibleItemsInfo.lastOrNull()?.index ?: 0) >= pager.items.size - 4 } }
-    LaunchedEffect(nearEnd, pager.items.size) { if (nearEnd && pager.error == null) pager.more() }
+    LoadMoreNearEnd(list, pager)
     Column(Modifier.fillMaxSize()) {
         PageHeader(nav, title)
         LazyColumn(Modifier.weight(1f), state = list, contentPadding = PaddingValues(bottom = 24.dp)) {
             items(pager.items, key = { it.bvid.ifEmpty { it.aid.toString() } }) { card ->
                 VideoRow(card, "${formatCount(card.views)} 播放 · ${formatAge(card.pubdate)}") { nav.push(Screen.Player(card.bvid, card.title)) }
             }
-            listFooter(nav, pager.items.isEmpty(), pager.loading, pager.hasMore, pager.error) { pager.more() }
+            listFooter(nav, pager)
         }
     }
 }

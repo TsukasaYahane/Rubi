@@ -2,14 +2,59 @@ use std::collections::BTreeMap;
 use std::sync::{Arc, Mutex};
 
 use futures_util::future::join_all;
-use rubi_api::{DanmakuApi, SEGMENT_MS};
+use rubi_api::{DanmakuApi, SEGMENT_MS, SendDanmaku};
 use rubi_filter::danmaku::{DanmakuOptions, DanmakuOutput, process};
 use rubi_model::{CommandDanmaku, Danmaku};
 
-use crate::error::Result;
+use crate::error::{CoreError, Result};
+use crate::ports::RuleSource;
+
+/// A video's danmaku, filtered by the rule table, and sending new ones.
+pub struct Danmakus {
+    api: Arc<dyn DanmakuApi>,
+    rules: Arc<dyn RuleSource>,
+}
+
+impl Danmakus {
+    pub(crate) fn new(api: Arc<dyn DanmakuApi>, rules: Arc<dyn RuleSource>) -> Self {
+        Self { api, rules }
+    }
+
+    /// Everything at once. Prefer [`session`](Self::session) while playing.
+    pub async fn all(&self, cid: u64, duration_ms: u32) -> Result<DanmakuOutput> {
+        load_danmaku(self.api.clone(), cid, duration_ms, &self.options()?).await
+    }
+
+    /// A segment-by-segment loader: the part being watched first, then the rest.
+    pub fn session(&self, cid: u64, duration_ms: u32) -> Result<DanmakuSession> {
+        Ok(DanmakuSession::open(self.api.clone(), cid, duration_ms, self.options()?))
+    }
+
+    /// Posts a danmaku (text trimmed, empty refused) and returns it as it will show.
+    pub async fn send(&self, mut req: SendDanmaku) -> Result<Danmaku> {
+        req.text = req.text.trim().to_owned();
+        if req.text.is_empty() {
+            return Err(CoreError::Invalid("弹幕不能为空".into()));
+        }
+        let id = self.api.send(&req).await?;
+        Ok(Danmaku {
+            id,
+            progress_ms: req.progress_ms,
+            mode: req.mode,
+            font_size: 25,
+            color: req.color,
+            content: req.text,
+            ..Default::default()
+        })
+    }
+
+    fn options(&self) -> Result<DanmakuOptions> {
+        Ok(self.rules.rules().danmaku_options()?)
+    }
+}
 
 /// Loads every danmaku segment of `cid` plus its command danmaku and runs the filters.
-pub async fn load_danmaku(
+async fn load_danmaku(
     api: Arc<dyn DanmakuApi>,
     cid: u64,
     duration_ms: u32,

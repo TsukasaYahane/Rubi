@@ -1,5 +1,7 @@
 package dev.rubi.app.ui
 
+import kotlinx.coroutines.CoroutineScope
+import dev.rubi.core.RubiCore
 import android.content.Intent
 import android.net.Uri
 import androidx.compose.foundation.background
@@ -62,18 +64,33 @@ import kotlinx.coroutines.launch
  * 关注 tab state, kept above the screen so switching tabs does not reload it. `selected` null
  * is 全部 (every followed UP's videos); otherwise one UP's posts of every kind.
  */
-class FollowState {
-    val cards = mutableStateListOf<FfiVideoCard>()
-    val posts = mutableStateListOf<FfiDynamic>()
+class FollowState(private val core: RubiCore, private val scope: CoroutineScope) {
     val ups = mutableStateListOf<FfiFollowedUp>()
     val grid = LazyGridState()
-    var selected by mutableStateOf<FfiFollowedUp?>(null)
-    var next by mutableStateOf<String?>(null)
-    var ended by mutableStateOf(false)
-    var loading by mutableStateOf(false)
-    var error by mutableStateOf<Throwable?>(null)
-    var hidden by mutableStateOf(0u)
     var note by mutableStateOf("")
+    var selected by mutableStateOf<FfiFollowedUp?>(null)
+        private set
+
+    val videos = Paged<FfiVideoCard, String>(scope, key = { it.bvid }) { at ->
+        core.followedFeed(at).let { Page(it.cards, it.next, it.hidden) }
+    }
+    var posts by mutableStateOf(postsOf(0uL))
+        private set
+
+    /** Shows `up`'s posts, or every UP's videos for null. */
+    fun select(up: FfiFollowedUp?) {
+        selected = up
+        if (up != null) posts = postsOf(up.mid).also { it.more() }
+    }
+
+    fun loadUps() {
+        if (ups.isNotEmpty()) return
+        scope.launch { runCatching { core.followedUps() }.onSuccess { ups.addAll(it) } }
+    }
+
+    private fun postsOf(mid: ULong) = Paged<FfiDynamic, String>(scope, key = { it.id }) { at ->
+        core.upDynamics(mid, at).let { Page(it.items, it.next) }
+    }
 }
 
 @OptIn(ExperimentalMaterial3Api::class)
@@ -82,64 +99,23 @@ fun FollowScreen(app: RubiApp, nav: Nav, state: FollowState, dual: Boolean) {
     val c = LocalMetro.current
     val scope = rememberCoroutineScope()
     val ctx = LocalContext.current
-
-    suspend fun load(reset: Boolean) {
-        if (state.loading) return
-        state.loading = true
-        val up = state.selected
-        try {
-            val offset = if (reset) null else state.next
-            if (up == null) {
-                val page = app.core.followedFeed(offset)
-                if (state.selected != null) return
-                if (reset) { state.cards.clear(); state.hidden = 0u }
-                state.cards.addAll(page.cards.filter { n -> state.cards.none { it.bvid == n.bvid } })
-                state.hidden += page.hidden
-                state.next = page.next
-            } else {
-                val page = app.core.upDynamics(up.mid, offset)
-                if (state.selected?.mid != up.mid) return
-                if (reset) state.posts.clear()
-                state.posts.addAll(page.items.filter { n -> state.posts.none { it.id == n.id } })
-                state.next = page.next
-            }
-            state.ended = state.next == null
-            state.error = null
-        } catch (e: CancellationException) {
-            throw e
-        } catch (e: Exception) {
-            state.error = e
-        } finally {
-            state.loading = false
-        }
-    }
+    val all = state.selected == null
+    val shown: Paged<*, String> = if (all) state.videos else state.posts
 
     fun select(up: FfiFollowedUp?) {
         if (state.selected?.mid == up?.mid) {
             scope.launch { state.grid.animateScrollToItem(0) }
             return
         }
-        state.selected = up
-        state.next = null
-        state.ended = false
-        state.error = null
-        state.loading = false
-        scope.launch {
-            state.grid.scrollToItem(0)
-            load(reset = true)
-        }
+        state.select(up)
+        scope.launch { state.grid.scrollToItem(0) }
     }
 
     LaunchedEffect(Unit) {
-        if (state.ups.isEmpty()) runCatching { app.core.followedUps() }.onSuccess { state.ups.addAll(it) }
-        if (state.cards.isEmpty() && state.posts.isEmpty() && state.error == null) load(reset = true)
+        state.loadUps()
+        if (state.videos.items.isEmpty()) state.videos.more()
     }
-    val shown = if (state.selected == null) state.cards.size else state.posts.size
-    val nearEnd by remember { derivedStateOf { (state.grid.layoutInfo.visibleItemsInfo.lastOrNull()?.index ?: 0) >= shown - 3 } }
-    LaunchedEffect(state) {
-        snapshotFlow { nearEnd && shown > 0 && !state.loading && !state.ended && state.error == null }
-            .collect { if (it) load(reset = false) }
-    }
+    if (all) LoadMoreNearEnd(state.grid, state.videos) else LoadMoreNearEnd(state.grid, state.posts)
     LaunchedEffect(Unit) { nav.reselected.collect { if (it == Tab.Follow) state.grid.animateScrollToItem(0) } }
 
     Column(Modifier.fillMaxSize()) {
@@ -155,26 +131,26 @@ fun FollowScreen(app: RubiApp, nav: Nav, state: FollowState, dual: Boolean) {
         UpBar(state.ups, state.selected, onSelect = ::select)
         val status = listOfNotNull(
             state.note.takeIf { it.isNotEmpty() },
-            "已过滤 ${state.hidden}".takeIf { state.hidden > 0u && state.selected == null },
+            "已过滤 ${state.videos.hidden}".takeIf { state.videos.hidden > 0u && all },
         ).joinToString(" · ")
         if (status.isNotEmpty()) Meta(status, Modifier.padding(horizontal = 16.dp))
-        val isEmpty = shown == 0
-        PullToRefreshBox(isRefreshing = state.loading && !isEmpty, onRefresh = { scope.launch { load(reset = true) } }) {
+        val isEmpty = shown.items.isEmpty()
+        PullToRefreshBox(isRefreshing = shown.loading && !isEmpty, onRefresh = { shown.reset() }) {
             LazyVerticalGrid(
                 // One UP's posts read top to bottom; 全部 follows the home layout.
-                columns = GridCells.Fixed(if (dual && state.selected == null) 2 else 1),
+                columns = GridCells.Fixed(if (dual && all) 2 else 1),
                 state = state.grid,
                 contentPadding = PaddingValues(start = 16.dp, end = 16.dp, top = 8.dp, bottom = 28.dp),
                 horizontalArrangement = Arrangement.spacedBy(12.dp),
-                verticalArrangement = Arrangement.spacedBy(if (dual && state.selected == null) 22.dp else 28.dp),
+                verticalArrangement = Arrangement.spacedBy(if (dual && all) 22.dp else 28.dp),
                 modifier = Modifier.fillMaxSize(),
             ) {
-                if (state.selected == null) {
-                    items(state.cards, key = { it.bvid }) { card ->
+                if (all) {
+                    items(state.videos.items, key = { it.bvid }) { card ->
                         VideoCardView(card, big = !dual, onOpen = { nav.push(Screen.Player(card.bvid, card.title)) })
                     }
                 } else {
-                    items(state.posts, key = { it.id }) { post ->
+                    items(state.posts.items, key = { it.id }) { post ->
                         DynamicCard(post, onOpenVideo = { nav.push(Screen.Player(it.bvid, it.title)) }, onOpenLink = { url ->
                             ctx.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(url)))
                         })
@@ -182,19 +158,19 @@ fun FollowScreen(app: RubiApp, nav: Nav, state: FollowState, dual: Boolean) {
                 }
                 item(span = { GridItemSpan(maxLineSpan) }) {
                     Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                        val e = state.error
+                        val e = shown.error
                         when {
                             e is RubiException.NotLoggedIn -> {
                                 Meta("登录后可查看关注的 UP 的动态")
                                 AccentButton("登录") { nav.push(Screen.Login) }
                             }
                             e != null -> {
-                                Meta("加载失败：${e.message}")
-                                TextAction("重试", onClick = { state.error = null; scope.launch { load(reset = isEmpty) } })
+                                Meta(errorText(e))
+                                TextAction("重试", onClick = shown::retry)
                             }
-                            state.loading -> Meta("加载中…")
-                            isEmpty -> Meta(if (state.selected == null) "关注的 UP 最近没有发布视频" else "这位 UP 最近没有动态")
-                            state.ended -> Meta("没有更多了")
+                            shown.loading -> Meta("加载中…")
+                            isEmpty -> Meta(if (all) "关注的 UP 最近没有发布视频" else "这位 UP 最近没有动态")
+                            shown.ended -> Meta("没有更多了")
                         }
                     }
                 }

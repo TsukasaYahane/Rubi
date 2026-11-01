@@ -1,66 +1,65 @@
+//! The composition root: the only place that knows the concrete API clients and the store.
+//! It wires every service once and hands them out; callers talk to one service at a time and
+//! never reach through one to another.
+
 use std::path::Path;
 use std::sync::Arc;
 
 use rubi_api::{
-    ActionApi, AuthApi, ChatApi, CommentApi, CommentSort, DEFAULT_PACKAGES, DanmakuApi, DynamicApi, Emote, EmoteApi,
-    FeedApi, HotWord, HttpClient, LibraryApi, NoticeApi, SearchApi, SearchOrder, Session, SpaceApi, SteinApi, Triple,
-    UpOrder, VideoApi, WebAccount, WebAuth, WebComment, WebDanmaku, WebDynamic, WebEmote, WebFeed, WebMessages,
-    WebSearch, WebSpace, WebStein, WebVideo,
-};
-use rubi_model::{
-    ChatSession, Comment, Dynamic, FeedbackEvent, ItemRef, Signal, UpProfile, VideoCard, VideoRef, find_video_ref,
-    now_secs,
+    ActionApi, ChatApi, FeedApi, HttpClient, LibraryApi, NoticeApi, Session, WebAccount, WebAuth, WebComment,
+    WebDanmaku, WebDynamic, WebEmote, WebFeed, WebMessages, WebSearch, WebSpace, WebStein, WebVideo,
 };
 use rubi_recommend::Source;
 use rubi_store::SqliteStore;
-use tokio::sync::Mutex as AsyncMutex;
 
-use crate::error::{CoreError, Result};
+use crate::account::Account;
+use crate::actions::Actions;
+use crate::comments::Comments;
+use crate::danmaku::Danmakus;
+use crate::discover::Discover;
+use crate::emotes::Emotes;
+use crate::error::Result;
 use crate::feed::{FeedService, Seeded};
-use crate::playlist::Playlist;
-use crate::social::{self, FilteredComments};
+use crate::following::Following;
+use crate::home::Home;
+use crate::library::Library;
+use crate::messages::Messages;
+use crate::playlist::{Playlist, Playlists};
+use crate::ports::{FeedbackSink, RuleSource};
+use crate::preferences::Preferences;
 use crate::sources::{
     BiliRecommendSource, FollowedUpsSource, PopularSource, PreferredZoneSource, RankingSource, RelatedSource,
 };
+use crate::space::Space;
+use crate::stein::Stein;
+use crate::videos::{CardCache, Videos};
 
-/// Following lists are fetched at most this many pages (50 per page).
-const MAX_FOLLOWING_PAGES: u32 = 40;
-
-/// A page of [`App::up_videos`].
-#[derive(Debug, Clone, Default)]
-pub struct UpUploads {
-    pub items: Vec<VideoCard>,
-    pub total: u32,
-    pub hidden_charging: usize,
-    pub has_more: bool,
+/// Every service, built once per process.
+pub struct Services {
+    pub account: Arc<Account>,
+    pub home: Home,
+    pub videos: Arc<Videos>,
+    pub danmaku: Danmakus,
+    pub stein: Stein,
+    pub comments: Comments,
+    pub discover: Discover,
+    pub following: Following,
+    pub space: Space,
+    pub actions: Actions,
+    pub library: Library,
+    pub messages: Messages,
+    pub playlists: Playlists,
+    pub preferences: Preferences,
+    pub emotes: Emotes,
 }
 
-/// Every service, wired once. Hold one per process.
-pub struct App {
-    pub http: Arc<HttpClient>,
-    pub auth: Arc<dyn AuthApi>,
-    pub feed_api: Arc<dyn FeedApi>,
-    pub video: Arc<dyn VideoApi>,
-    pub danmaku: Arc<dyn DanmakuApi>,
-    pub comments: Arc<dyn CommentApi>,
-    pub search: Arc<dyn SearchApi>,
-    pub notices: Arc<dyn NoticeApi>,
-    pub chat: Arc<dyn ChatApi>,
-    pub actions: Arc<dyn ActionApi>,
-    pub library: Arc<dyn LibraryApi>,
-    pub emote: Arc<dyn EmoteApi>,
-    pub space: Arc<dyn SpaceApi>,
-    pub stein: Arc<dyn SteinApi>,
-    pub dynamics: Arc<dyn DynamicApi>,
-    pub feed: FeedService<SqliteStore>,
-    pub playlist: Playlist<SqliteStore>,
-    emotes: AsyncMutex<Option<Arc<Vec<Emote>>>>,
-}
-
-impl App {
+impl Services {
     /// Opens (or creates) the database at `db_path` and builds all services.
     pub fn open(db_path: impl AsRef<Path>, session: Session) -> Result<Self> {
         let http = Arc::new(HttpClient::new(session)?);
+        let store = Arc::new(SqliteStore::open(db_path)?);
+        let cards = Arc::new(CardCache::default());
+
         let feed_api: Arc<dyn FeedApi> = Arc::new(WebFeed::new(http.clone()));
         let related = Arc::new(RelatedSource::new(feed_api.clone()));
         let zones = Arc::new(PreferredZoneSource::new(feed_api.clone()));
@@ -72,219 +71,51 @@ impl App {
             related.clone(),
             zones.clone(),
         ];
-        let store = Arc::new(SqliteStore::open(db_path)?);
-        let playlist = Playlist::new(store.clone());
-        let feed = FeedService::new(store, sources, Seeded { related: Some(related), zones: Some(zones) })?;
+        let feed =
+            Arc::new(FeedService::new(store.clone(), sources, Seeded { related: Some(related), zones: Some(zones) })?);
+        let rules: Arc<dyn RuleSource> = feed.clone();
+        let feedback: Arc<dyn FeedbackSink> = feed.clone();
+
+        let web_account = Arc::new(WebAccount::new(http.clone()));
+        let actions_api: Arc<dyn ActionApi> = web_account.clone();
+        let library_api: Arc<dyn LibraryApi> = web_account;
         let messages = Arc::new(WebMessages::new(http.clone()));
-        let account = Arc::new(WebAccount::new(http.clone()));
+        let notices: Arc<dyn NoticeApi> = messages.clone();
+        let chat: Arc<dyn ChatApi> = messages;
+
+        let account = Arc::new(Account::new(http.clone(), Arc::new(WebAuth::new(http.clone()))));
+        let videos = Arc::new(Videos::new(Arc::new(WebVideo::new(http.clone())), cards.clone()));
+        let playlist = Arc::new(Playlist::new(store));
+
         Ok(Self {
-            auth: Arc::new(WebAuth::new(http.clone())),
-            video: Arc::new(WebVideo::new(http.clone())),
-            danmaku: Arc::new(WebDanmaku::new(http.clone())),
-            comments: Arc::new(WebComment::new(http.clone())),
-            search: Arc::new(WebSearch::new(http.clone())),
-            notices: messages.clone(),
-            chat: messages,
-            actions: account.clone(),
-            library: account,
-            emote: Arc::new(WebEmote::new(http.clone())),
-            space: Arc::new(WebSpace::new(http.clone())),
-            stein: Arc::new(WebStein::new(http.clone())),
-            dynamics: Arc::new(WebDynamic::new(http.clone())),
-            feed_api,
-            http,
-            feed,
-            playlist,
-            emotes: AsyncMutex::new(None),
+            home: Home::new(feed.clone(), videos.clone(), cards.clone()),
+            danmaku: Danmakus::new(Arc::new(WebDanmaku::new(http.clone())), rules.clone()),
+            stein: Stein::new(Arc::new(WebStein::new(http.clone()))),
+            comments: Comments::new(Arc::new(WebComment::new(http.clone())), rules.clone()),
+            discover: Discover::new(
+                feed_api.clone(),
+                Arc::new(WebSearch::new(http.clone())),
+                rules.clone(),
+                feedback.clone(),
+                cards.clone(),
+            ),
+            following: Following::new(
+                feed_api,
+                Arc::new(WebDynamic::new(http.clone())),
+                library_api.clone(),
+                rules.clone(),
+                feedback.clone(),
+                cards.clone(),
+            ),
+            space: Space::new(Arc::new(WebSpace::new(http.clone())), cards.clone()),
+            actions: Actions::new(actions_api.clone(), videos.clone(), feedback),
+            library: Library::new(library_api, actions_api, account.clone(), videos.clone(), cards.clone()),
+            messages: Messages::new(notices, chat, rules),
+            playlists: Playlists::new(playlist.clone(), videos.clone(), cards),
+            preferences: Preferences::new(feed, playlist),
+            emotes: Emotes::new(Arc::new(WebEmote::new(http))),
+            account,
+            videos,
         })
-    }
-
-    /// The default emote set (`[doge]` → image url), fetched once per process.
-    pub async fn emotes(&self) -> Result<Arc<Vec<Emote>>> {
-        let mut cached = self.emotes.lock().await;
-        if let Some(e) = cached.as_ref() {
-            return Ok(e.clone());
-        }
-        let list = Arc::new(self.emote.packages(DEFAULT_PACKAGES).await?);
-        *cached = Some(list.clone());
-        Ok(list)
-    }
-
-    /// 热门 list with ads and blocked items removed.
-    pub async fn popular(&self, pn: u32) -> Result<Vec<VideoCard>> {
-        let cards = self.feed_api.popular(pn.max(1), 20).await?;
-        self.filter_list(cards)
-    }
-
-    /// 排行 list with ads and blocked items removed.
-    pub async fn ranking(&self) -> Result<Vec<VideoCard>> {
-        let cards = self.feed_api.ranking(0).await?;
-        self.filter_list(cards)
-    }
-
-    /// One page of videos from followed UPs (关注动态), filtered by the rule table like every
-    /// list; also returns the next page's offset and how many this page hid.
-    pub async fn followed_feed(&self, offset: Option<&str>) -> Result<(Vec<VideoCard>, Option<String>, usize)> {
-        let (cards, next) = self.feed_api.followed_videos(offset).await?;
-        let total = cards.len();
-        let kept = self.filter_list(cards)?;
-        let hidden = total - kept.len();
-        Ok((kept, next, hidden))
-    }
-
-    /// One UP's posts; videos among them go through the rule table like any list (a blocked
-    /// video is dropped, other kinds are kept). Also returns the next offset.
-    pub async fn up_dynamics(&self, mid: u64, offset: Option<&str>) -> Result<(Vec<Dynamic>, Option<String>)> {
-        let (items, next) = self.dynamics.up_dynamics(mid, offset).await?;
-        let pipeline = self.feed.settings().rules.card_pipeline(None, now_secs)?;
-        let kept =
-            items.into_iter().filter(|d| d.video.as_ref().is_none_or(|v| !pipeline.judge(v).is_blocked())).collect();
-        Ok((kept, next))
-    }
-
-    /// Videos related to `bvid`, filtered by the rule table (ads, blocked UPs, keywords…).
-    pub async fn related(&self, bvid: &str) -> Result<Vec<VideoCard>> {
-        let cards = self.feed_api.related(bvid).await?;
-        self.filter_list(cards)
-    }
-
-    fn filter_list(&self, cards: Vec<VideoCard>) -> Result<Vec<VideoCard>> {
-        let pipeline = self.feed.settings().rules.card_pipeline(None, now_secs)?;
-        Ok(cards.into_iter().filter(|c| !pipeline.judge(c).is_blocked()).collect())
-    }
-
-    fn signal(&self, card: &VideoCard, signal: Signal) -> Result<()> {
-        self.feed.record(FeedbackEvent { signal, item: Some(ItemRef::of(card)), at: now_secs() })
-    }
-
-    // ----- account actions: each also feeds the recommendation profile -----
-
-    pub async fn like(&self, card: &VideoCard, on: bool) -> Result<()> {
-        self.actions.like(&card.bvid, on).await?;
-        if on { self.signal(card, Signal::Like) } else { Ok(()) }
-    }
-
-    pub async fn coin(&self, card: &VideoCard, count: u32, also_like: bool) -> Result<()> {
-        self.actions.coin(&card.bvid, count, also_like).await?;
-        self.signal(card, Signal::Coin)
-    }
-
-    /// 一键三连; each part that succeeded feeds the profile.
-    pub async fn triple(&self, card: &VideoCard) -> Result<Triple> {
-        let t = self.actions.triple(&card.bvid).await?;
-        let done = [(t.liked, Signal::Like), (t.coined, Signal::Coin), (t.favorited, Signal::Favorite)];
-        for (_, s) in done.into_iter().filter(|(ok, _)| *ok) {
-            self.signal(card, s)?;
-        }
-        Ok(t)
-    }
-
-    pub async fn favorite(&self, card: &VideoCard, add: &[u64], remove: &[u64]) -> Result<()> {
-        self.actions.set_fav(card.aid, add, remove).await?;
-        if add.is_empty() { Ok(()) } else { self.signal(card, Signal::Favorite) }
-    }
-
-    pub async fn watch_later(&self, card: &VideoCard) -> Result<()> {
-        self.actions.watch_later(&card.bvid).await.map_err(Into::into)
-    }
-
-    pub async fn follow(&self, card: &VideoCard, on: bool) -> Result<()> {
-        self.actions.follow(card.owner.mid, on).await?;
-        if on { self.signal(card, Signal::Follow) } else { Ok(()) }
-    }
-
-    /// Follow / unfollow from the UP's page, where there is no video to attach.
-    pub async fn follow_mid(&self, mid: u64, name: &str, on: bool) -> Result<()> {
-        self.actions.follow(mid, on).await?;
-        if !on {
-            return Ok(());
-        }
-        let item = ItemRef { up_mid: mid, title: name.to_owned(), ..ItemRef::of(&VideoCard::default()) };
-        self.feed.record(FeedbackEvent { signal: Signal::Follow, item: Some(item), at: now_secs() })
-    }
-
-    pub async fn up_profile(&self, mid: u64) -> Result<UpProfile> {
-        Ok(self.space.profile(mid).await?)
-    }
-
-    /// The BV id a video pointer stands for: av numbers are looked up, short links followed
-    /// (one hop, the target page itself is never fetched).
-    pub async fn resolve_video(&self, video: VideoRef) -> Result<String> {
-        match video {
-            VideoRef::Bvid(bvid) => Ok(bvid),
-            VideoRef::Aid(aid) => Ok(self.video.bvid_of(aid).await?),
-            VideoRef::Short(url) => {
-                let target = self.video.expand_short(&url).await?.unwrap_or_default();
-                match find_video_ref(&target) {
-                    Some(VideoRef::Bvid(bvid)) => Ok(bvid),
-                    Some(VideoRef::Aid(aid)) => Ok(self.video.bvid_of(aid).await?),
-                    _ => Err(CoreError::Invalid(format!(
-                        "短链指向的不是视频：{}",
-                        if target.is_empty() { &url } else { &target }
-                    ))),
-                }
-            }
-        }
-    }
-
-    /// One page of an UP's uploads without 充电专属 videos; also returns the total count and
-    /// how many charging-only videos this page hid.
-    pub async fn up_videos(&self, mid: u64, pn: u32, order: UpOrder) -> Result<UpUploads> {
-        let page = self.space.videos(mid, pn, order).await?;
-        let fetched = page.items.len();
-        let items: Vec<VideoCard> = page.items.into_iter().filter(|v| !v.charging).map(|v| v.card).collect();
-        Ok(UpUploads { hidden_charging: fetched - items.len(), has_more: page.has_more, items, total: page.total })
-    }
-
-    /// Copies the account's following list into the follow factor. Returns how many.
-    pub async fn sync_followings(&self) -> Result<usize> {
-        let mut all = Vec::new();
-        for pn in 1..=MAX_FOLLOWING_PAGES {
-            let (mids, total) = self.library.followings(pn).await?;
-            let done = mids.is_empty();
-            all.extend(mids);
-            if done || all.len() as u32 >= total {
-                break;
-            }
-        }
-        all.sort_unstable();
-        all.dedup();
-        self.feed.set_followed(&all)?;
-        Ok(all.len())
-    }
-
-    // ----- search, comments, message center -----
-
-    /// Searches videos, drops ads and blocked items, and records the search term.
-    pub async fn search_videos(&self, keyword: &str, page: u32, order: SearchOrder) -> Result<(Vec<VideoCard>, usize)> {
-        let cards = self.search.videos(keyword, page, order).await?;
-        let pipeline = self.feed.settings().rules.card_pipeline(None, now_secs)?;
-        let before = cards.len();
-        let kept: Vec<VideoCard> = cards.into_iter().filter(|c| !pipeline.judge(c).is_blocked()).collect();
-        let hidden = before - kept.len();
-        self.feed.record(FeedbackEvent {
-            signal: Signal::Search { term: keyword.to_owned() },
-            item: None,
-            at: now_secs(),
-        })?;
-        Ok((kept, hidden))
-    }
-
-    pub async fn hot_words(&self, limit: u32) -> Result<(Vec<HotWord>, usize)> {
-        let words = self.search.hot_words(limit).await?;
-        Ok(social::filter_hot_words(&self.feed.settings().rules, words))
-    }
-
-    pub async fn comments(&self, aid: u64, sort: CommentSort, offset: Option<&str>) -> Result<FilteredComments> {
-        social::load_comments(self.comments.as_ref(), &self.feed.settings().rules, aid, sort, offset).await
-    }
-
-    pub async fn thread(&self, aid: u64, root: u64, max_pages: u32) -> Result<Vec<Comment>> {
-        social::load_thread(self.comments.as_ref(), aid, root, max_pages).await
-    }
-
-    pub async fn chat_sessions(&self) -> Result<(Vec<ChatSession>, usize)> {
-        let sessions = self.chat.sessions().await?;
-        Ok(social::filter_sessions(&self.feed.settings().rules, sessions))
     }
 }

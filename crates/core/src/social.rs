@@ -1,4 +1,4 @@
-//! Comments, search, message center and chat, with the rule table applied.
+//! The rule table applied to comments, hot words and chats; used by the services.
 
 use rubi_api::{CommentApi, CommentPage, CommentSort, HotWord};
 use rubi_filter::{RuleSet, Target};
@@ -10,14 +10,14 @@ use crate::error::Result;
 const THREAD_PAGE: u32 = 20;
 
 #[derive(Debug, Clone, Default)]
-pub struct FilteredComments {
+pub(crate) struct FilteredComments {
     pub page: CommentPage,
     /// Pinned comments removed by the 置顶带货 rule.
     pub hidden_pinned: usize,
 }
 
 /// One page of root comments; pinned 带货 comments are dropped.
-pub async fn load_comments(
+pub(crate) async fn load_comments(
     api: &dyn CommentApi,
     rules: &RuleSet,
     aid: u64,
@@ -33,7 +33,7 @@ pub async fn load_comments(
 
 /// Every reply under `root` (up to `max_pages` pages), flat. Feed it to
 /// [`rubi_model::flatten_thread`] to get the fishbone rows.
-pub async fn load_thread(api: &dyn CommentApi, aid: u64, root: u64, max_pages: u32) -> Result<Vec<Comment>> {
+pub(crate) async fn load_thread(api: &dyn CommentApi, aid: u64, root: u64, max_pages: u32) -> Result<Vec<Comment>> {
     let mut all = Vec::new();
     for pn in 1..=max_pages.max(1) {
         let (replies, total) = api.replies(aid, root, pn, THREAD_PAGE).await?;
@@ -46,7 +46,7 @@ pub async fn load_thread(api: &dyn CommentApi, aid: u64, root: u64, max_pages: u
     Ok(all)
 }
 
-pub fn filter_hot_words(rules: &RuleSet, words: Vec<HotWord>) -> (Vec<HotWord>, usize) {
+pub(crate) fn filter_hot_words(rules: &RuleSet, words: Vec<HotWord>) -> (Vec<HotWord>, usize) {
     let pipeline = rules.raw_pipeline(Target::HotWord);
     let before = words.len();
     let kept: Vec<HotWord> = words.into_iter().filter(|w| !pipeline.judge(&w.raw).is_blocked()).collect();
@@ -54,17 +54,12 @@ pub fn filter_hot_words(rules: &RuleSet, words: Vec<HotWord>) -> (Vec<HotWord>, 
     (kept, hidden)
 }
 
-pub fn filter_sessions(rules: &RuleSet, sessions: Vec<ChatSession>) -> (Vec<ChatSession>, usize) {
+pub(crate) fn filter_sessions(rules: &RuleSet, sessions: Vec<ChatSession>) -> (Vec<ChatSession>, usize) {
     let pipeline = rules.raw_pipeline(Target::Notice);
     let before = sessions.len();
     let kept: Vec<ChatSession> = sessions.into_iter().filter(|s| !pipeline.judge(&s.raw).is_blocked()).collect();
     let hidden = before - kept.len();
     (kept, hidden)
-}
-
-/// Whether a comment would be hidden by the pinned-comment rules (for previews).
-pub fn is_blocked_pinned(rules: &RuleSet, c: &Comment) -> bool {
-    rules.raw_pipeline(Target::Comment).judge(&c.raw).is_blocked()
 }
 
 #[cfg(test)]

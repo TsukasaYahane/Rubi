@@ -9,6 +9,22 @@ use rubi_api::{SteinApi, SteinChoice, SteinNode};
 
 use crate::error::Result;
 
+/// Opens interactive videos.
+pub struct Stein {
+    api: Arc<dyn SteinApi>,
+}
+
+impl Stein {
+    pub(crate) fn new(api: Arc<dyn SteinApi>) -> Self {
+        Self { api }
+    }
+
+    /// The story starting at part `cid`; `None` for ordinary videos.
+    pub async fn open(&self, bvid: &str, cid: u64) -> Result<Option<SteinSession>> {
+        SteinSession::open(self.api.clone(), bvid, cid).await
+    }
+}
+
 /// One interactive video being played.
 pub struct SteinSession {
     api: Arc<dyn SteinApi>,
@@ -24,7 +40,7 @@ struct State {
 
 impl SteinSession {
     /// `None` when the video is not interactive.
-    pub async fn open(api: Arc<dyn SteinApi>, bvid: &str, cid: u64) -> Result<Option<Self>> {
+    async fn open(api: Arc<dyn SteinApi>, bvid: &str, cid: u64) -> Result<Option<Self>> {
         let Some(graph_version) = api.graph_version(bvid, cid).await? else { return Ok(None) };
         let node = api.node(bvid, graph_version, None).await?;
         let vars = node.vars.iter().map(|v| (v.id.clone(), v.value)).collect();

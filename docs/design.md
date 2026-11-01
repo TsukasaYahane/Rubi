@@ -45,7 +45,9 @@
 └──────────────────────┬─────────────────────────┘
                        │ UniFFI (async → suspend)
 ┌──────────────────────┴─────────────────────────┐
-│ ffi      唯一门面，组装依赖（Composition Root）   │
+│ ffi      门面：只做类型转换，按领域分模块         │
+├────────────────────────────────────────────────┤
+│ core     领域服务 + 组装根（Services::open）     │
 ├──────────┬──────────┬────────────┬─────────────┤
 │ api      │ filter   │ recommend  │ store       │
 │ 协议/签名 │ 规则管线  │ 来源+因子   │ SQLite 仓储  │
@@ -59,7 +61,10 @@
 - **接口隔离**：`api` 按领域暴露 trait（`AuthApi`、`FeedApi`、`VideoApi`、`DanmakuApi`、`SearchApi`、`UserApi`、`LiveApi`…），不做大一统客户端。
 - **开闭 + 合成复用**：过滤与打分都以小 trait 实现单元，经组合器拼装；新增能力 = 新增实现，不改旧代码。不使用继承式设计。
 - **依赖倒置 + 迪米特**：`recommend` 只依赖 `Source` / `Factor` 抽象，不认识具体 API；Kotlin 只依赖 `ffi` 生成接口。
-- 依赖一律构造函数注入（trait 对象或泛型），只在 `ffi` 组装。
+- 依赖一律构造函数注入（trait 对象或泛型），只在 `core::Services::open` 组装。
+- **单一职责 + 功能私有化**（2026-11-01 重构）：`core` 按领域拆成独立服务——`Account`、`Home`、`Videos`、`Danmakus`、`Stein`、`Comments`、`Discover`、`Following`、`Space`、`Actions`、`Library`、`Messages`、`Playlists`（含听视频队列）、`Preferences`（设置与备份）、`Emotes`。每个服务字段私有，只持有自己需要的 API trait；服务之间只经窄接口协作：`RuleSource`（取规则表）、`FeedbackSink`（写反馈信号），由 `FeedService` 实现，服务看不到它的其余部分。卡片缓存 `CardCache`、评论根缓存都有上限。
+- **门面不含业务**：`ffi` 只把 `Ffi*` 记录与核心类型互转；清晰度上限（1080P）、弹幕空文本、楼中楼分页、听视频的上一首 / 下一首规则都在 `core`，Android 与将来的 iOS 共用。CLI 同样只调用服务。
+- **Android 端**：页面不自写分页，统一用 `Paged`（`ui/Paging.kt`，游标泛型、去重、错误重试、重置时丢弃旧请求）；播放页拆为页面本身、`PlayerEffects`（小窗与后台、观看心跳、列表连播、弹幕分段加载）、`CommentSection`、`RelatedList`；听视频的选曲交给 core，`AudioQueue` 只负责播放。
 
 ### 3.2 Cargo workspace
 
@@ -70,8 +75,8 @@
 | `recommend` | `trait Source`、`trait Factor`、打分器、候选池调度、推荐解释 |
 | `store` | SQLite（候选池、反馈信号、画像、规则、设置），Repository trait |
 | `model` | 共享领域类型（视频卡片、弹幕、反馈信号、评论树），无 I/O；让 `filter` / `recommend` 不依赖 `api` |
-| `core` | 组装根：把 API 适配成推荐来源，FeedService、弹幕加载、导出导入 |
-| `ffi` | UniFFI 门面，包装 `core`（待 Android 工具链就绪后加入） |
+| `core` | 领域服务（见 3.1）与组装根 `Services`；把 API 适配成推荐来源，FeedService、弹幕加载、导出导入 |
+| `ffi` | UniFFI 门面：一个 `RubiCore` 对象持有各服务，按领域分文件导出，只做类型转换 |
 | `cli` | 命令行调试工具（二进制名 `rubi`）：终端查看自建推荐流、打分明细、过滤日志、弹幕处理、扫码登录 |
 
 构建：cargo-ndk 交叉编译，Gradle 任务自动调用。
