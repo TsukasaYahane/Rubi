@@ -24,6 +24,7 @@ const RELATION_MODIFY: &str = "https://api.bilibili.com/x/relation/modify";
 const ARCHIVE_RELATION: &str = "https://api.bilibili.com/x/web-interface/archive/relation";
 const HISTORY: &str = "https://api.bilibili.com/x/web-interface/history/cursor";
 const FOLLOWINGS: &str = "https://api.bilibili.com/x/relation/followings";
+const HEARTBEAT: &str = "https://api.bilibili.com/x/click-interface/web/heartbeat";
 
 #[async_trait]
 pub trait ActionApi: Send + Sync {
@@ -49,6 +50,9 @@ pub trait LibraryApi: Send + Sync {
     async fn fav_items(&self, folder_id: u64, pn: u32) -> Result<(Vec<VideoCard>, bool)>;
     /// Mids the user follows, one page of 50; returns the total too.
     async fn followings(&self, pn: u32) -> Result<(Vec<u64>, u32)>;
+    /// Playback heartbeat: puts the video in 历史记录 with its progress. `play_type` is 1 when
+    /// playback starts, 0 while playing, 2 on pause / leaving. Times in seconds.
+    async fn heartbeat(&self, aid: u64, cid: u64, played_s: u64, realtime_s: u64, play_type: u8) -> Result<()>;
 }
 
 /// What a 一键三连 request achieved; each part can fail on its own (e.g. coins run out).
@@ -228,6 +232,15 @@ impl LibraryApi for WebAccount {
             .await?;
         let items = d["medias"].as_array().map(|a| a.iter().map(fav_item_of).collect()).unwrap_or_default();
         Ok((items, d["has_more"].as_bool().unwrap_or(false)))
+    }
+
+    async fn heartbeat(&self, aid: u64, cid: u64, played_s: u64, realtime_s: u64, play_type: u8) -> Result<()> {
+        let mid = self.my_mid()?;
+        let form = params![
+            "aid" => aid, "cid" => cid, "mid" => mid, "played_time" => played_s, "realtime" => realtime_s,
+            "start_ts" => rubi_model::now_secs() - realtime_s as i64, "type" => 3, "dt" => 2, "play_type" => play_type,
+        ];
+        self.http.post_form(HEARTBEAT, form).await.map(|_| ())
     }
 
     async fn followings(&self, pn: u32) -> Result<(Vec<u64>, u32)> {

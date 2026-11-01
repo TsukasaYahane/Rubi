@@ -46,10 +46,11 @@ import kotlinx.coroutines.withContext
 @Composable
 fun MeScreen(app: RubiApp, nav: Nav) {
     val c = LocalMetro.current
-    var account by remember { mutableStateOf<FfiAccount?>(null) }
+    val account by app.account
     var note by remember { mutableStateOf("") }
     var backup by remember { mutableStateOf(false) }
-    LaunchedEffect(nav.stack.size) { account = runCatching { app.core.account() }.getOrNull() }
+    // Re-read after login / logout (the stack changes); what is known shows meanwhile.
+    LaunchedEffect(nav.stack.size) { app.refreshAccount() }
 
     val list = rememberLazyListState()
     LaunchedEffect(Unit) { nav.reselected.collect { if (it == Tab.Me) list.animateScrollToItem(0) } }
@@ -61,7 +62,7 @@ fun MeScreen(app: RubiApp, nav: Nav) {
                 if (a?.loggedIn == true) {
                     Text(a.name, fontSize = 24.sp, fontWeight = FontWeight.SemiBold, color = c.fg)
                     Meta("mid ${a.mid} · 凭证经 Keystore 加密仅存本机")
-                    TextAction("退出登录", onClick = { app.logout(); account = null }, dim = true)
+                    TextAction("退出登录", onClick = { app.logout() }, dim = true)
                 } else {
                     Text("游客", fontSize = 24.sp, fontWeight = FontWeight.SemiBold, color = c.fg)
                     Meta("未登录 · 历史与推荐画像仅保存在本机")
@@ -73,6 +74,7 @@ fun MeScreen(app: RubiApp, nav: Nav) {
             "历史记录" to { nav.push(Screen.History) },
             "收藏夹" to { nav.push(Screen.FavFolders) },
             "稍后再看" to { nav.push(Screen.WatchLater) },
+            "播放列表" to { nav.push(Screen.Playlist) },
             "被过滤内容" to { nav.push(Screen.Filtered) },
             "设置" to { nav.push(Screen.Settings) },
             "备份与迁移" to { backup = true },

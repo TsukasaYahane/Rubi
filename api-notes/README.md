@@ -27,7 +27,7 @@
 | `x/web-interface/ranking/v2` | ✅ | 2026-10-30 游客实测，无需 WBI |
 | `x/web-interface/archive/related` | 🔶 | |
 | `x/web-interface/dynamic/region` | ⛔ | 2026-10-31 已下线：任何 rid 均返回 -404「啥都木有」；偏好分区源已停用 |
-| `x/web-interface/region/feed/rcmd` | 🔶 | 替代接口：`from_region` 只认 v2 主分区号（如 1005），旧 tid 与 v2 子分区返回 -400；条目无分区字段，封面为 `http://` |
+| `x/web-interface/region/feed/rcmd` | ✅ | 2026-11-01 起用于偏好分区：`from_region` 只认 v2 主分区号（1001–1031，取自网页频道配置 `channelConfigMap`），旧 tid 与 v2 子分区返回 -400；条目 UP 主字段为 `author`，封面为 `http://` |
 | `x/polymer/web-dynamic/v1/feed/all?type=video` | 🔶 | 关注 UP 投稿，需登录 |
 
 ## 广告 / 推广识别字段（见 `crates/filter/src/default_rules.toml`）

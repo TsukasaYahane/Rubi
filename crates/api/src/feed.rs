@@ -1,19 +1,20 @@
 use std::sync::Arc;
 
 use async_trait::async_trait;
-use rubi_model::{SourceKind, VideoCard};
+use rubi_model::{Owner, SourceKind, VideoCard};
 use serde_json::Value;
 
 use crate::error::Result;
 use crate::http::HttpClient;
 use crate::params;
-use crate::parse::{card_of, card_of_dynamic, str_of};
+use crate::parse::{card_of, card_of_dynamic, str_of, u64_of};
 
 const HOME_RCMD: &str = "https://api.bilibili.com/x/web-interface/wbi/index/top/feed/rcmd";
 const POPULAR: &str = "https://api.bilibili.com/x/web-interface/popular";
 const RANKING: &str = "https://api.bilibili.com/x/web-interface/ranking/v2";
 const RELATED: &str = "https://api.bilibili.com/x/web-interface/archive/related";
-const REGION: &str = "https://api.bilibili.com/x/web-interface/dynamic/region";
+/// Takes v2 main region ids only (the old `dynamic/region` answers -404 since 2026-10).
+const REGION: &str = "https://api.bilibili.com/x/web-interface/region/feed/rcmd";
 const DYNAMIC_FEED: &str = "https://api.bilibili.com/x/polymer/web-dynamic/v1/feed/all";
 
 /// Lists that feed the candidate pool. Cards come back unfiltered, ads included.
@@ -23,7 +24,8 @@ pub trait FeedApi: Send + Sync {
     async fn popular(&self, pn: u32, ps: u32) -> Result<Vec<VideoCard>>;
     async fn ranking(&self, rid: u32) -> Result<Vec<VideoCard>>;
     async fn related(&self, bvid: &str) -> Result<Vec<VideoCard>>;
-    async fn zone_newest(&self, rid: u32, pn: u32, ps: u32) -> Result<Vec<VideoCard>>;
+    /// Recommended videos of a v2 main region (e.g. 1008 游戏); `page` starts at 1.
+    async fn region_feed(&self, region: u32, page: u32, count: u32) -> Result<Vec<VideoCard>>;
     /// Videos from followed UPs (login required). Returns the next page offset.
     async fn followed_videos(&self, offset: Option<&str>) -> Result<(Vec<VideoCard>, Option<String>)>;
 }
@@ -68,9 +70,26 @@ impl FeedApi for WebFeed {
         Ok(cards(&data, SourceKind::Related))
     }
 
-    async fn zone_newest(&self, rid: u32, pn: u32, ps: u32) -> Result<Vec<VideoCard>> {
-        let data = self.http.get_json(REGION, params!["rid" => rid, "pn" => pn, "ps" => ps], false).await?;
-        Ok(cards(&data["archives"], SourceKind::PreferredZone))
+    async fn region_feed(&self, region: u32, page: u32, count: u32) -> Result<Vec<VideoCard>> {
+        let p = params![
+            "display_id" => page.max(1), "request_cnt" => count, "from_region" => region, "device" => "web", "plat" => 30,
+        ];
+        let data = self.http.get_json(REGION, p, false).await?;
+        // Items name the uploader `author`, not `owner`.
+        Ok(data["archives"]
+            .as_array()
+            .map(|a| {
+                a.iter()
+                    .map(|v| {
+                        let mut card = card_of(v, SourceKind::PreferredZone);
+                        if card.owner.mid == 0 {
+                            card.owner = Owner { mid: u64_of(&v["author"]["mid"]), name: str_of(&v["author"]["name"]) };
+                        }
+                        card
+                    })
+                    .collect()
+            })
+            .unwrap_or_default())
     }
 
     async fn followed_videos(&self, offset: Option<&str>) -> Result<(Vec<VideoCard>, Option<String>)> {

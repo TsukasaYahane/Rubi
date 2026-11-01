@@ -2,12 +2,14 @@ use std::path::Path;
 use std::sync::Arc;
 
 use rubi_api::{
-    ActionApi, AuthApi, ChatApi, CommentApi, CommentSort, DEFAULT_PACKAGES, DanmakuApi, Emote, EmoteApi, FeedApi,
-    HotWord, HttpClient, LibraryApi, NoticeApi, SearchApi, SearchOrder, Session, SpaceApi, Triple, UpOrder, VideoApi,
-    WebAccount, WebAuth, WebComment, WebDanmaku, WebEmote, WebFeed, WebMessages, WebSearch, WebSpace, WebVideo,
+    ActionApi, AuthApi, ChatApi, CommentApi, CommentSort, DEFAULT_PACKAGES, DanmakuApi, DynamicApi, Emote, EmoteApi,
+    FeedApi, HotWord, HttpClient, LibraryApi, NoticeApi, SearchApi, SearchOrder, Session, SpaceApi, SteinApi, Triple,
+    UpOrder, VideoApi, WebAccount, WebAuth, WebComment, WebDanmaku, WebDynamic, WebEmote, WebFeed, WebMessages,
+    WebSearch, WebSpace, WebStein, WebVideo,
 };
 use rubi_model::{
-    ChatSession, Comment, FeedbackEvent, ItemRef, Signal, UpProfile, VideoCard, VideoRef, find_video_ref, now_secs,
+    ChatSession, Comment, Dynamic, FeedbackEvent, ItemRef, Signal, UpProfile, VideoCard, VideoRef, find_video_ref,
+    now_secs,
 };
 use rubi_recommend::Source;
 use rubi_store::SqliteStore;
@@ -15,8 +17,11 @@ use tokio::sync::Mutex as AsyncMutex;
 
 use crate::error::{CoreError, Result};
 use crate::feed::{FeedService, Seeded};
+use crate::playlist::Playlist;
 use crate::social::{self, FilteredComments};
-use crate::sources::{BiliRecommendSource, FollowedUpsSource, PopularSource, RankingSource, RelatedSource};
+use crate::sources::{
+    BiliRecommendSource, FollowedUpsSource, PopularSource, PreferredZoneSource, RankingSource, RelatedSource,
+};
 
 /// Following lists are fetched at most this many pages (50 per page).
 const MAX_FOLLOWING_PAGES: u32 = 40;
@@ -45,7 +50,10 @@ pub struct App {
     pub library: Arc<dyn LibraryApi>,
     pub emote: Arc<dyn EmoteApi>,
     pub space: Arc<dyn SpaceApi>,
+    pub stein: Arc<dyn SteinApi>,
+    pub dynamics: Arc<dyn DynamicApi>,
     pub feed: FeedService<SqliteStore>,
+    pub playlist: Playlist<SqliteStore>,
     emotes: AsyncMutex<Option<Arc<Vec<Emote>>>>,
 }
 
@@ -55,18 +63,18 @@ impl App {
         let http = Arc::new(HttpClient::new(session)?);
         let feed_api: Arc<dyn FeedApi> = Arc::new(WebFeed::new(http.clone()));
         let related = Arc::new(RelatedSource::new(feed_api.clone()));
-        // PreferredZoneSource is left out: x/web-interface/dynamic/region answers -404 for every
-        // zone since 2026-10 and its successor (region/feed/rcmd) takes v2 zone ids we do not
-        // map yet. Zone preference still counts through the interest factor.
+        let zones = Arc::new(PreferredZoneSource::new(feed_api.clone()));
         let sources: Vec<Arc<dyn Source>> = vec![
             Arc::new(BiliRecommendSource::new(feed_api.clone())),
             Arc::new(FollowedUpsSource::new(feed_api.clone())),
             Arc::new(PopularSource::new(feed_api.clone())),
             Arc::new(RankingSource::new(feed_api.clone())),
             related.clone(),
+            zones.clone(),
         ];
         let store = Arc::new(SqliteStore::open(db_path)?);
-        let feed = FeedService::new(store, sources, Seeded { related: Some(related), zones: None })?;
+        let playlist = Playlist::new(store.clone());
+        let feed = FeedService::new(store, sources, Seeded { related: Some(related), zones: Some(zones) })?;
         let messages = Arc::new(WebMessages::new(http.clone()));
         let account = Arc::new(WebAccount::new(http.clone()));
         Ok(Self {
@@ -81,9 +89,12 @@ impl App {
             library: account,
             emote: Arc::new(WebEmote::new(http.clone())),
             space: Arc::new(WebSpace::new(http.clone())),
+            stein: Arc::new(WebStein::new(http.clone())),
+            dynamics: Arc::new(WebDynamic::new(http.clone())),
             feed_api,
             http,
             feed,
+            playlist,
             emotes: AsyncMutex::new(None),
         })
     }
@@ -109,6 +120,26 @@ impl App {
     pub async fn ranking(&self) -> Result<Vec<VideoCard>> {
         let cards = self.feed_api.ranking(0).await?;
         self.filter_list(cards)
+    }
+
+    /// One page of videos from followed UPs (关注动态), filtered by the rule table like every
+    /// list; also returns the next page's offset and how many this page hid.
+    pub async fn followed_feed(&self, offset: Option<&str>) -> Result<(Vec<VideoCard>, Option<String>, usize)> {
+        let (cards, next) = self.feed_api.followed_videos(offset).await?;
+        let total = cards.len();
+        let kept = self.filter_list(cards)?;
+        let hidden = total - kept.len();
+        Ok((kept, next, hidden))
+    }
+
+    /// One UP's posts; videos among them go through the rule table like any list (a blocked
+    /// video is dropped, other kinds are kept). Also returns the next offset.
+    pub async fn up_dynamics(&self, mid: u64, offset: Option<&str>) -> Result<(Vec<Dynamic>, Option<String>)> {
+        let (items, next) = self.dynamics.up_dynamics(mid, offset).await?;
+        let pipeline = self.feed.settings().rules.card_pipeline(None, now_secs)?;
+        let kept =
+            items.into_iter().filter(|d| d.video.as_ref().is_none_or(|v| !pipeline.judge(v).is_blocked())).collect();
+        Ok((kept, next))
     }
 
     /// Videos related to `bvid`, filtered by the rule table (ads, blocked UPs, keywords…).

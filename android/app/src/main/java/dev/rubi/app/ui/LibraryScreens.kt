@@ -1,6 +1,8 @@
 package dev.rubi.app.ui
 
+import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.background
+import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -88,7 +90,9 @@ private fun describe(e: Throwable): String = when (e) {
 
 /** Status rows at the end of a list: loading, error with 重试, empty or 没有更多了. */
 private fun LazyListScope.listFooter(nav: Nav, empty: Boolean, loading: Boolean, hasMore: Boolean, error: Throwable?, retry: () -> Unit) {
-    item(key = "footer") {
+    // No key: a keyed footer is what the list would hold on to while the first page is
+    // inserted above it, opening the list at the bottom instead of the newest entry.
+    item {
         Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
             when {
                 error != null -> {
@@ -197,12 +201,16 @@ fun FavFolderScreen(app: RubiApp, nav: Nav, id: ULong, title: String) {
     }
 }
 
-/** Compact list row: small cover on the left, title / UP / one meta line on the right. */
+/** Compact list row: small cover on the left, title / UP / one meta line on the right.
+ *  Long-press puts the video on the play list. */
+@OptIn(ExperimentalFoundationApi::class)
 @Composable
-private fun VideoRow(card: FfiVideoCard, meta: String, onClick: () -> Unit) {
+internal fun VideoRow(card: FfiVideoCard, meta: String, onClick: () -> Unit) {
     val c = LocalMetro.current
+    val addToList = LocalAddToPlaylist.current
     Row(
-        Modifier.fillMaxWidth().clickable(onClick = onClick).padding(horizontal = 16.dp, vertical = 8.dp),
+        Modifier.fillMaxWidth().combinedClickable(onLongClick = { addToList(card) }, onClick = onClick)
+            .padding(horizontal = 16.dp, vertical = 8.dp),
         horizontalArrangement = Arrangement.spacedBy(12.dp),
     ) {
         Box(Modifier.size(width = 136.dp, height = 76.dp).background(c.bg2)) {

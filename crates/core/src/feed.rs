@@ -391,7 +391,7 @@ impl<S: AppStore> FeedService<S> {
             let mut z: Vec<(u32, f64)> =
                 p.likes.zones.iter().map(|(k, d)| (*k, d.get(now, p.half_life_days))).collect();
             z.sort_by(|a, b| b.1.total_cmp(&a.1));
-            zones.set_zones(z.into_iter().take(3).map(|(k, _)| k).collect());
+            zones.set_zones(crate::zones::main_regions(z.into_iter().map(|(k, _)| k), 3));
         }
         Ok(())
     }

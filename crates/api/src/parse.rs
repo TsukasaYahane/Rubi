@@ -7,9 +7,23 @@ use serde_json::Value;
 pub fn u64_of(v: &Value) -> u64 {
     match v {
         Value::Number(n) => n.as_u64().or_else(|| n.as_f64().map(|f| f.max(0.0) as u64)).unwrap_or(0),
-        Value::String(s) => s.parse().unwrap_or(0),
+        Value::String(s) => count_of(s),
         _ => 0,
     }
+}
+
+/// A count as text: `"123"`, or rounded like the dynamic feed writes it, `"2.1万"` / `"1.3亿"`.
+fn count_of(s: &str) -> u64 {
+    let s = s.trim();
+    if let Ok(n) = s.parse() {
+        return n;
+    }
+    let (num, scale) = match s.char_indices().last() {
+        Some((i, '万')) => (&s[..i], 1e4),
+        Some((i, '亿')) => (&s[..i], 1e8),
+        _ => return 0,
+    };
+    num.trim().parse::<f64>().map(|n| (n * scale).round().max(0.0) as u64).unwrap_or(0)
 }
 
 pub fn str_of(v: &Value) -> String {
@@ -139,6 +153,15 @@ pub fn card_of_dynamic(item: &Value) -> Option<VideoCard> {
 mod tests {
     use super::*;
     use serde_json::json;
+
+    #[test]
+    fn counts_written_in_wan_and_yi() {
+        assert_eq!(u64_of(&json!("2.1万")), 21_000);
+        assert_eq!(u64_of(&json!("4938")), 4938);
+        assert_eq!(u64_of(&json!("1.3亿")), 130_000_000);
+        assert_eq!(u64_of(&json!(5)), 5);
+        assert_eq!(u64_of(&json!("--")), 0);
+    }
 
     #[test]
     fn styled_letters_become_plain() {

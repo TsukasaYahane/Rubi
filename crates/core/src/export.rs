@@ -11,6 +11,7 @@ use zip::write::SimpleFileOptions;
 
 use crate::error::{CoreError, Result};
 use crate::feed::Settings;
+use rubi_model::VideoCard;
 
 const FORMAT_VERSION: u32 = 1;
 
@@ -61,6 +62,7 @@ pub fn export_bundle<W: Write + Seek>(
     settings: &Settings,
     profile: &InterestProfile,
     history: &[FeedbackEvent],
+    playlist: &[VideoCard],
     opts: ExportOptions,
 ) -> Result<()> {
     let mut zip = zip::ZipWriter::new(out);
@@ -89,6 +91,13 @@ pub fn export_bundle<W: Write + Seek>(
     };
     zip.start_file("settings.json", o)?;
     zip.write_all(&serde_json::to_vec_pretty(&sf)?)?;
+    if !playlist.is_empty() {
+        // Without the raw API JSON: the list needs the card, not what it was parsed from.
+        let slim: Vec<VideoCard> =
+            playlist.iter().map(|c| VideoCard { raw: serde_json::Value::Null, ..c.clone() }).collect();
+        zip.start_file("playlist.json", o)?;
+        zip.write_all(&serde_json::to_vec_pretty(&slim)?)?;
+    }
     zip.start_file("profile.json", o)?;
     zip.write_all(&serde_json::to_vec(profile)?)?;
     if opts.include_history {
@@ -106,6 +115,8 @@ pub struct Imported {
     pub settings: Settings,
     pub profile: InterestProfile,
     pub history: Vec<FeedbackEvent>,
+    /// Empty for exports made before the play list existed.
+    pub playlist: Vec<VideoCard>,
 }
 
 pub fn import_bundle<R: Read + Seek>(input: R) -> Result<Imported> {
@@ -152,7 +163,9 @@ pub fn import_bundle<R: Read + Seek>(input: R) -> Result<Imported> {
         })
         .transpose()?
         .unwrap_or_default();
-    Ok(Imported { settings, profile, history })
+    let playlist: Vec<VideoCard> =
+        read("playlist.json")?.map(|p| serde_json::from_str(&p)).transpose()?.unwrap_or_default();
+    Ok(Imported { settings, profile, history, playlist })
 }
 
 #[cfg(test)]
@@ -169,7 +182,9 @@ mod tests {
         let history = vec![FeedbackEvent { signal: Signal::Like, item: None, at: 1 }];
 
         let mut buf = Cursor::new(Vec::new());
-        export_bundle(&mut buf, &settings, &profile, &history, ExportOptions { include_history: true }).unwrap();
+        let playlist = vec![VideoCard { bvid: "BV1".into(), raw: serde_json::json!({"big": 1}), ..Default::default() }];
+        export_bundle(&mut buf, &settings, &profile, &history, &playlist, ExportOptions { include_history: true })
+            .unwrap();
         let bytes = buf.into_inner();
         let text = String::from_utf8_lossy(&bytes);
         assert!(!text.contains("SESSDATA"));
@@ -178,5 +193,8 @@ mod tests {
         assert_eq!(back.settings.rules.up_blacklist, vec![42]);
         assert_eq!(back.profile.half_life_days, 14.0);
         assert_eq!(back.history, history);
+        assert_eq!(back.playlist.len(), 1);
+        assert_eq!(back.playlist[0].bvid, "BV1");
+        assert!(back.playlist[0].raw.is_null(), "raw API JSON is not exported");
     }
 }

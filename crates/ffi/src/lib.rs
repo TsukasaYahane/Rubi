@@ -271,6 +271,18 @@ impl RubiCore {
         Ok(self.app.resolve_video(video).await?)
     }
 
+    /// Stream URLs of one part (`cid`) of a video, e.g. a branch of an interactive video.
+    pub async fn playback_part(&self, bvid: String, cid: u64, qn: u32) -> Res<FfiPlayback> {
+        let p = self.app.video.playurl(&bvid, cid, qn).await?;
+        Ok(FfiPlayback::of(cid, p, self.app.video.stream_headers()))
+    }
+
+    /// The story of an interactive video starting at part `cid`; `None` for ordinary videos.
+    pub async fn stein_open(&self, bvid: String, cid: u64) -> Res<Option<Arc<FfiStein>>> {
+        let session = rubi_core::SteinSession::open(self.app.stein.clone(), &bvid, cid).await?;
+        Ok(session.map(|s| Arc::new(FfiStein(s))))
+    }
+
     /// Stream URLs for `qn` (the server caps it to what the account may play).
     pub async fn playback(&self, bvid: String, qn: u32) -> Res<FfiPlayback> {
         // Feed cards usually carry the cid already; only look it up when they do not.
@@ -458,6 +470,84 @@ impl RubiCore {
         Ok(cards.iter().map(|c| FfiVideoCard::of(c, None)).collect())
     }
 
+    // ----- play list (also 听视频) -----
+
+    pub fn playlist_items(&self) -> Res<Vec<FfiVideoCard>> {
+        let items = self.app.playlist.items()?;
+        self.remember(&items);
+        Ok(items.iter().map(|c| FfiVideoCard::of(c, None)).collect())
+    }
+
+    pub fn playlist_contains(&self, bvid: String) -> Res<bool> {
+        Ok(self.app.playlist.contains(&bvid)?)
+    }
+
+    /// Adds a video (looked up if it is not cached); false when it was already listed.
+    pub async fn playlist_add(&self, bvid: String) -> Res<bool> {
+        let card = self.card(&bvid).await?;
+        Ok(self.app.playlist.add(card)?)
+    }
+
+    pub fn playlist_remove(&self, bvid: String) -> Res<()> {
+        Ok(self.app.playlist.remove(&bvid)?)
+    }
+
+    pub fn playlist_move(&self, from: u32, to: u32) -> Res<()> {
+        Ok(self.app.playlist.move_item(from as usize, to as usize)?)
+    }
+
+    pub fn playlist_clear(&self) -> Res<()> {
+        Ok(self.app.playlist.clear()?)
+    }
+
+    pub fn playlist_mode(&self) -> Res<FfiPlaylistMode> {
+        Ok(self.app.playlist.mode()?.into())
+    }
+
+    pub fn set_playlist_mode(&self, mode: FfiPlaylistMode) -> Res<()> {
+        Ok(self.app.playlist.set_mode(mode.into())?)
+    }
+
+    /// Where 播放全部 / 听全部 starts.
+    pub fn playlist_first(&self) -> Res<Option<FfiVideoCard>> {
+        Ok(self.app.playlist.first()?.map(|c| FfiVideoCard::of(&c, None)))
+    }
+
+    /// What plays after `current` by the list's mode; `None` stops.
+    pub fn playlist_next(&self, current: String) -> Res<Option<FfiVideoCard>> {
+        Ok(self.app.playlist.next_after(&current)?.map(|c| FfiVideoCard::of(&c, None)))
+    }
+
+    // ----- 关注动态 -----
+
+    /// One page of followed UPs' videos; pass `next` back for the following page.
+    pub async fn followed_feed(&self, offset: Option<String>) -> Res<FfiFollowPage> {
+        let (cards, next, hidden) = self.app.followed_feed(offset.as_deref()).await?;
+        self.remember(&cards);
+        Ok(FfiFollowPage {
+            cards: cards.iter().map(|c| FfiVideoCard::of(c, None)).collect(),
+            next,
+            hidden: hidden as u32,
+        })
+    }
+
+    /// Followed UPs with recent posts, for the bar above the 关注 feed.
+    pub async fn followed_ups(&self) -> Res<Vec<FfiFollowedUp>> {
+        Ok(self.app.dynamics.followed_ups().await?.into_iter().map(Into::into).collect())
+    }
+
+    /// One UP's posts of every kind; pass `next` back for more.
+    pub async fn up_dynamics(&self, mid: u64, offset: Option<String>) -> Res<FfiDynamicPage> {
+        let (items, next) = self.app.up_dynamics(mid, offset.as_deref()).await?;
+        let videos: Vec<VideoCard> = items
+            .iter()
+            .flat_map(|d| d.video.iter().chain(d.orig.iter().flat_map(|o| o.video.iter())))
+            .cloned()
+            .collect();
+        self.remember(&videos);
+        Ok(FfiDynamicPage { items: items.iter().map(FfiDynamic::of).collect(), next })
+    }
+
     // ----- message center -----
 
     pub async fn unread(&self) -> Res<FfiUnread> {
@@ -601,6 +691,16 @@ impl RubiCore {
         Ok(FfiFavPage { items: cards.iter().map(|c| FfiVideoCard::of(c, None)).collect(), has_more })
     }
 
+    /// Reports playback so the video lands in 历史记录. `play_type`: 1 start, 0 playing,
+    /// 2 pause / leaving. Guests are skipped silently.
+    pub async fn report_watch(&self, bvid: String, cid: u64, played_s: u64, realtime_s: u64, play_type: u8) -> Res<()> {
+        if !self.app.http.session().is_logged_in() {
+            return Ok(());
+        }
+        let card = self.card(&bvid).await?;
+        Ok(self.app.library.heartbeat(card.aid, cid, played_s, realtime_s, play_type).await?)
+    }
+
     pub async fn sync_followings(&self) -> Res<u32> {
         Ok(self.app.sync_followings().await? as u32)
     }
@@ -621,7 +721,8 @@ impl RubiCore {
         let history = if include_history { self.app.feed.history()? } else { Vec::new() };
         let file = std::fs::File::create(path)?;
         let opts = ExportOptions { include_history };
-        Ok(export_bundle(file, &self.app.feed.settings(), &self.app.feed.profile(), &history, opts)?)
+        let playlist = self.app.playlist.items()?;
+        Ok(export_bundle(file, &self.app.feed.settings(), &self.app.feed.profile(), &history, &playlist, opts)?)
     }
 
     pub fn import_from(&self, path: String) -> Res<()> {
@@ -631,7 +732,27 @@ impl RubiCore {
         for ev in imported.history {
             self.app.feed.record(ev)?;
         }
+        if !imported.playlist.is_empty() {
+            self.app.playlist.replace(&imported.playlist)?;
+        }
         Ok(())
+    }
+}
+
+/// An interactive video being played: its current node and hidden variables.
+#[derive(uniffi::Object)]
+pub struct FfiStein(rubi_core::SteinSession);
+
+#[uniffi::export(async_runtime = "tokio")]
+impl FfiStein {
+    pub fn node(&self) -> FfiSteinNode {
+        FfiSteinNode::of(&self.0.current(), self.0.shown_vars())
+    }
+
+    /// Takes the choice leading to `edge_id`; play the returned node's part next.
+    pub async fn choose(&self, edge_id: u64) -> Res<FfiSteinNode> {
+        let n = self.0.choose(edge_id).await?;
+        Ok(FfiSteinNode::of(&n, self.0.shown_vars()))
     }
 }
 

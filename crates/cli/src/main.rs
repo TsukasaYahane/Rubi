@@ -104,6 +104,7 @@ async fn run() -> Res<()> {
                 &app.feed.settings(),
                 &app.feed.profile(),
                 &events,
+                &app.playlist.items()?,
                 ExportOptions { include_history },
             )?;
             println!("已导出到 {path}（不含登录凭证）");

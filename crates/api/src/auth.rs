@@ -86,11 +86,26 @@ pub trait AuthApi: Send + Sync {
 }
 
 impl WebAuth {
-    /// Takes the cookies a successful login sets and returns the new session.
+    /// Takes the credentials a successful login hands out and returns the new session. They
+    /// come as `Set-Cookie` headers, or only as query parameters of `data.url` (the cross-domain
+    /// link), depending on the endpoint; both are read. A non-zero `data.status` means the
+    /// account must verify further (phone / email) before it is let in.
     fn finish_login(&self, resp: crate::http::Response) -> Result<Session> {
+        let status = resp.data["status"].as_i64().unwrap_or(0);
+        if status != 0 {
+            let message = str_of(&resp.data["message"]);
+            return Err(ApiError::Api {
+                code: -2100, message: format!("需要二次验证（status {status}）：{message}")
+            });
+        }
         let refresh = str_of(&resp.data["refresh_token"]);
+        let link = str_of(&resp.data["url"]);
+        let from_link = link_params(&link);
         self.http.update_session(|s| {
             s.absorb_set_cookies(resp.set_cookies.iter().map(String::as_str));
+            if !s.is_logged_in() {
+                s.absorb_set_cookies(from_link.iter().map(String::as_str));
+            }
             if !refresh.is_empty() {
                 s.refresh_token = Some(refresh);
             }
@@ -102,6 +117,11 @@ impl WebAuth {
             Err(ApiError::Decode("login answered without SESSDATA".into()))
         }
     }
+}
+
+/// `k=v` pairs of a url's query, shaped like `Set-Cookie` values so the session can absorb them.
+fn link_params(link: &str) -> Vec<String> {
+    link.split_once('?').map(|(_, q)| q.split('&').map(str::to_owned).collect()).unwrap_or_default()
 }
 
 fn captcha_form(c: &SolvedCaptcha) -> Vec<(String, String)> {
@@ -207,5 +227,20 @@ impl AuthApi for WebAuth {
             Err(ApiError::NotLoggedIn) => Ok(NavInfo { is_login: false, mid: 0, uname: String::new() }),
             Err(e) => Err(e),
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn credentials_come_from_the_cross_domain_link() {
+        let link = "https://passport.biligame.com/x/passport-login/web/crossDomain?DedeUserID=123&DedeUserID__ckMd5=ab&Expires=1&SESSDATA=s%2C1%2Cx&bili_jct=j&gourl=https%3A%2F%2Fwww.bilibili.com";
+        let mut s = Session::default();
+        s.absorb_set_cookies(link_params(link).iter().map(String::as_str));
+        assert!(s.is_logged_in());
+        assert_eq!((s.dede_user_id.as_deref(), s.bili_jct.as_deref()), (Some("123"), Some("j")));
+        assert!(link_params("https://www.bilibili.com").is_empty());
     }
 }

@@ -1,13 +1,13 @@
 use std::sync::Arc;
 
 use async_trait::async_trait;
-use rubi_model::Comment;
+use rubi_model::{Comment, CommentPicture, VideoLink, find_video_ref};
 use serde_json::Value;
 
 use crate::error::{ApiError, Result};
 use crate::http::HttpClient;
 use crate::params;
-use crate::parse::{image_of, str_of, u64_of};
+use crate::parse::{image_of, plain_letters, str_of, u64_of};
 
 const MAIN: &str = "https://api.bilibili.com/x/v2/reply/wbi/main";
 const REPLIES: &str = "https://api.bilibili.com/x/v2/reply/reply";
@@ -74,8 +74,41 @@ pub(crate) fn comment_of(v: &Value, up_mid: u64) -> Comment {
             .as_object()
             .map(|m| m.iter().map(|(k, e)| (k.clone(), image_of(&e["url"]))).filter(|(_, u)| !u.is_empty()).collect())
             .unwrap_or_default(),
+        pictures: v["content"]["pictures"]
+            .as_array()
+            .map(|a| {
+                a.iter()
+                    .map(|p| CommentPicture {
+                        url: image_of(&p["img_src"]),
+                        width: u64_of(&p["img_width"]) as u32,
+                        height: u64_of(&p["img_height"]) as u32,
+                    })
+                    .filter(|p| !p.url.is_empty())
+                    .collect()
+            })
+            .unwrap_or_default(),
+        video_links: video_links(&v["content"]),
+        note_cvid: u64_of(&v["note_cvid_str"]),
         raw: v.clone(),
     }
+}
+
+/// `content.jump_url` entries that point at a video: the key is the text as written (a BV or
+/// av id, or a video url); search highlights and other links are left out.
+fn video_links(content: &Value) -> Vec<VideoLink> {
+    let text = str_of(&content["message"]);
+    content["jump_url"]
+        .as_object()
+        .map(|m| {
+            m.iter()
+                .filter(|(token, _)| text.contains(token.as_str()))
+                .filter_map(|(token, j)| {
+                    let video = find_video_ref(token).or_else(|| find_video_ref(&str_of(&j["pc_url"])))?;
+                    Some(VideoLink { token: token.clone(), title: plain_letters(&str_of(&j["title"])), video })
+                })
+                .collect()
+        })
+        .unwrap_or_default()
 }
 
 fn list(v: &Value, up_mid: u64) -> Vec<Comment> {
@@ -149,6 +182,22 @@ impl CommentApi for WebComment {
 mod tests {
     use super::*;
     use serde_json::json;
+
+    /// Shapes from the 2026-10-31 capture of reply/main.
+    #[test]
+    fn parses_pictures_notes_and_video_links() {
+        let v = json!({"rpid": 1, "mid": 2, "note_cvid_str": "21936142", "content": {
+            "message": "看看 BV1zpxy6xEFC 再看 #话题",
+            "pictures": [{"img_src": "http://i0.hdslb.com/bfs/new_dyn/a.gif", "img_width": 240, "img_height": 240}],
+            "jump_url": {"BV1zpxy6xEFC": {"title": "游戏王决斗链接真好玩", "pc_url": ""},
+                         "话题": {"title": "话题", "pc_url": "//search.bilibili.com/all?keyword=x", "extra": {"is_word_search": true}}}}});
+        let c = comment_of(&v, 0);
+        assert_eq!(c.pictures[0].url, "https://i0.hdslb.com/bfs/new_dyn/a.gif");
+        assert_eq!(c.note_cvid, 21936142);
+        assert_eq!(c.video_links.len(), 1);
+        assert_eq!(c.video_links[0].token, "BV1zpxy6xEFC");
+        assert_eq!(c.video_links[0].title, "游戏王决斗链接真好玩");
+    }
 
     #[test]
     fn parses_page_with_pinned_and_previews() {

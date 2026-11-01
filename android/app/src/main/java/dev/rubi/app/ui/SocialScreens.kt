@@ -14,12 +14,14 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.text.BasicTextField
 import androidx.compose.foundation.text.KeyboardActions
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.derivedStateOf
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -77,18 +79,54 @@ fun SearchScreen(app: RubiApp, nav: Nav) {
     var results by remember { mutableStateOf<List<FfiVideoCard>?>(null) }
     var hot by remember { mutableStateOf(emptyList<String>()) }
     var note by remember { mutableStateOf("") }
+    // Paging of the current search: the next page loads as the end of the list comes near.
+    var searched by remember { mutableStateOf("") }
+    var page by remember { mutableStateOf(1u) }
+    var hasMore by remember { mutableStateOf(false) }
+    var loading by remember { mutableStateOf(false) }
+    var failed by remember { mutableStateOf(false) }
+    var hiddenTotal by remember { mutableStateOf(0u) }
+    val list = rememberLazyListState()
 
     LaunchedEffect(Unit) {
         runCatching { app.core.hotWords() }.onSuccess { hot = it.words; note = "已过滤推广热搜词 ${it.hidden} 条" }
     }
-    fun search(q: String) {
-        query = q
+    fun loadPage() {
+        if (loading || (!hasMore && page > 1u)) return
+        loading = true
+        val q = searched
         scope.launch {
-            runCatching { app.core.search(q, 1u) }
-                .onSuccess { results = it.cards; note = "结果 ${it.cards.size} · 已过滤 ${it.hidden}" }
-                .onFailure { note = "搜索失败：${it.message}" }
+            runCatching { app.core.search(q, page) }
+                .onSuccess { r ->
+                    if (q != searched) return@onSuccess
+                    val have = results.orEmpty()
+                    results = have + r.cards.filter { n -> have.none { it.bvid == n.bvid } }
+                    hiddenTotal += r.hidden
+                    // A page that came back empty (all filtered or past the end) still moves on,
+                    // up to the API's 50 pages.
+                    hasMore = (r.cards.isNotEmpty() || r.hidden > 0u) && page < 50u
+                    page++
+                    failed = false
+                    note = "结果 ${results.orEmpty().size} · 已过滤 $hiddenTotal"
+                }
+                .onFailure { failed = true; note = "搜索失败：${it.message}" }
+            loading = false
         }
     }
+    fun search(q: String) {
+        query = q
+        searched = q
+        results = emptyList()
+        page = 1u
+        hasMore = true
+        hiddenTotal = 0u
+        failed = false
+        loading = false
+        scope.launch { list.scrollToItem(0) }
+        loadPage()
+    }
+    val nearEnd by remember { derivedStateOf { (list.layoutInfo.visibleItemsInfo.lastOrNull()?.index ?: 0) >= (results?.size ?: 0) - 3 } }
+    LaunchedEffect(nearEnd, results?.size) { if (nearEnd && results != null && hasMore && !failed) loadPage() }
 
     Column(Modifier.fillMaxSize()) {
         Row(Modifier.fillMaxWidth().padding(end = 16.dp), verticalAlignment = Alignment.CenterVertically) {
@@ -96,7 +134,7 @@ fun SearchScreen(app: RubiApp, nav: Nav) {
             MetroField(query, { query = it }, "搜索视频、UP 主", Modifier.weight(1f)) { if (query.isNotBlank()) search(query) }
         }
         Meta(note, Modifier.padding(horizontal = 16.dp, vertical = 8.dp))
-        LazyColumn(Modifier.weight(1f)) {
+        LazyColumn(Modifier.weight(1f), state = list) {
             val r = results
             if (r == null) {
                 item { SectionTitle("热搜") }
@@ -113,6 +151,16 @@ fun SearchScreen(app: RubiApp, nav: Nav) {
                 items(r, key = { it.bvid }) { card ->
                     Box(Modifier.padding(horizontal = 16.dp, vertical = 12.dp)) {
                         VideoCardView(card, big = true, onOpen = { nav.push(Screen.Player(card.bvid, card.title)) })
+                    }
+                }
+                item {
+                    Column(Modifier.padding(16.dp)) {
+                        when {
+                            loading -> Meta("加载中…")
+                            failed -> TextAction("重试", onClick = { failed = false; loadPage() })
+                            !hasMore && r.isNotEmpty() -> Meta("没有更多了")
+                            r.isEmpty() && !hasMore -> Meta("没有找到相关视频")
+                        }
                     }
                 }
             }
@@ -215,6 +263,9 @@ fun ChatScreen(app: RubiApp, nav: Nav, mid: ULong, name: String) {
     var messages by remember { mutableStateOf(emptyList<FfiChatMessage>()) }
     var draft by remember { mutableStateOf("") }
     var note by remember { mutableStateOf("") }
+    val list = rememberLazyListState()
+    // Messages run oldest to newest: open (and stay after sending) at the newest one.
+    LaunchedEffect(messages.size) { if (messages.isNotEmpty()) list.scrollToItem(messages.lastIndex) }
 
     suspend fun reload() {
         runCatching { app.core.chatMessages(mid) }
@@ -232,7 +283,7 @@ fun ChatScreen(app: RubiApp, nav: Nav, mid: ULong, name: String) {
             Text(name, fontSize = 18.sp, fontWeight = FontWeight.SemiBold, color = c.fg, modifier = Modifier.weight(1f))
             Meta("私信")
         }
-        LazyColumn(Modifier.weight(1f).padding(horizontal = 16.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+        LazyColumn(Modifier.weight(1f).padding(horizontal = 16.dp), state = list, verticalArrangement = Arrangement.spacedBy(10.dp)) {
             items(messages, key = { it.seqno.toString() }) { m ->
                 val shared = m.video
                 Column(Modifier.fillMaxWidth(), horizontalAlignment = if (m.fromMe) Alignment.End else Alignment.Start) {

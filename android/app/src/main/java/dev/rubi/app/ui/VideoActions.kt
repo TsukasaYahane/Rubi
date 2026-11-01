@@ -59,6 +59,9 @@ fun VideoActions(app: RubiApp, nav: Nav, d: FfiVideoDetail) {
     var confirmUnfollow by remember { mutableStateOf(false) }
     var note by remember { mutableStateOf("") }
     var sheet by remember { mutableStateOf(ActionSheet.None) }
+    // The play list is local: no login needed.
+    var listed by remember { mutableStateOf(false) }
+    LaunchedEffect(d.bvid) { listed = runCatching { app.core.playlistContains(d.bvid) }.getOrDefault(false) }
 
     // Re-checked when coming back from the login page.
     LaunchedEffect(d.bvid, nav.stack.size) {
@@ -142,6 +145,15 @@ fun VideoActions(app: RubiApp, nav: Nav, d: FfiVideoDetail) {
                     if (later) return@act
                     later = true
                     scope.launch { runCatching { app.core.watchLater(d.bvid) }.onFailure { later = false; failed(it) } }
+                }
+            }
+            Action("列表", if (listed) "已加入" else "加入", listed, Modifier.weight(1f)) {
+                val add = !listed
+                listed = add
+                scope.launch {
+                    runCatching { if (add) app.core.playlistAdd(d.bvid) else app.core.playlistRemove(d.bvid) }
+                        .onSuccess { note = if (add) "已加入播放列表" else "已移出播放列表" }
+                        .onFailure { listed = !add; note = "操作失败：${it.message}" }
                 }
             }
             Action("关注", if (r?.followingUp == true) "已关注" else "UP", r?.followingUp == true, Modifier.weight(1f)) {

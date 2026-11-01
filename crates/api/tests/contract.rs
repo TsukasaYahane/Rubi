@@ -4,8 +4,8 @@
 use std::sync::Arc;
 
 use rubi_api::{
-    AuthApi, CommentApi, CommentSort, DanmakuApi, FeedApi, HttpClient, SearchApi, Session, SpaceApi, UpOrder, VideoApi,
-    WebAuth, WebComment, WebDanmaku, WebFeed, WebSearch, WebSpace, WebVideo,
+    AuthApi, CommentApi, CommentSort, DanmakuApi, FeedApi, HttpClient, SearchApi, Session, SpaceApi, SteinApi, UpOrder,
+    VideoApi, WebAuth, WebComment, WebDanmaku, WebFeed, WebSearch, WebSpace, WebVideo,
 };
 use rubi_model::VideoCard;
 
@@ -61,6 +61,11 @@ async fn comments_and_search() {
     assert!(!page.threads.is_empty());
     let first = page.threads[0].root.rpid;
     assert_eq!(comments.root(card.aid, first).await.expect("thread root").rpid, first);
+    // The cursor leads to a second page of other threads.
+    if let Some(next) = page.next_offset.as_deref() {
+        let more = comments.page(card.aid, CommentSort::Hot, Some(next)).await.expect("comments page 2");
+        assert!(more.threads.iter().all(|t| t.root.rpid != first));
+    }
     let search = WebSearch::new(http.clone());
     let words = search.hot_words(5).await.expect("hot words");
     // From s.search hotword (not the square fallback): it carries the commercial flag.
@@ -95,4 +100,32 @@ async fn login_handshake() {
     let k = auth.login_key().await.expect("login key");
     assert_eq!(k.hash.len(), 16);
     assert!(k.key.contains("BEGIN PUBLIC KEY"));
+}
+
+#[tokio::test]
+#[ignore = "live API"]
+async fn interactive_video() {
+    // A long-standing interactive video (2021); skipped if it ever disappears.
+    let http = guest().await;
+    let stein = rubi_api::WebStein::new(http.clone());
+    let Ok(Some(gv)) = stein.graph_version("BV1vb4y1r7cg", 381841269).await else {
+        eprintln!("interactive sample gone, skipped");
+        return;
+    };
+    let start = stein.node("BV1vb4y1r7cg", gv, None).await.expect("start node");
+    let q = start.questions.iter().find(|q| !q.choices.is_empty()).expect("a question");
+    let first = &q.choices[0];
+    assert!(first.edge_id > 0 && first.cid > 0);
+    let next = stein.node("BV1vb4y1r7cg", gv, Some(first.edge_id)).await.expect("next node");
+    assert_eq!(next.edge_id, first.edge_id);
+}
+
+#[tokio::test]
+#[ignore = "live API"]
+async fn region_feed() {
+    // v2 main region 1008 (游戏): cards carry their uploader and play count.
+    let http = guest().await;
+    let region = WebFeed::new(http.clone()).region_feed(1008, 1, 5).await.expect("region feed");
+    assert!(!region.is_empty());
+    assert!(region.iter().all(|c| !c.bvid.is_empty() && c.owner.mid > 0 && c.stats.view > 0));
 }

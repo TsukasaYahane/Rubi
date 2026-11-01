@@ -1,7 +1,8 @@
 use rusqlite::Connection;
 
 /// Each entry upgrades the schema by one version; never edit a shipped entry.
-const MIGRATIONS: &[&str] = &["CREATE TABLE candidates(
+const MIGRATIONS: &[&str] = &[
+    "CREATE TABLE candidates(
         bvid TEXT PRIMARY KEY,
         card TEXT NOT NULL,
         penalty REAL NOT NULL,
@@ -33,7 +34,13 @@ const MIGRATIONS: &[&str] = &["CREATE TABLE candidates(
         source TEXT NOT NULL,
         reason TEXT NOT NULL
      );
-     CREATE TABLE kv(key TEXT PRIMARY KEY, value TEXT NOT NULL);"];
+     CREATE TABLE kv(key TEXT PRIMARY KEY, value TEXT NOT NULL);",
+    "CREATE TABLE playlist(
+        pos INTEGER NOT NULL,
+        bvid TEXT PRIMARY KEY,
+        card TEXT NOT NULL
+     );",
+];
 
 pub fn migrate(conn: &Connection) -> rusqlite::Result<()> {
     let current: usize = conn.query_row("PRAGMA user_version", [], |r| r.get::<_, i64>(0))? as usize;

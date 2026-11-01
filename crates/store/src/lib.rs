@@ -60,6 +60,13 @@ pub trait FilterLogRepo {
     fn recent_filter_log(&self, limit: usize) -> Result<Vec<FilterLogEntry>>;
 }
 
+/// The custom play list, in order.
+pub trait PlaylistRepo {
+    fn playlist(&self) -> Result<Vec<VideoCard>>;
+    /// Replaces the whole list (it is short).
+    fn set_playlist(&self, items: &[VideoCard]) -> Result<()>;
+}
+
 /// Typed key/value settings (rule table, weights, profile…).
 pub trait KvRepo {
     fn get_raw(&self, key: &str) -> Result<Option<String>>;
@@ -277,6 +284,35 @@ impl FilterLogRepo for SqliteStore {
                 })
             })?;
             Ok(rows.collect::<std::result::Result<_, _>>()?)
+        })
+    }
+}
+
+impl PlaylistRepo for SqliteStore {
+    fn playlist(&self) -> Result<Vec<VideoCard>> {
+        self.with(|c| {
+            let mut stmt = c.prepare("SELECT card FROM playlist ORDER BY pos")?;
+            let rows = stmt.query_map([], |r| r.get::<_, String>(0))?;
+            let mut out = Vec::new();
+            for row in rows {
+                out.push(serde_json::from_str(&row?)?);
+            }
+            Ok(out)
+        })
+    }
+
+    fn set_playlist(&self, items: &[VideoCard]) -> Result<()> {
+        self.with(|c| {
+            let tx = c.transaction()?;
+            tx.execute("DELETE FROM playlist", [])?;
+            for (pos, card) in items.iter().enumerate() {
+                tx.execute(
+                    "INSERT OR IGNORE INTO playlist(pos, bvid, card) VALUES (?1, ?2, ?3)",
+                    params![pos as i64, card.bvid, serde_json::to_string(card)?],
+                )?;
+            }
+            tx.commit()?;
+            Ok(())
         })
     }
 }

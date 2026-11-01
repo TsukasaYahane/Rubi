@@ -3,6 +3,7 @@ package dev.rubi.app.ui
 import android.util.Log
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -303,6 +304,7 @@ private fun HotRankList(app: RubiApp, nav: Nav, list: FeedList, ranking: Boolean
     }
 }
 
+@OptIn(androidx.compose.foundation.ExperimentalFoundationApi::class)
 @Composable
 fun VideoCardView(
     card: FfiVideoCard,
@@ -313,8 +315,13 @@ fun VideoCardView(
     preview: (@Composable () -> Unit)? = null,
 ) {
     val c = LocalMetro.current
+    val addToList = LocalAddToPlaylist.current
     Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-        Column(Modifier.clickable(onClick = onOpen), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+        // Long-press: put it on the play list.
+        Column(
+            Modifier.combinedClickable(onLongClick = { addToList(card) }, onClick = onOpen),
+            verticalArrangement = Arrangement.spacedBy(8.dp),
+        ) {
             Box(Modifier.fillMaxWidth().aspectRatio(16f / 9f).background(c.bg2)) {
                 AsyncImage(model = card.cover, contentDescription = null, contentScale = ContentScale.Crop, modifier = Modifier.fillMaxSize())
                 preview?.invoke()

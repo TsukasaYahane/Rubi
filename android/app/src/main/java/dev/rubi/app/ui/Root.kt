@@ -26,6 +26,7 @@ import androidx.compose.runtime.key
 import androidx.compose.runtime.mutableStateListOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -44,7 +45,13 @@ import dev.rubi.app.ui.theme.MetroType
 
 sealed interface Screen {
     /** `focus`: a comment to open the 评论 tab on (from a notice). */
-    data class Player(val bvid: String, val title: String, val focus: FfiCommentRef? = null) : Screen
+    data class Player(
+        val bvid: String,
+        val title: String,
+        val focus: FfiCommentRef? = null,
+        /** Opened from the play list: when it ends, the list's next item follows. */
+        val fromPlaylist: Boolean = false,
+    ) : Screen
     data object Search : Screen
     data object Inbox : Screen
     data class Chat(val mid: ULong, val name: String) : Screen
@@ -52,6 +59,7 @@ sealed interface Screen {
     data object Login : Screen
     data object Filtered : Screen
     data object Settings : Screen
+    data object Playlist : Screen
     data object History : Screen
     data object WatchLater : Screen
     data object FavFolders : Screen
@@ -74,6 +82,11 @@ class Nav {
     }
 
     fun push(s: Screen) = stack.add(s)
+
+    /** Swaps the top page (the play list moving on to its next video). */
+    fun replaceTop(s: Screen) {
+        if (stack.isEmpty()) stack.add(s) else stack[stack.lastIndex] = s
+    }
     fun pop() = stack.removeLastOrNull()
 
     /** Opens a video from a notice or message; av numbers are resolved to a BV id first. */
@@ -97,7 +110,8 @@ class Nav {
 fun RubiRoot(app: RubiApp) {
     val c = LocalMetro.current
     val nav = remember { Nav() }
-    val home = remember { HomeState(UiPrefs(app)) }
+    val home = remember { HomeState(app.ui) }
+    val follow = remember { FollowState() }
     var unread by remember { mutableStateOf(0u) }
     var emotes by remember { mutableStateOf(emptyMap<String, String>()) }
 
@@ -108,7 +122,11 @@ fun RubiRoot(app: RubiApp) {
     }
     BackHandler(enabled = nav.stack.isNotEmpty()) { nav.pop() }
 
-    CompositionLocalProvider(LocalEmotes provides emotes) {
+    val rootScope = rememberCoroutineScope()
+    CompositionLocalProvider(
+        LocalEmotes provides emotes,
+        LocalAddToPlaylist provides { card -> addToPlaylist(app, rootScope, card) },
+    ) {
     Box(Modifier.fillMaxSize().background(c.bg).safeDrawingPadding()) {
         when (val top = nav.stack.lastOrNull()) {
             null -> Column(Modifier.fillMaxSize()) {
@@ -116,14 +134,14 @@ fun RubiRoot(app: RubiApp) {
                 Box(Modifier.weight(1f)) {
                     when (nav.tab) {
                         Tab.Home -> HomeScreen(app, nav, home)
-                        Tab.Follow -> FollowScreen(app, nav)
+                        Tab.Follow -> FollowScreen(app, nav, follow, home.dual)
                         Tab.Me -> MeScreen(app, nav)
                     }
                 }
                 BottomNav(nav)
             }
             // A fresh composition per video: no danmaku, comments or tab state carried over.
-            is Screen.Player -> key(top) { PlayerScreen(app, nav, top.bvid, top.title, top.focus) }
+            is Screen.Player -> key(top) { PlayerScreen(app, nav, top.bvid, top.title, top.focus, top.fromPlaylist) }
             Screen.Search -> SearchScreen(app, nav)
             Screen.Inbox -> InboxScreen(app, nav)
             is Screen.Chat -> ChatScreen(app, nav, top.mid, top.name)
@@ -131,6 +149,7 @@ fun RubiRoot(app: RubiApp) {
             Screen.Login -> LoginScreen(app, nav)
             Screen.Filtered -> FilteredScreen(app, nav)
             Screen.Settings -> SettingsScreen(app, nav)
+            Screen.Playlist -> PlaylistScreen(app, nav)
             Screen.History -> HistoryScreen(app, nav)
             Screen.WatchLater -> WatchLaterScreen(app, nav)
             Screen.FavFolders -> FavFoldersScreen(app, nav)
@@ -197,20 +216,3 @@ fun PageHeader(nav: Nav, title: String?) {
     if (title != null) Text(title, style = MetroType.pivot, color = c.fg, modifier = Modifier.padding(horizontal = 16.dp))
 }
 
-@Composable
-fun FollowScreen(app: RubiApp, nav: Nav) {
-    val c = LocalMetro.current
-    var note by remember { mutableStateOf("动态是第二阶段功能。这里可以先把关注列表同步给推荐算法。") }
-    val scroll = rememberScrollState()
-    LaunchedEffect(Unit) { nav.reselected.collect { if (it == Tab.Follow) scroll.animateScrollTo(0) } }
-    Column(Modifier.fillMaxSize().verticalScroll(scroll).padding(16.dp), verticalArrangement = Arrangement.spacedBy(16.dp)) {
-        Text("关注", style = MetroType.pivot, color = c.fg)
-        Text(note, color = c.fg2, fontSize = 14.sp)
-        var busy by remember { mutableStateOf(false) }
-        if (busy) LaunchedEffect(Unit) {
-            note = runCatching { "已同步 ${app.core.syncFollowings()} 个关注" }.getOrElse { "同步失败：${it.message}" }
-            busy = false
-        }
-        AccentButton("同步关注列表") { busy = true }
-    }
-}

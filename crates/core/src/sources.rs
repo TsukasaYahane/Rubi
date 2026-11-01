@@ -149,7 +149,7 @@ impl Source for RelatedSource {
     }
 }
 
-/// Newest uploads in the zones the profile likes most.
+/// Recommended videos of the v2 main regions the profile likes most (mapped by `zones`).
 pub struct PreferredZoneSource {
     api: Arc<dyn FeedApi>,
     zones: Mutex<Vec<u32>>,
@@ -174,12 +174,11 @@ impl Source for PreferredZoneSource {
     async fn fetch(&self, want: usize) -> Result<Vec<VideoCard>, SourceError> {
         let zones: Vec<u32> = self.zones.lock().unwrap_or_else(|e| e.into_inner()).iter().take(3).copied().collect();
         let per = (want / zones.len().max(1)).clamp(5, 30) as u32;
-        // A zone the endpoint does not know (-404, e.g. a parent or new-style tid) is skipped;
-        // the source fails only when every zone does.
+        // A region the endpoint refuses is skipped; the source fails only when every one does.
         let mut out = Vec::new();
         let mut last_err = None;
         for z in &zones {
-            match self.api.zone_newest(*z, 1, per).await {
+            match self.api.region_feed(*z, 1, per).await {
                 Ok(cards) => out.extend(cards),
                 Err(e) => last_err = Some(e),
             }

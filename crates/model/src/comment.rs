@@ -19,9 +19,34 @@ pub struct Comment {
     /// Emote image urls used in `text`, keyed by their token (e.g. `[doge]`).
     #[serde(default)]
     pub emotes: std::collections::BTreeMap<String, String>,
+    /// Images attached to the comment.
+    #[serde(default)]
+    pub pictures: Vec<CommentPicture>,
+    /// Links in `text` to videos on the site: the token as written (a BV / av id or a url)
+    /// and the video's title.
+    #[serde(default)]
+    pub video_links: Vec<VideoLink>,
+    /// The 专栏 id of the note this comment carries (笔记), 0 for ordinary comments.
+    #[serde(default)]
+    pub note_cvid: u64,
     /// The reply exactly as the API returned it; the pinned-comment rules match against this.
     #[serde(default)]
     pub raw: serde_json::Value,
+}
+
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
+pub struct CommentPicture {
+    pub url: String,
+    pub width: u32,
+    pub height: u32,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct VideoLink {
+    /// Exactly as it appears in the comment text.
+    pub token: String,
+    pub title: String,
+    pub video: crate::VideoRef,
 }
 
 /// One row of a thread drawn as a fishbone tree.

@@ -310,6 +310,25 @@ pub struct FfiCommentRow {
     pub ctime: i64,
     /// Emotes this comment uses that may be missing from the global set.
     pub emotes: Vec<FfiEmote>,
+    pub pictures: Vec<FfiPicture>,
+    /// Video links in `text`; draw `token` as the title and open the video on tap.
+    pub video_links: Vec<FfiVideoLink>,
+    /// 专栏 id of the note (笔记) this comment carries; 0 for ordinary comments.
+    pub note_cvid: u64,
+}
+
+#[derive(Debug, Clone, uniffi::Record)]
+pub struct FfiPicture {
+    pub url: String,
+    pub width: u32,
+    pub height: u32,
+}
+
+#[derive(Debug, Clone, uniffi::Record)]
+pub struct FfiVideoLink {
+    pub token: String,
+    pub title: String,
+    pub video: FfiVideoRef,
 }
 
 #[derive(Debug, Clone, uniffi::Record)]
@@ -332,6 +351,17 @@ impl FfiCommentRow {
             is_up: c.is_up,
             ctime: c.ctime,
             emotes: c.emotes.iter().map(|(text, url)| FfiEmote { text: text.clone(), url: url.clone() }).collect(),
+            pictures: c
+                .pictures
+                .iter()
+                .map(|p| FfiPicture { url: p.url.clone(), width: p.width, height: p.height })
+                .collect(),
+            video_links: c
+                .video_links
+                .iter()
+                .map(|l| FfiVideoLink { token: l.token.clone(), title: l.title.clone(), video: l.video.clone().into() })
+                .collect(),
+            note_cvid: c.note_cvid,
         }
     }
 }
@@ -699,4 +729,200 @@ impl From<FfiSolvedCaptcha> for rubi_api::SolvedCaptcha {
 pub struct FfiLoginKey {
     pub hash: String,
     pub public_key_pem: String,
+}
+
+/// A node of an interactive video and the question asked near the end of its part.
+#[derive(Debug, Clone, uniffi::Record)]
+pub struct FfiSteinNode {
+    pub edge_id: u64,
+    pub title: String,
+    pub is_leaf: bool,
+    pub question: Option<FfiSteinQuestion>,
+    /// Variables the video shows (name, value), e.g. a score.
+    pub vars: Vec<FfiSteinVar>,
+}
+
+#[derive(Debug, Clone, uniffi::Record)]
+pub struct FfiSteinQuestion {
+    /// 0: no options shown, jump on at the end; otherwise show the options.
+    pub kind: u8,
+    pub before_end_ms: u32,
+    pub time_limit_ms: Option<u32>,
+    pub pause: bool,
+    pub title: String,
+    /// Only the choices whose conditions hold.
+    pub choices: Vec<FfiSteinChoice>,
+}
+
+#[derive(Debug, Clone, uniffi::Record)]
+pub struct FfiSteinChoice {
+    pub edge_id: u64,
+    pub cid: u64,
+    pub option: String,
+    pub is_default: bool,
+}
+
+#[derive(Debug, Clone, uniffi::Record)]
+pub struct FfiSteinVar {
+    pub name: String,
+    pub value: f64,
+}
+
+impl FfiSteinNode {
+    pub fn of(n: &rubi_api::SteinNode, vars: Vec<(String, f64)>) -> Self {
+        // The first question that has choices; trailing entries are the ending module.
+        let question = n.questions.iter().find(|q| !q.choices.is_empty()).map(|q| FfiSteinQuestion {
+            kind: q.kind,
+            before_end_ms: q.before_end_ms,
+            time_limit_ms: q.time_limit_ms,
+            pause: q.pause,
+            title: q.title.clone(),
+            choices: q
+                .choices
+                .iter()
+                .map(|c| FfiSteinChoice {
+                    edge_id: c.edge_id,
+                    cid: c.cid,
+                    option: c.option.clone(),
+                    is_default: c.is_default,
+                })
+                .collect(),
+        });
+        Self {
+            edge_id: n.edge_id,
+            title: n.title.clone(),
+            is_leaf: n.is_leaf,
+            question,
+            vars: vars.into_iter().map(|(name, value)| FfiSteinVar { name, value }).collect(),
+        }
+    }
+}
+
+#[derive(Debug, Clone, uniffi::Record)]
+pub struct FfiFollowPage {
+    pub cards: Vec<FfiVideoCard>,
+    /// Offset of the next page; `None` at the end.
+    pub next: Option<String>,
+    /// Cards this page's filters removed.
+    pub hidden: u32,
+}
+
+#[derive(Debug, Clone, Copy, uniffi::Enum)]
+pub enum FfiPlaylistMode {
+    Sequential,
+    LoopAll,
+    LoopOne,
+    Shuffle,
+}
+
+impl From<rubi_core::PlaylistMode> for FfiPlaylistMode {
+    fn from(m: rubi_core::PlaylistMode) -> Self {
+        use rubi_core::PlaylistMode::*;
+        match m {
+            Sequential => Self::Sequential,
+            LoopAll => Self::LoopAll,
+            LoopOne => Self::LoopOne,
+            Shuffle => Self::Shuffle,
+        }
+    }
+}
+
+impl From<FfiPlaylistMode> for rubi_core::PlaylistMode {
+    fn from(m: FfiPlaylistMode) -> Self {
+        match m {
+            FfiPlaylistMode::Sequential => Self::Sequential,
+            FfiPlaylistMode::LoopAll => Self::LoopAll,
+            FfiPlaylistMode::LoopOne => Self::LoopOne,
+            FfiPlaylistMode::Shuffle => Self::Shuffle,
+        }
+    }
+}
+
+#[derive(Debug, Clone, uniffi::Record)]
+pub struct FfiFollowedUp {
+    pub mid: u64,
+    pub name: String,
+    pub face: String,
+    pub has_update: bool,
+}
+
+impl From<rubi_model::FollowedUp> for FfiFollowedUp {
+    fn from(u: rubi_model::FollowedUp) -> Self {
+        Self { mid: u.mid, name: u.name, face: u.face, has_update: u.has_update }
+    }
+}
+
+#[derive(Debug, Clone, Copy, uniffi::Enum)]
+pub enum FfiDynamicKind {
+    Video,
+    Word,
+    Draw,
+    Article,
+    Opus,
+    Forward,
+    Other,
+}
+
+/// What a post shows; a repost's original is one level of this (records cannot nest).
+#[derive(Debug, Clone, uniffi::Record)]
+pub struct FfiDynamicBody {
+    pub kind: FfiDynamicKind,
+    pub author_name: String,
+    pub text: String,
+    pub title: String,
+    pub pictures: Vec<String>,
+    pub video: Option<FfiVideoCard>,
+    pub link: String,
+}
+
+#[derive(Debug, Clone, uniffi::Record)]
+pub struct FfiDynamic {
+    pub id: String,
+    pub author_mid: u64,
+    pub author_face: String,
+    pub published_at: i64,
+    pub body: FfiDynamicBody,
+    pub orig: Option<FfiDynamicBody>,
+}
+
+#[derive(Debug, Clone, uniffi::Record)]
+pub struct FfiDynamicPage {
+    pub items: Vec<FfiDynamic>,
+    pub next: Option<String>,
+}
+
+impl FfiDynamicBody {
+    fn of(d: &rubi_model::Dynamic) -> Self {
+        use rubi_model::DynamicKind as K;
+        Self {
+            kind: match d.kind {
+                K::Video => FfiDynamicKind::Video,
+                K::Word => FfiDynamicKind::Word,
+                K::Draw => FfiDynamicKind::Draw,
+                K::Article => FfiDynamicKind::Article,
+                K::Opus => FfiDynamicKind::Opus,
+                K::Forward => FfiDynamicKind::Forward,
+                K::Other => FfiDynamicKind::Other,
+            },
+            author_name: d.author_name.clone(),
+            text: d.text.clone(),
+            title: d.title.clone(),
+            pictures: d.pictures.clone(),
+            video: d.video.as_ref().map(|v| FfiVideoCard::of(v, None)),
+            link: d.link.clone(),
+        }
+    }
+}
+
+impl FfiDynamic {
+    pub fn of(d: &rubi_model::Dynamic) -> Self {
+        Self {
+            id: d.id.clone(),
+            author_mid: d.author_mid,
+            author_face: d.author_face.clone(),
+            published_at: d.published_at,
+            body: FfiDynamicBody::of(d),
+            orig: d.orig.as_deref().map(FfiDynamicBody::of),
+        }
+    }
 }
