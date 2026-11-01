@@ -1,5 +1,6 @@
 package dev.rubi.app.ui
 
+import android.os.SystemClock
 import androidx.compose.foundation.lazy.LazyListState
 import androidx.compose.foundation.lazy.grid.LazyGridState
 import androidx.compose.runtime.Composable
@@ -12,6 +13,7 @@ import androidx.compose.runtime.snapshotFlow
 import dev.rubi.core.RubiException
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.launch
@@ -28,12 +30,17 @@ class Page<T, C>(val items: List<T>, val next: C?, val hidden: UInt = 0u)
  *
  * Loads run in `scope`, which should outlive the effects that ask for pages: those restart as
  * the list grows, and a restart must not cancel a page half way. By default the list has a
- * scope of its own, for state that outlives its screen (a page left for a video and come back to). A [reset] drops any load still
- * under way, so an old answer never lands in the new list.
+ * scope of its own, for state that outlives its screen (a page left for a video and come back
+ * to). A [reset] drops any load still under way, so an old answer never lands in the new list.
+ *
+ * `minGapMs` spaces the pages after the first: scrolling fast then cannot fire a burst of
+ * requests (which B站 answers with HTTP 412). A page asked for too soon follows once the gap
+ * has passed.
  */
 class Paged<T, C>(
     private val scope: CoroutineScope = CoroutineScope(SupervisorJob() + Dispatchers.Main),
     private val key: (T) -> Any,
+    private val minGapMs: Long = 0L,
     private val fetch: suspend (cursor: C?) -> Page<T, C>,
 ) {
     val items = mutableStateListOf<T>()
@@ -48,11 +55,31 @@ class Paged<T, C>(
 
     private var cursor: C? = null
     private var generation = 0
+    private var lastStart = 0L
+    private var waiting = false
 
     /** Loads the next page unless one is loading, the list ended, or the last one failed. */
     fun more() {
         if (loading || ended || error != null) return
+        val wait = minGapMs - (SystemClock.elapsedRealtime() - lastStart)
+        if (wait > 0) {
+            if (!waiting) {
+                waiting = true
+                scope.launch {
+                    delay(wait)
+                    waiting = false
+                    more()
+                }
+            }
+            return
+        }
         load()
+    }
+
+    /** Puts `item` in place of the listed one with the same key (e.g. a thread grown longer). */
+    fun replace(item: T) {
+        val at = items.indexOfFirst { key(it) == key(item) }
+        if (at >= 0) items[at] = item
     }
 
     /** Tries again after an error. */
@@ -76,6 +103,7 @@ class Paged<T, C>(
     private fun load() {
         if (loading || ended) return
         loading = true
+        lastStart = SystemClock.elapsedRealtime()
         val gen = generation
         val at = cursor
         scope.launch {

@@ -28,11 +28,11 @@ impl Library {
         Self { api, folders, account, videos, cards }
     }
 
-    /// Watch history; pass the returned cursor back for the next page.
+    /// Watch history; pass the returned cursor back for the next page. Its cards are not
+    /// cached: they carry the part last watched instead of the first, and no counts, so a
+    /// video opened from here is looked up in full.
     pub async fn history(&self, cursor: Option<&str>) -> Result<(Vec<HistoryEntry>, Option<String>)> {
-        let (items, cursor) = self.api.history(cursor).await?;
-        self.cards.remember(&items.iter().map(|h| h.card.clone()).collect::<Vec<_>>());
-        Ok((items, cursor))
+        Ok(self.api.history(cursor).await?)
     }
 
     pub async fn watch_later(&self) -> Result<Vec<VideoCard>> {

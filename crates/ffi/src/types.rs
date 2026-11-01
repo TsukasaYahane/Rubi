@@ -87,10 +87,43 @@ pub struct FfiVideoDetail {
     pub likes: u64,
     pub coins: u64,
     pub favorites: u64,
+    /// 分P, in order; one entry for a single-part video.
+    pub parts: Vec<FfiPart>,
+    pub season: Option<FfiSeason>,
+}
+
+#[derive(Debug, Clone, uniffi::Record)]
+pub struct FfiPart {
+    pub cid: u64,
+    pub title: String,
+    pub duration_s: u32,
+}
+
+#[derive(Debug, Clone, uniffi::Record)]
+pub struct FfiEpisode {
+    pub bvid: String,
+    pub cid: u64,
+    pub title: String,
+    pub cover: String,
+    pub duration_s: u32,
+}
+
+#[derive(Debug, Clone, uniffi::Record)]
+pub struct FfiSeasonSection {
+    pub title: String,
+    pub episodes: Vec<FfiEpisode>,
+}
+
+/// The 合集 a video is in.
+#[derive(Debug, Clone, uniffi::Record)]
+pub struct FfiSeason {
+    pub title: String,
+    pub sections: Vec<FfiSeasonSection>,
 }
 
 impl FfiVideoDetail {
-    pub fn of(c: &VideoCard, pages: u32) -> Self {
+    pub fn of(info: &rubi_core::VideoInfo) -> Self {
+        let c = &info.card;
         Self {
             bvid: c.bvid.clone(),
             aid: c.aid,
@@ -102,13 +135,39 @@ impl FfiVideoDetail {
             tags: c.tags.clone(),
             pubdate: c.pubdate,
             duration_s: c.duration_s,
-            pages,
+            pages: info.parts.len().max(1) as u32,
             views: c.stats.view,
             danmaku: c.stats.danmaku,
             replies: c.stats.reply,
             likes: c.stats.like,
             coins: c.stats.coin,
             favorites: c.stats.favorite,
+            parts: info
+                .parts
+                .iter()
+                .map(|p| FfiPart { cid: p.cid, title: p.part.clone(), duration_s: p.duration_s })
+                .collect(),
+            season: info.season.as_ref().map(|s| FfiSeason {
+                title: s.title.clone(),
+                sections: s
+                    .sections
+                    .iter()
+                    .map(|sec| FfiSeasonSection {
+                        title: sec.title.clone(),
+                        episodes: sec
+                            .episodes
+                            .iter()
+                            .map(|e| FfiEpisode {
+                                bvid: e.bvid.clone(),
+                                cid: e.cid,
+                                title: e.title.clone(),
+                                cover: e.cover.clone(),
+                                duration_s: e.duration_s,
+                            })
+                            .collect(),
+                    })
+                    .collect(),
+            }),
         }
     }
 }
@@ -306,6 +365,8 @@ pub struct FfiCommentRow {
     pub video_links: Vec<FfiVideoLink>,
     /// 专栏 id of the note (笔记) this comment carries; 0 for ordinary comments.
     pub note_cvid: u64,
+    /// The signed-in user has liked it.
+    pub liked: bool,
 }
 
 #[derive(Debug, Clone, uniffi::Record)]
@@ -353,6 +414,7 @@ impl FfiCommentRow {
                 .map(|l| FfiVideoLink { token: l.token.clone(), title: l.title.clone(), video: l.video.clone().into() })
                 .collect(),
             note_cvid: c.note_cvid,
+            liked: c.liked,
         }
     }
 }
@@ -927,4 +989,100 @@ impl From<&rubi_core::ThreadView> for FfiCommentThread {
             total_replies: t.total_replies,
         }
     }
+}
+
+#[derive(Debug, Clone, uniffi::Enum)]
+pub enum FfiArticleBlock {
+    Heading {
+        text: String,
+    },
+    Text {
+        text: String,
+    },
+    /// A quote or list item.
+    Quote {
+        text: String,
+    },
+    Pictures {
+        pictures: Vec<FfiPicture>,
+    },
+    Line,
+}
+
+/// A 专栏 / 图文 ready to read.
+#[derive(Debug, Clone, uniffi::Record)]
+pub struct FfiArticle {
+    pub id: String,
+    pub title: String,
+    pub author_name: String,
+    pub author_mid: u64,
+    pub author_face: String,
+    pub published_at: i64,
+    pub cover: String,
+    pub blocks: Vec<FfiArticleBlock>,
+    /// Where its comments are; `None` when it has none.
+    pub comments: Option<FfiCommentArea>,
+    /// Promotion cards taken out of the body.
+    pub hidden: u32,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, uniffi::Enum)]
+pub enum FfiDownloadState {
+    Queued,
+    Running,
+    Paused,
+    Done,
+    Failed,
+}
+
+#[derive(Debug, Clone, uniffi::Record)]
+pub struct FfiDownload {
+    pub card: FfiVideoCard,
+    pub quality: u32,
+    pub state: FfiDownloadState,
+    /// Why it failed.
+    pub error: Option<String>,
+    pub done_bytes: u64,
+    /// An estimate until both streams have answered.
+    pub total_bytes: u64,
+    pub created_at: i64,
+}
+
+/// A finished download's files.
+#[derive(Debug, Clone, uniffi::Record)]
+pub struct FfiLocalCopy {
+    pub video_path: String,
+    pub audio_path: Option<String>,
+}
+
+/// A comment area: a video's, an article's… (`kind` is B站's `type`).
+#[derive(Debug, Clone, Copy, uniffi::Record)]
+pub struct FfiCommentArea {
+    pub kind: u32,
+    pub oid: u64,
+}
+
+/// Where watching a video can pick up again.
+#[derive(Debug, Clone, Copy, uniffi::Record)]
+pub struct FfiResumePoint {
+    pub cid: u64,
+    pub position_ms: u64,
+}
+
+/// A followed UP in the 全部关注 list.
+#[derive(Debug, Clone, uniffi::Record)]
+pub struct FfiFollowing {
+    pub mid: u64,
+    pub name: String,
+    pub face: String,
+    /// Their latest post seen (Unix seconds); 0 when none since `checked_since`.
+    pub last_post_at: i64,
+    pub has_update: bool,
+}
+
+#[derive(Debug, Clone, uniffi::Record)]
+pub struct FfiFollowings {
+    pub ups: Vec<FfiFollowing>,
+    /// How far back posts were read (Unix seconds).
+    pub checked_since: i64,
 }

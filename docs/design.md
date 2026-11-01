@@ -64,7 +64,7 @@
 - 依赖一律构造函数注入（trait 对象或泛型），只在 `core::Services::open` 组装。
 - **单一职责 + 功能私有化**（2026-11-01 重构）：`core` 按领域拆成独立服务——`Account`、`Home`、`Videos`、`Danmakus`、`Stein`、`Comments`、`Discover`、`Following`、`Space`、`Actions`、`Library`、`Messages`、`Playlists`（含听视频队列）、`Preferences`（设置与备份）、`Emotes`。每个服务字段私有，只持有自己需要的 API trait；服务之间只经窄接口协作：`RuleSource`（取规则表）、`FeedbackSink`（写反馈信号），由 `FeedService` 实现，服务看不到它的其余部分。卡片缓存 `CardCache`、评论根缓存都有上限。
 - **门面不含业务**：`ffi` 只把 `Ffi*` 记录与核心类型互转；清晰度上限（1080P）、弹幕空文本、楼中楼分页、听视频的上一首 / 下一首规则都在 `core`，Android 与将来的 iOS 共用。CLI 同样只调用服务。
-- **Android 端**：页面不自写分页，统一用 `Paged`（`ui/Paging.kt`，游标泛型、去重、错误重试、重置时丢弃旧请求）；播放页拆为页面本身、`PlayerEffects`（小窗与后台、观看心跳、列表连播、弹幕分段加载）、`CommentSection`、`RelatedList`；听视频的选曲交给 core，`AudioQueue` 只负责播放。
+- **Android 端**：页面不自写分页，统一用 `Paged`（`ui/Paging.kt`，游标泛型、去重、错误重试、重置时丢弃旧请求）；播放页拆为页面本身、`PlayerEffects`（小窗与后台、观看心跳、列表连播、弹幕分段加载）、`CommentSection`、`RelatedList`；听视频的选曲交给 core，`Listening` 只负责播放。播放相关的状态不再是全局单例：`MainPlayer`（正片 / 听视频）、`PreviewPlayer`、`Listening`、`Pip` 与全屏状态由应用持有的 `Media` 一次构建，界面经 `LocalMedia` 取用，播放服务经 Application 取用。评论区与 UP 页也用 `Paged`，可设最小翻页间隔（评论 1.5 秒、UP 投稿 1 秒）防止 412。
 
 ### 3.2 Cargo workspace
 

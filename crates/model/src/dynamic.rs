@@ -42,6 +42,28 @@ pub struct Dynamic {
     pub orig: Option<Box<Dynamic>>,
 }
 
+/// Someone the user follows, from the full following list.
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
+pub struct Following {
+    pub mid: u64,
+    pub name: String,
+    pub face: String,
+    /// When the user followed them (Unix seconds).
+    pub followed_at: i64,
+}
+
+/// A followed UP in the 全部关注 list.
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
+pub struct FollowingUp {
+    pub mid: u64,
+    pub name: String,
+    pub face: String,
+    /// Their latest post seen while looking back (Unix seconds); `None` when none was.
+    pub last_post_at: Option<i64>,
+    /// Posted since the feed was last seen.
+    pub has_update: bool,
+}
+
 /// A followed UP in the 关注 bar.
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
 pub struct FollowedUp {

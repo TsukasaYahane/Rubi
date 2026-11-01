@@ -1,9 +1,9 @@
-//! Comments of a video: pages of threads (pinned 带货 removed), expanding a thread, and finding
+//! Comments of a video or an article: pages of threads (pinned 带货 removed), expanding a thread, and finding
 //! the thread a notice points to. Threads come out as fishbone rows ready to draw.
 
 use std::sync::Arc;
 
-use rubi_api::{CommentApi, CommentSort};
+use rubi_api::{CommentApi, CommentArea, CommentSort};
 use rubi_model::{Comment, ThreadRow, flatten_thread};
 
 use crate::error::{CoreError, Result};
@@ -46,15 +46,32 @@ impl Comments {
         Self { api, rules, roots: Recent::new(ROOT_CACHE) }
     }
 
+    /// Likes a comment (or takes the like back).
+    pub async fn like(&self, area: CommentArea, rpid: u64, on: bool) -> Result<()> {
+        Ok(self.api.like(area, rpid, on).await?)
+    }
+
+    /// Replies in a thread (`root` 0: a new comment under the video). The text is trimmed and an
+    /// empty one refused. Returns the reply as a row to show at once.
+    pub async fn reply(&self, area: CommentArea, root: u64, parent: u64, text: &str) -> Result<(ThreadRow, Comment)> {
+        let text = text.trim();
+        if text.is_empty() {
+            return Err(CoreError::Invalid("评论不能为空".into()));
+        }
+        let c = self.api.reply(area, root, parent, text).await?;
+        let row = ThreadRow { rpid: c.rpid, depth: u32::from(root > 0), has_later_sibling: false, reply_to: None };
+        Ok((row, c))
+    }
+
     /// Forgets the root comments kept for expanding threads (the videos were left).
     pub fn forget(&self) {
         self.roots.clear();
     }
 
     /// One page of root comments with their inline previews.
-    pub async fn page(&self, aid: u64, by_time: bool, offset: Option<&str>) -> Result<CommentsPage> {
+    pub async fn page(&self, area: CommentArea, by_time: bool, offset: Option<&str>) -> Result<CommentsPage> {
         let sort = if by_time { CommentSort::Time } else { CommentSort::Hot };
-        let page = load_comments(self.api.as_ref(), &self.rules.rules(), aid, sort, offset).await?;
+        let page = load_comments(self.api.as_ref(), &self.rules.rules(), area, sort, offset).await?;
         let threads = page
             .page
             .threads
@@ -73,22 +90,22 @@ impl Comments {
     }
 
     /// A thread of a loaded page in full, cut to its first `limit` replies.
-    pub async fn thread(&self, aid: u64, root_rpid: u64, limit: usize) -> Result<ThreadView> {
+    pub async fn thread(&self, area: CommentArea, root_rpid: u64, limit: usize) -> Result<ThreadView> {
         let root = self
             .roots
             .get(&root_rpid)
             .ok_or_else(|| CoreError::Invalid("unknown root comment; load the page first".into()))?;
-        let replies = load_thread(self.api.as_ref(), aid, root_rpid, THREAD_MAX_PAGES).await?;
+        let replies = load_thread(self.api.as_ref(), area, root_rpid, THREAD_MAX_PAGES).await?;
         let total = root.reply_count.max(replies.len() as u32);
         Ok(thread_view(&root, &replies, limit, total))
     }
 
     /// The whole thread under `root_rpid`, even when it is on no loaded page (a notice's
     /// comment). Expanding it later works like any other thread.
-    pub async fn focus(&self, aid: u64, root_rpid: u64) -> Result<ThreadView> {
-        let root = self.api.root(aid, root_rpid).await?;
+    pub async fn focus(&self, area: CommentArea, root_rpid: u64) -> Result<ThreadView> {
+        let root = self.api.root(area, root_rpid).await?;
         self.roots.put(root.rpid, root.clone());
-        let replies = load_thread(self.api.as_ref(), aid, root.rpid, THREAD_MAX_PAGES).await?;
+        let replies = load_thread(self.api.as_ref(), area, root.rpid, THREAD_MAX_PAGES).await?;
         let total = root.reply_count.max(replies.len() as u32);
         Ok(thread_view(&root, &replies, usize::MAX, total))
     }

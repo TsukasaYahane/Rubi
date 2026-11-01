@@ -75,6 +75,7 @@ fun MeScreen(app: RubiApp, nav: Nav) {
             "收藏夹" to { nav.push(Screen.FavFolders) },
             "稍后再看" to { nav.push(Screen.WatchLater) },
             "播放列表" to { nav.push(Screen.Playlist) },
+            "离线缓存" to { nav.push(Screen.Downloads) },
             "被过滤内容" to { nav.push(Screen.Filtered) },
             "设置" to { nav.push(Screen.Settings) },
             "备份与迁移" to { backup = true },

@@ -1,5 +1,6 @@
 package dev.rubi.app.ui
 
+import dev.rubi.app.playback.LocalMedia
 import android.widget.Toast
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
@@ -28,7 +29,6 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import dev.rubi.app.RubiApp
-import dev.rubi.app.playback.AudioQueue
 import dev.rubi.app.ui.theme.LocalMetro
 import dev.rubi.core.FfiPlaylistMode
 import dev.rubi.core.FfiVideoCard
@@ -57,12 +57,12 @@ private val MODES = listOf(
 @Composable
 fun PlaylistScreen(app: RubiApp, nav: Nav) {
     val c = LocalMetro.current
-    val ctx = LocalContext.current
+    val listening = LocalMedia.current.listening
     var items by remember { mutableStateOf(emptyList<FfiVideoCard>()) }
     var mode by remember { mutableStateOf(FfiPlaylistMode.SEQUENTIAL) }
     var version by remember { mutableStateOf(0) }
-    val hearing by AudioQueue.current
-    val audioPlaying by AudioQueue.playing
+    val hearing by listening.current
+    val audioPlaying by listening.playing
 
     LaunchedEffect(version) {
         items = runCatching { app.core.playlistItems() }.getOrDefault(emptyList())
@@ -91,7 +91,7 @@ fun PlaylistScreen(app: RubiApp, nav: Nav) {
             AccentButton("播放全部") { runCatching { app.core.playlistFirst() }.getOrNull()?.let(::play) }
             TextAction("听全部", onClick = {
                 runCatching { app.core.playlistFirst() }.getOrNull()?.let {
-                    AudioQueue.start(ctx, app.core, it)
+                    listening.start(it)
                     nav.push(Screen.Listen)
                 }
             })
@@ -103,9 +103,9 @@ fun PlaylistScreen(app: RubiApp, nav: Nav) {
                 Meta("正在听 · 点按打开播放页")
                 Text(now.title, fontSize = 15.sp, color = c.fg, maxLines = 1, overflow = TextOverflow.Ellipsis)
                 Row(horizontalArrangement = Arrangement.spacedBy(20.dp)) {
-                    TextAction(if (audioPlaying) "暂停" else "继续", onClick = { AudioQueue.toggle() })
-                    TextAction("下一首", onClick = { AudioQueue.next() })
-                    TextAction("停止", onClick = { AudioQueue.stop() }, dim = true)
+                    TextAction(if (audioPlaying) "暂停" else "继续", onClick = { listening.toggle() })
+                    TextAction("下一首", onClick = { listening.next() })
+                    TextAction("停止", onClick = { listening.stop() }, dim = true)
                 }
             }
         }

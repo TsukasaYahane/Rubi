@@ -77,7 +77,7 @@ async fn run() -> Res<()> {
     };
     let dir = data_dir();
     fs::create_dir_all(&dir)?;
-    let app = Services::open(dir.join("rubi.db"), load_session(&dir))?;
+    let app = Services::open(&dir, load_session(&dir))?;
     app.account.ensure_device_ids().await?;
     save_session(&dir, &app.account.session())?;
     let arg = |i: usize| args.get(i).map(String::as_str);
@@ -199,7 +199,7 @@ async fn signal(app: &Services, bvid: &str, kind: &str) -> Res<()> {
 }
 
 async fn dm(app: &Services, bvid: &str) -> Res<()> {
-    let (card, _) = app.videos.detail(bvid).await?;
+    let card = app.videos.detail(bvid).await?.card;
     let out = app.danmaku.all(card.cid.unwrap_or_default(), card.duration_s * 1000).await?;
     println!("{} · 时长 {}s", card.title, card.duration_s);
     println!("保留 {} 条", out.kept.len());

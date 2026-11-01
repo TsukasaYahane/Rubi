@@ -11,6 +11,23 @@ use crate::parse::{image_of, plain_letters, str_of, u64_of};
 
 const MAIN: &str = "https://api.bilibili.com/x/v2/reply/wbi/main";
 const REPLIES: &str = "https://api.bilibili.com/x/v2/reply/reply";
+const ACTION: &str = "https://api.bilibili.com/x/v2/reply/action";
+const ADD: &str = "https://api.bilibili.com/x/v2/reply/add";
+
+/// Which comment area: B站 keys every area by a `type` and an object id (`oid`).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct CommentArea {
+    /// 1 video, 12 专栏, 17 图文…; whatever the content says it uses.
+    pub kind: u32,
+    pub oid: u64,
+}
+
+impl CommentArea {
+    /// The comments under a video (by aid).
+    pub fn video(aid: u64) -> Self {
+        Self { kind: 1, oid: aid }
+    }
+}
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum CommentSort {
@@ -38,12 +55,17 @@ pub struct CommentPage {
 
 #[async_trait]
 pub trait CommentApi: Send + Sync {
-    /// Root comments of a video (`oid` is the aid).
-    async fn page(&self, aid: u64, sort: CommentSort, offset: Option<&str>) -> Result<CommentPage>;
+    /// Root comments of an area.
+    async fn page(&self, area: CommentArea, sort: CommentSort, offset: Option<&str>) -> Result<CommentPage>;
     /// One page of every reply under `root`, flat; rebuild the tree from `parent`.
-    async fn replies(&self, aid: u64, root: u64, pn: u32, ps: u32) -> Result<(Vec<Comment>, u32)>;
+    async fn replies(&self, area: CommentArea, root: u64, pn: u32, ps: u32) -> Result<(Vec<Comment>, u32)>;
     /// The root comment of a thread, for opening a thread that is not on a loaded page.
-    async fn root(&self, aid: u64, root: u64) -> Result<Comment>;
+    async fn root(&self, area: CommentArea, root: u64) -> Result<Comment>;
+    /// Likes a comment, or takes the like back. Login required.
+    async fn like(&self, area: CommentArea, rpid: u64, on: bool) -> Result<()>;
+    /// Replies to `parent` in the thread under `root` (both 0: a new root comment) and returns
+    /// the reply as it will show. Login required.
+    async fn reply(&self, area: CommentArea, root: u64, parent: u64, text: &str) -> Result<Comment>;
 }
 
 pub struct WebComment {
@@ -89,12 +111,24 @@ pub(crate) fn comment_of(v: &Value, up_mid: u64) -> Comment {
             .unwrap_or_default(),
         video_links: video_links(&v["content"]),
         note_cvid: u64_of(&v["note_cvid_str"]),
+        liked: u64_of(&v["action"]) == 1,
         raw: v.clone(),
     }
 }
 
+/// A `jump_url` entry for a shop item: it carries a goods id, opens a shopping app, or is a
+/// `b23.tv/mall-…` link. Short links look like any other `b23.tv` link, so this is what tells
+/// them apart from videos.
+fn is_goods(token: &str, j: &Value) -> bool {
+    !j["extra"]["goods_item_id"].is_null()
+        || !j["extra"]["goods_prefetched_cache"].is_null()
+        || !str_of(&j["app_package_name"]).is_empty()
+        || token.contains("/mall-")
+        || token.contains("b23.tv/cm-")
+}
+
 /// `content.jump_url` entries that point at a video: the key is the text as written (a BV or
-/// av id, or a video url); search highlights and other links are left out.
+/// av id, or a video url); search highlights, shop items and other links are left out.
 fn video_links(content: &Value) -> Vec<VideoLink> {
     let text = str_of(&content["message"]);
     content["jump_url"]
@@ -102,6 +136,7 @@ fn video_links(content: &Value) -> Vec<VideoLink> {
         .map(|m| {
             m.iter()
                 .filter(|(token, _)| text.contains(token.as_str()))
+                .filter(|(token, j)| !is_goods(token, j))
                 .filter_map(|(token, j)| {
                     let video = find_video_ref(token).or_else(|| find_video_ref(&str_of(&j["pc_url"])))?;
                     Some(VideoLink { token: token.clone(), title: plain_letters(&str_of(&j["title"])), video })
@@ -147,34 +182,57 @@ pub(crate) fn page_of(d: &Value) -> CommentPage {
 
 #[async_trait]
 impl CommentApi for WebComment {
-    async fn page(&self, aid: u64, sort: CommentSort, offset: Option<&str>) -> Result<CommentPage> {
+    async fn page(&self, area: CommentArea, sort: CommentSort, offset: Option<&str>) -> Result<CommentPage> {
         let mode = match sort {
             CommentSort::Hot => 3,
             CommentSort::Time => 2,
         };
         let pagination = serde_json::json!({ "offset": offset.unwrap_or_default() }).to_string();
-        let p = params!["oid" => aid, "type" => 1, "mode" => mode, "pagination_str" => pagination, "plat" => 1, "web_location" => 1315875];
+        let p = params!["oid" => area.oid, "type" => area.kind, "mode" => mode, "pagination_str" => pagination, "plat" => 1, "web_location" => 1315875];
         Ok(page_of(&self.http.get_json(MAIN, p, true).await?))
     }
 
-    async fn replies(&self, aid: u64, root: u64, pn: u32, ps: u32) -> Result<(Vec<Comment>, u32)> {
+    async fn replies(&self, area: CommentArea, root: u64, pn: u32, ps: u32) -> Result<(Vec<Comment>, u32)> {
         let d = self
             .http
-            .get_json(REPLIES, params!["oid" => aid, "type" => 1, "root" => root, "pn" => pn, "ps" => ps], false)
+            .get_json(
+                REPLIES,
+                params!["oid" => area.oid, "type" => area.kind, "root" => root, "pn" => pn, "ps" => ps],
+                false,
+            )
             .await?;
         let up_mid = u64_of(&d["upper"]["mid"]);
         Ok((list(&d["replies"], up_mid), u64_of(&d["page"]["count"]) as u32))
     }
 
-    async fn root(&self, aid: u64, root: u64) -> Result<Comment> {
+    async fn root(&self, area: CommentArea, root: u64) -> Result<Comment> {
         let d = self
             .http
-            .get_json(REPLIES, params!["oid" => aid, "type" => 1, "root" => root, "pn" => 1, "ps" => 1], false)
+            .get_json(
+                REPLIES,
+                params!["oid" => area.oid, "type" => area.kind, "root" => root, "pn" => 1, "ps" => 1],
+                false,
+            )
             .await?;
         if d["root"].is_null() {
             return Err(ApiError::Decode("reply/reply has no root comment".into()));
         }
         Ok(comment_of(&d["root"], u64_of(&d["upper"]["mid"])))
+    }
+
+    async fn like(&self, area: CommentArea, rpid: u64, on: bool) -> Result<()> {
+        let form = params!["type" => area.kind, "oid" => area.oid, "rpid" => rpid, "action" => u8::from(on)];
+        self.http.post_form(ACTION, form).await.map(|_| ())
+    }
+
+    async fn reply(&self, area: CommentArea, root: u64, parent: u64, text: &str) -> Result<Comment> {
+        let mut form = params!["type" => area.kind, "oid" => area.oid, "message" => text, "plat" => 1];
+        if root > 0 {
+            form.push(("root".into(), root.to_string()));
+            form.push(("parent".into(), parent.max(root).to_string()));
+        }
+        let d = self.http.post_form(ADD, form).await?;
+        Ok(comment_of(&d["reply"], 0))
     }
 }
 
@@ -182,6 +240,20 @@ impl CommentApi for WebComment {
 mod tests {
     use super::*;
     use serde_json::json;
+
+    /// 2026-11-01: an UP's pinned shop comment (BV154nE6FEK1) links `b23.tv/mall-…` items that
+    /// open Taobao; they are not videos.
+    #[test]
+    fn shop_links_are_not_video_links() {
+        let v = json!({"rpid": 1, "content": {
+            "message": "推荐这把椅子 https://b23.tv/mall-1PEUvH-75mBT 看 BV1zpxy6xEFC",
+            "jump_url": {
+                "https://b23.tv/mall-1PEUvH-75mBT": {"title": "工学椅", "app_package_name": "com.taobao.taobao", "extra": {"goods_item_id": 104811215}},
+                "BV1zpxy6xEFC": {"title": "视频", "pc_url": ""}}}});
+        let c = comment_of(&v, 0);
+        assert_eq!(c.video_links.len(), 1);
+        assert_eq!(c.video_links[0].token, "BV1zpxy6xEFC");
+    }
 
     /// Shapes from the 2026-10-31 capture of reply/main.
     #[test]

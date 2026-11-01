@@ -1,5 +1,6 @@
 package dev.rubi.app.ui
 
+import dev.rubi.app.playback.LocalMedia
 import android.app.Activity
 import android.content.Context
 import android.content.ContextWrapper
@@ -56,17 +57,12 @@ internal fun Context.activity(): Activity? = when (this) {
 }
 
 /**
- * True while the player is fullscreen: the root then paints black edge to edge instead of
- * keeping clear of the camera cutout and system bars (which left a light strip on some phones).
- */
-val fullscreenActive = mutableStateOf(false)
-
-/**
  * While `on`: landscape, system bars hidden (swipe to peek), drawing into the cutout area, screen
  * kept on. Undone on exit.
  */
 @Composable
 fun FullscreenMode(on: Boolean) {
+    val media = LocalMedia.current
     val activity = LocalContext.current.activity() ?: return
     val view = LocalView.current
     DisposableEffect(on) {
@@ -83,7 +79,7 @@ fun FullscreenMode(on: Boolean) {
                 }
             }
             view.keepScreenOn = true
-            fullscreenActive.value = true
+            media.fullscreen.value = true
         }
         onDispose {
             if (on) {
@@ -93,7 +89,7 @@ fun FullscreenMode(on: Boolean) {
                     window.attributes = window.attributes.apply { layoutInDisplayCutoutMode = cutoutBefore }
                 }
                 view.keepScreenOn = false
-                fullscreenActive.value = false
+                media.fullscreen.value = false
             }
         }
     }

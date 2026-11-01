@@ -7,11 +7,13 @@ use serde_json::Value;
 use crate::error::{ApiError, Result};
 use crate::http::HttpClient;
 use crate::params;
-use crate::parse::{card_of, duration_of, str_of, u64_of};
+use crate::parse::{card_of, duration_of, image_of, plain_letters, str_of, u64_of};
 
 const VIEW: &str = "https://api.bilibili.com/x/web-interface/view";
 const TAGS: &str = "https://api.bilibili.com/x/web-interface/view/detail/tag";
 const PLAYURL: &str = "https://api.bilibili.com/x/player/wbi/playurl";
+/// Player info; for a signed-in user it also says where they stopped watching.
+const PLAYER: &str = "https://api.bilibili.com/x/player/v2";
 /// DASH + HDR + 4K + Dolby + 8K + AV1. The server still caps quality to what the account may play.
 const FNVAL: u32 = 16 | 64 | 128 | 256 | 512 | 1024 | 2048;
 
@@ -22,11 +24,78 @@ pub struct Page {
     pub duration_s: u32,
 }
 
+/// One video of a 合集 (UGC season).
+#[derive(Debug, Clone, PartialEq, Default)]
+pub struct SeasonEpisode {
+    pub bvid: String,
+    pub aid: u64,
+    pub cid: u64,
+    pub title: String,
+    pub cover: String,
+    pub duration_s: u32,
+}
+
+#[derive(Debug, Clone, PartialEq, Default)]
+pub struct SeasonSection {
+    pub title: String,
+    pub episodes: Vec<SeasonEpisode>,
+}
+
+/// The 合集 a video belongs to, in the UP's order.
+#[derive(Debug, Clone, PartialEq, Default)]
+pub struct Season {
+    pub id: u64,
+    pub title: String,
+    pub sections: Vec<SeasonSection>,
+}
+
 #[derive(Debug, Clone)]
 pub struct VideoDetail {
     pub card: VideoCard,
     pub cid: u64,
     pub pages: Vec<Page>,
+    /// `None` when the video is in no 合集.
+    pub season: Option<Season>,
+}
+
+/// `last_play_time` (ms) and `last_play_cid` of `player/v2`; a missing cid means the part asked about.
+fn last_watched_of(d: &Value, cid: u64) -> Option<(u64, u64)> {
+    let at = u64_of(&d["last_play_time"]);
+    let part = Some(u64_of(&d["last_play_cid"])).filter(|&c| c > 0).unwrap_or(cid);
+    (at > 0).then_some((part, at))
+}
+
+/// `ugc_season` of `view`: sections of episodes; a season without episodes counts as none.
+fn season_of(v: &Value) -> Option<Season> {
+    let sections: Vec<SeasonSection> = v["sections"]
+        .as_array()?
+        .iter()
+        .map(|s| SeasonSection {
+            title: str_of(&s["title"]),
+            episodes: s["episodes"]
+                .as_array()
+                .map(|a| {
+                    a.iter()
+                        .map(|e| SeasonEpisode {
+                            bvid: str_of(&e["bvid"]),
+                            aid: u64_of(&e["aid"]),
+                            cid: u64_of(&e["cid"]),
+                            title: plain_letters(&str_of(&e["title"])),
+                            cover: image_of(&e["arc"]["pic"]),
+                            duration_s: [&e["arc"]["duration"], &e["page"]["duration"]]
+                                .into_iter()
+                                .map(duration_of)
+                                .find(|&d| d > 0)
+                                .unwrap_or_default(),
+                        })
+                        .filter(|e| !e.bvid.is_empty())
+                        .collect()
+                })
+                .unwrap_or_default(),
+        })
+        .filter(|s| !s.episodes.is_empty())
+        .collect();
+    (!sections.is_empty()).then(|| Season { id: u64_of(&v["id"]), title: str_of(&v["title"]), sections })
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -60,6 +129,9 @@ pub trait VideoApi: Send + Sync {
     async fn expand_short(&self, url: &str) -> Result<Option<String>>;
     async fn tags(&self, bvid: &str) -> Result<Vec<String>>;
     async fn playurl(&self, bvid: &str, cid: u64, qn: u32) -> Result<PlayUrl>;
+    /// Where the signed-in user stopped watching: the part (`cid`) and the position in ms.
+    /// `None` for guests and for videos never watched.
+    async fn last_watched(&self, bvid: &str, cid: u64) -> Result<Option<(u64, u64)>>;
     /// Headers the player must send with stream requests.
     fn stream_headers(&self) -> Vec<(String, String)>;
 }
@@ -132,7 +204,12 @@ impl VideoApi for WebVideo {
                     .collect()
             })
             .unwrap_or_default();
-        Ok(VideoDetail { cid: u64_of(&d["cid"]), card: card_of(&d, SourceKind::Related), pages })
+        Ok(VideoDetail {
+            cid: u64_of(&d["cid"]),
+            card: card_of(&d, SourceKind::Related),
+            pages,
+            season: season_of(&d["ugc_season"]),
+        })
     }
 
     async fn bvid_of(&self, aid: u64) -> Result<String> {
@@ -181,11 +258,41 @@ impl VideoApi for WebVideo {
     fn stream_headers(&self) -> Vec<(String, String)> {
         self.http.stream_headers()
     }
+
+    async fn last_watched(&self, bvid: &str, cid: u64) -> Result<Option<(u64, u64)>> {
+        let d = self.http.get_json(PLAYER, params!["bvid" => bvid, "cid" => cid], false).await?;
+        Ok(last_watched_of(&d, cid))
+    }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn last_watched_needs_a_position() {
+        let d = serde_json::json!({"last_play_time": 432000, "last_play_cid": 22});
+        assert_eq!(last_watched_of(&d, 11), Some((22, 432000)));
+        assert_eq!(last_watched_of(&serde_json::json!({"last_play_time": 5000}), 11), Some((11, 5000)));
+        assert_eq!(last_watched_of(&serde_json::json!({"last_play_time": 0}), 11), None);
+    }
+
+    #[test]
+    fn season_lists_sections_and_episodes() {
+        let v = serde_json::json!({"id": 9, "title": "合集", "sections": [
+            {"title": "正片", "episodes": [
+                {"bvid": "BV1a", "aid": 1, "cid": 11, "title": "第一集", "arc": {"pic": "http://i0.hdslb.com/a.jpg", "duration": 125}},
+                {"bvid": "BV1b", "aid": 2, "cid": 22, "title": "第二集", "arc": {"pic": ""}, "page": {"duration": 60}}
+            ]},
+            {"title": "空", "episodes": []}
+        ]});
+        let s = season_of(&v).unwrap();
+        assert_eq!((s.id, s.sections.len()), (9, 1));
+        let e = &s.sections[0].episodes;
+        assert_eq!((e[0].cover.as_str(), e[0].duration_s), ("https://i0.hdslb.com/a.jpg", 125));
+        assert_eq!(e[1].duration_s, 60);
+        assert!(season_of(&serde_json::json!(null)).is_none());
+    }
     use serde_json::json;
 
     #[test]

@@ -20,6 +20,8 @@ pub trait DynamicApi: Send + Sync {
     async fn followed_ups(&self) -> Result<Vec<FollowedUp>>;
     /// One UP's posts of every kind, newest first; pass the returned offset back for more.
     async fn up_dynamics(&self, mid: u64, offset: Option<&str>) -> Result<(Vec<Dynamic>, Option<String>)>;
+    /// Every followed UP's posts, newest first; pass the returned offset back for older ones.
+    async fn followed_posts(&self, offset: Option<&str>) -> Result<(Vec<Dynamic>, Option<String>)>;
 }
 
 pub struct WebDynamic {
@@ -127,7 +129,17 @@ impl DynamicApi for WebDynamic {
     }
 
     async fn up_dynamics(&self, mid: u64, offset: Option<&str>) -> Result<(Vec<Dynamic>, Option<String>)> {
-        let mut p = params!["host_mid" => mid, "timezone_offset" => -480];
+        self.feed(params!["host_mid" => mid, "timezone_offset" => -480], offset).await
+    }
+
+    async fn followed_posts(&self, offset: Option<&str>) -> Result<(Vec<Dynamic>, Option<String>)> {
+        self.feed(params!["type" => "all", "timezone_offset" => -480], offset).await
+    }
+}
+
+impl WebDynamic {
+    /// A page of `feed/all` with `p`, after `offset`.
+    async fn feed(&self, mut p: crate::http::Params, offset: Option<&str>) -> Result<(Vec<Dynamic>, Option<String>)> {
         if let Some(o) = offset {
             p.push(("offset".into(), o.into()));
         }

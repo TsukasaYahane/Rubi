@@ -1,5 +1,12 @@
 package dev.rubi.app.ui
 
+import dev.rubi.core.RubiException
+import androidx.compose.ui.text.AnnotatedString
+import androidx.compose.ui.platform.LocalClipboardManager
+import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.foundation.gestures.detectTapGestures
+import android.widget.Toast
+import dev.rubi.core.FfiCommentArea
 import android.os.SystemClock
 import android.util.Log
 import android.content.Intent
@@ -62,9 +69,6 @@ import androidx.lifecycle.LifecycleEventObserver
 import androidx.lifecycle.compose.LocalLifecycleOwner
 import dev.rubi.app.data.DanmakuDisplay
 import dev.rubi.app.data.PlaybackPrefs
-import dev.rubi.app.playback.AudioQueue
-import dev.rubi.app.playback.Pip
-import dev.rubi.app.playback.PlayerHolder
 import dev.rubi.app.ui.theme.LocalMetro
 import dev.rubi.app.ui.theme.MetroType
 import dev.rubi.core.FfiCommentRef
@@ -85,90 +89,130 @@ import kotlinx.coroutines.withContext
 /** Lines a comment shows before 展开全文. */
 private const val COMMENT_LINES = 6
 
+/**
+ * The comments of one area (a video's, an article's…): sorted pages of fishbone threads, and
+ * a long press on any comment for 点赞 / 回复 / 复制 / 分享.
+ */
 @Composable
 internal fun CommentSection(
     app: RubiApp,
-    aid: ULong,
+    area: FfiCommentArea,
     focus: FfiCommentRef?,
     onOpenVideo: (FfiVideoLink) -> Unit,
+    onOpenArticle: (String) -> Unit,
     onFocusShown: () -> Unit,
 ) {
     val c = LocalMetro.current
     val scope = rememberCoroutineScope()
+    val ctx = LocalContext.current
+    val clipboard = LocalClipboardManager.current
     var byTime by remember { mutableStateOf(false) }
     var pinned by remember { mutableStateOf(emptyList<FfiCommentRow>()) }
     var hiddenPinned by remember { mutableStateOf(0u) }
-    val threads = remember { mutableStateListOf<FfiCommentThread>() }
     val collapsed = remember { mutableStateMapOf<ULong, Boolean>() }
-    var error by remember { mutableStateOf<String?>(null) }
     // The thread holding the notice's comment, shown first and kept across sort changes.
     var focusThread by remember { mutableStateOf<FfiCommentThread?>(null) }
     var focusNote by remember { mutableStateOf<String?>(null) }
 
-    LaunchedEffect(aid, focus) {
+    LaunchedEffect(area, focus) {
         if (focus == null) return@LaunchedEffect
-        runCatching { app.core.focusThread(aid, focus) }
+        runCatching { app.core.focusThread(area, focus) }
             .onSuccess { focusThread = it; onFocusShown() }
             .onFailure { focusNote = "无法定位到消息里的评论（可能已被删除或折叠）" }
     }
 
-    // Pages after the first follow the API's cursor; `round` restarts from the top (tapping
-    // the active sort again).
-    var next by remember { mutableStateOf<String?>(null) }
-    var hasMore by remember { mutableStateOf(true) }
-    var loadingMore by remember { mutableStateOf(false) }
-    var round by remember { mutableStateOf(0) }
-    // When the last page request went out: pages are spaced so scrolling fast does not fire a
-    // burst of requests (which B站 answers with HTTP 412).
-    var lastLoad by remember { mutableStateOf(0L) }
-    var waiting by remember { mutableStateOf(false) }
+    // Pages after the first follow the API's cursor, spaced so a fast scroll cannot fire a burst
+    // (B站 answers those with HTTP 412). The first page also brings the pinned comments.
+    val paged = remember(area) {
+        Paged<FfiCommentThread, String>(scope, key = { it.rootRpid }, minGapMs = COMMENT_PAGE_GAP_MS) { at ->
+            val page = app.core.comments(area, byTime, at)
+            if (at == null) {
+                pinned = page.pinned
+                hiddenPinned = page.hiddenPinned
+            }
+            Page(page.threads, page.nextOffset?.takeIf { page.threads.isNotEmpty() })
+        }
+    }
+    // A new sort starts over; so does tapping the active one again.
+    LaunchedEffect(paged, byTime) { paged.reset() }
+    val error = paged.error?.let(::commentError)
 
-    fun loadMore() {
-        // Only after the first page is in: before that there is no cursor to follow.
-        if (loadingMore || !hasMore || next == null) return
-        val now = SystemClock.elapsedRealtime()
-        if (now - lastLoad < COMMENT_PAGE_GAP_MS) {
-            // Too soon: try once more when the gap has passed, in case the list stops moving.
-            if (!waiting) {
-                waiting = true
+    // Likes changed here, by rpid (liked, count), until the list reloads.
+    val likeOverride = remember { mutableStateMapOf<ULong, Pair<Boolean, ULong>>() }
+    fun likeOf(row: FfiCommentRow) = likeOverride[row.rpid] ?: (row.liked to row.likes)
+    // The comment a long press is acting on, with the root of its thread.
+    var menuFor by remember { mutableStateOf<Pair<FfiCommentRow, ULong>?>(null) }
+    var replyFor by remember { mutableStateOf<Pair<FfiCommentRow, ULong>?>(null) }
+    var sending by remember { mutableStateOf(false) }
+    var replyError by remember { mutableStateOf<String?>(null) }
+    fun say(msg: String) = Toast.makeText(ctx, msg, Toast.LENGTH_SHORT).show()
+
+    fun replaceThread(t: FfiCommentThread) {
+        if (t.rootRpid == focusThread?.rootRpid) focusThread = t else paged.replace(t)
+    }
+
+    /** A sent reply goes to the end of its thread at once, with the branch line drawn on to it. */
+    fun addReply(root: ULong, reply: FfiCommentRow) {
+        val thread = (listOfNotNull(focusThread) + paged.items).firstOrNull { it.rootRpid == root } ?: return
+        val lastAtOne = thread.rows.indexOfLast { it.depth == 1u }
+        val rows = thread.rows.mapIndexed { i, r -> if (i == lastAtOne) r.copy(hasLaterSibling = true) else r } + reply
+        replaceThread(thread.copy(rows = rows, totalReplies = thread.totalReplies + 1u))
+        collapsed[root] = false
+    }
+
+    fun act(row: FfiCommentRow, root: ULong, action: CommentAction) {
+        menuFor = null
+        when (action) {
+            CommentAction.Like -> {
+                val (was, count) = likeOf(row)
+                val want = !was
+                likeOverride[row.rpid] = want to if (want) count + 1u else count - minOf(count, 1uL)
                 scope.launch {
-                    delay(COMMENT_PAGE_GAP_MS - (now - lastLoad))
-                    waiting = false
-                    loadMore()
+                    runCatching { app.core.likeComment(area, row.rpid, want) }
+                        .onSuccess { say(if (want) "已点赞" else "已取消点赞") }
+                        .onFailure {
+                            likeOverride[row.rpid] = was to count
+                            say(if (it is RubiException.NotLoggedIn) "登录后才能点赞" else "点赞失败：${it.message}")
+                        }
                 }
             }
-            return
-        }
-        lastLoad = now
-        loadingMore = true
-        scope.launch {
-            runCatching { app.core.comments(aid, byTime, next) }
-                .onSuccess { page ->
-                    threads.addAll(page.threads.filter { t -> threads.none { it.rootRpid == t.rootRpid } })
-                    next = page.nextOffset
-                    hasMore = page.nextOffset != null && page.threads.isNotEmpty()
-                    error = null
-                }
-                .onFailure { error = commentError(it) }
-            loadingMore = false
+            CommentAction.Reply -> {
+                replyError = null
+                replyFor = row to root
+            }
+            CommentAction.Copy -> {
+                clipboard.setText(AnnotatedString(row.text))
+                say("已复制评论文字")
+            }
+            CommentAction.Share -> {
+                clipboard.setText(AnnotatedString(commentLink(area, row.rpid)))
+                say("已复制评论链接")
+            }
         }
     }
 
-    LaunchedEffect(aid, byTime, round) {
-        loadingMore = true
-        runCatching { app.core.comments(aid, byTime, null) }
-            .onSuccess { page ->
-                pinned = page.pinned
-                hiddenPinned = page.hiddenPinned
-                threads.clear()
-                threads.addAll(page.threads)
-                next = page.nextOffset
-                hasMore = page.nextOffset != null && page.threads.isNotEmpty()
-                error = null
-            }
-            .onFailure { error = commentError(it) }
-        lastLoad = SystemClock.elapsedRealtime()
-        loadingMore = false
+    fun send(text: String) {
+        val (row, root) = replyFor ?: return
+        sending = true
+        scope.launch {
+            runCatching { app.core.replyComment(area, root, row.rpid, text) }
+                .onSuccess { r ->
+                    // Replies to a reply say whom they answer, as the list shows them.
+                    addReply(root, if (row.depth > 0u) r.copy(replyTo = row.name) else r)
+                    replyFor = null
+                    say("已发送")
+                }
+                .onFailure { replyError = if (it is RubiException.NotLoggedIn) "登录后才能回复" else "发送失败：${it.message}" }
+            sending = false
+        }
+    }
+
+    menuFor?.let { (row, root) ->
+        val (liked, likes) = likeOf(row)
+        CommentMenu(row, liked, likes, onDismiss = { menuFor = null }) { act(row, root, it) }
+    }
+    replyFor?.let { (row, _) ->
+        ReplyComposer(row.name, sending, replyError, onDismiss = { replyFor = null }, onSend = ::send)
     }
 
     Column(Modifier.padding(horizontal = 16.dp)) {
@@ -181,23 +225,31 @@ internal fun CommentSection(
                     color = if (byTime == t) c.fg else c.fg2,
                     fontWeight = if (byTime == t) FontWeight.SemiBold else FontWeight.Normal,
                     modifier = Modifier.padding(start = 16.dp).size(width = 56.dp, height = 44.dp).clickable {
-                        if (byTime == t) round++ else byTime = t
+                        if (byTime == t) paged.reset() else byTime = t
                     },
                 )
             }
         }
         error?.let {
             Text(it, color = c.fg2, fontSize = 13.sp)
-            if (threads.isEmpty()) TextAction("重试", onClick = { error = null; round++ })
+            if (paged.items.isEmpty()) TextAction("重试", onClick = paged::reset)
         }
         focusNote?.let { Meta(it) }
-        pinned.forEach { CommentRow(it, open = BooleanArray(0), pinnedLabel = true, onLink = onOpenVideo) }
-        val focused = focusThread
-        val shownThreads = listOfNotNull(focused) + threads.filter { it.rootRpid != focused?.rootRpid }
-        fun replace(t: FfiCommentThread) {
-            if (t.rootRpid == focused?.rootRpid) focusThread = t
-            else threads.indexOfFirst { it.rootRpid == t.rootRpid }.takeIf { it >= 0 }?.let { threads[it] = t }
+        pinned.forEach { row ->
+            val (liked, likes) = likeOf(row)
+            CommentRow(
+                row,
+                open = BooleanArray(0),
+                liked = liked,
+                likes = likes,
+                pinnedLabel = true,
+                onLink = onOpenVideo,
+                onOpenNote = { onOpenArticle("cv$it") },
+                onLongPress = { menuFor = row to row.rpid },
+            )
         }
+        val focused = focusThread
+        val shownThreads = listOfNotNull(focused) + paged.items.filter { it.rootRpid != focused?.rootRpid }
         shownThreads.forEach { thread ->
             val isCollapsed = collapsed[thread.rootRpid] == true
             val rows = if (isCollapsed) thread.rows.take(1) else thread.rows
@@ -205,7 +257,17 @@ internal fun CommentSection(
                 val open = BooleanArray(16)
                 rows.forEach { row ->
                     // Snapshot: drawing happens later, after `open` has moved on.
-                    CommentRow(row, open.copyOf(), highlight = thread === focused && row.rpid == focus?.rpid, onLink = onOpenVideo)
+                    val (liked, likes) = likeOf(row)
+                    CommentRow(
+                        row,
+                        open.copyOf(),
+                        liked = liked,
+                        likes = likes,
+                        highlight = thread === focused && row.rpid == focus?.rpid,
+                        onLink = onOpenVideo,
+                        onOpenNote = { onOpenArticle("cv$it") },
+                        onLongPress = { menuFor = row to thread.rootRpid },
+                    )
                     if (row.depth.toInt() in 1 until open.size) open[row.depth.toInt()] = row.hasLaterSibling
                 }
                 val shown = (thread.rows.size - 1).toUInt()
@@ -214,8 +276,8 @@ internal fun CommentSection(
                     else {
                         if (thread.hidden > 0u) add("再看 5 条 · 剩 ${thread.hidden}" to {
                             scope.launch {
-                                runCatching { app.core.commentThread(aid, thread.rootRpid, shown + 5u) }
-                                    .onSuccess { replace(it) }
+                                runCatching { app.core.commentThread(area, thread.rootRpid, shown + 5u) }
+                                    .onSuccess { replaceThread(it) }
                             }
                             Unit
                         })
@@ -234,13 +296,13 @@ internal fun CommentSection(
         val screenH = with(LocalDensity.current) { LocalConfiguration.current.screenHeightDp.dp.toPx() }
         Column(
             Modifier.fillMaxWidth().padding(vertical = 16.dp).onGloballyPositioned { coords ->
-                if (coords.boundsInWindow().top < screenH && error == null) loadMore()
+                if (coords.boundsInWindow().top < screenH) paged.more()
             },
         ) {
             when {
-                loadingMore -> Meta("评论加载中…")
-                error != null && threads.isNotEmpty() -> TextAction("加载更多评论", onClick = { error = null; lastLoad = 0L; loadMore() })
-                !hasMore && threads.isNotEmpty() -> Meta("没有更多评论了")
+                paged.loading -> Meta("评论加载中…")
+                error != null && paged.items.isNotEmpty() -> TextAction("加载更多评论", onClick = paged::retry)
+                paged.ended && paged.items.isNotEmpty() -> Meta("没有更多评论了")
                 else -> {}
             }
         }
@@ -261,9 +323,13 @@ private fun commentError(e: Throwable): String =
 private fun CommentRow(
     row: FfiCommentRow,
     open: BooleanArray,
+    liked: Boolean,
+    likes: ULong,
     pinnedLabel: Boolean = false,
     highlight: Boolean = false,
     onLink: (FfiVideoLink) -> Unit = {},
+    onOpenNote: (ULong) -> Unit = {},
+    onLongPress: () -> Unit = {},
 ) {
     val c = LocalMetro.current
     val depth = row.depth.toInt()
@@ -282,6 +348,8 @@ private fun CommentRow(
                 drawLine(c.spine, Offset(xd, 0f), Offset(xd, if (row.hasLaterSibling) size.height else tick), stroke)
                 drawLine(c.spine, Offset(xd, tick), Offset(xd + 10.dp.toPx(), tick), stroke)
             }
+            // Taps go to links and 展开全文 inside; a long press anywhere opens the actions.
+            .pointerInput(row.rpid) { detectTapGestures(onLongPress = { onLongPress() }) }
             .padding(start = indent, top = 6.dp, bottom = 6.dp),
         verticalArrangement = Arrangement.spacedBy(2.dp),
     ) {
@@ -321,13 +389,7 @@ private fun CommentRow(
             )
         }
         if (row.pictures.isNotEmpty()) CommentPictures(row.pictures)
-        if (row.noteCvid > 0u) {
-            val ctx = LocalContext.current
-            // Rubi has no article reader yet (文字专栏 is phase 2): the full note opens in the browser.
-            TextAction("查看完整笔记", onClick = {
-                ctx.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse("https://www.bilibili.com/read/cv${row.noteCvid}")))
-            })
-        }
-        Meta("赞 ${row.likes}")
+        if (row.noteCvid > 0u) TextAction("查看完整笔记", onClick = { onOpenNote(row.noteCvid) })
+        Meta(if (liked) "已赞 $likes" else "赞 $likes", color = if (liked) c.accent else c.fg2)
     }
 }

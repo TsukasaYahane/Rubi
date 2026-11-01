@@ -11,6 +11,21 @@ class UiPrefs(context: Context) {
         get() = prefs.getBoolean("home_dual", true)
         set(value) = prefs.edit().putBoolean("home_dual", value).apply()
 
+    /** 播完自动连播下一个: the next part, then the next video of the 合集. */
+    var autoNext: Boolean
+        get() = prefs.getBoolean("auto_next", true)
+        set(value) = prefs.edit().putBoolean("auto_next", value).apply()
+
+    /** 离线缓存 only on unmetered networks (Wi-Fi). */
+    var downloadWifiOnly: Boolean
+        get() = prefs.getBoolean("download_wifi_only", true)
+        set(value) = prefs.edit().putBoolean("download_wifi_only", value).apply()
+
+    /** Body text size of the 专栏 reader, in sp. */
+    var articleSp: Int
+        get() = prefs.getInt("article_sp", 16)
+        set(value) = prefs.edit().putInt("article_sp", value).apply()
+
     /** Who was signed in last time (name, mid), shown at once while the account is re-read. */
     var lastAccount: Pair<String, Long>?
         get() = prefs.getString("account_name", null)?.let { it to prefs.getLong("account_mid", 0L) }

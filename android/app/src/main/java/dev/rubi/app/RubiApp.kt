@@ -6,6 +6,7 @@ import coil3.SingletonImageLoader
 import dev.rubi.app.data.SessionStore
 import androidx.compose.runtime.mutableStateOf
 import dev.rubi.app.data.UiPrefs
+import dev.rubi.app.playback.Media
 import dev.rubi.core.FfiAccount
 import dev.rubi.core.RubiCore
 import kotlinx.coroutines.CoroutineScope
@@ -20,6 +21,10 @@ class RubiApp : Application() {
         private set
 
     lateinit var ui: UiPrefs
+        private set
+
+    /** Players, 听视频, picture-in-picture: built once, after the core. */
+    lateinit var media: Media
         private set
 
     /**
@@ -44,6 +49,7 @@ class RubiApp : Application() {
         ui = UiPrefs(this)
         val stored = sessions.load()
         core = RubiCore(filesDir.absolutePath, stored)
+        media = Media(this, core)
         if (stored != null) {
             ui.lastAccount?.let { (name, mid) -> account.value = FfiAccount(true, mid.toULong(), name) }
         }

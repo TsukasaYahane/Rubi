@@ -2,7 +2,7 @@
 
 use std::sync::Arc;
 
-use rubi_api::{PlayUrl, VideoApi};
+use rubi_api::{Page, PlayUrl, Season, VideoApi};
 use rubi_model::{VideoCard, VideoRef, find_video_ref};
 
 use crate::error::{CoreError, Result};
@@ -41,6 +41,33 @@ impl CardCache {
     }
 }
 
+/// What the player page shows about a video besides its card: its parts (分P) and the
+/// 合集 it belongs to.
+#[derive(Debug, Clone)]
+pub struct VideoInfo {
+    pub card: VideoCard,
+    pub parts: Vec<Page>,
+    pub season: Option<Season>,
+}
+
+/// Where watching can pick up again.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct ResumePoint {
+    pub cid: u64,
+    pub position_ms: u64,
+}
+
+/// Positions this close to the start are not worth offering.
+const RESUME_MIN_MS: u64 = 10_000;
+/// Nor ones this close to the end (the video was finished).
+const RESUME_END_MS: u64 = 15_000;
+
+/// Whether a stopped position is worth offering for a part `duration_s` long (0: unknown).
+fn worth_resuming(position_ms: u64, duration_s: u32) -> bool {
+    let end = u64::from(duration_s) * 1000;
+    position_ms >= RESUME_MIN_MS && (end == 0 || position_ms + RESUME_END_MS < end)
+}
+
 /// Streams of one part, with only the qualities Rubi offers.
 #[derive(Debug, Clone)]
 pub struct Playback {
@@ -76,14 +103,14 @@ impl Videos {
         self.cards.clear();
     }
 
-    /// Fresh details for the player page: the card (with tags and cid) and how many parts.
-    pub async fn detail(&self, bvid: &str) -> Result<(VideoCard, usize)> {
+    /// Fresh details for the player page: the card (with tags and cid), its parts and 合集.
+    pub async fn detail(&self, bvid: &str) -> Result<VideoInfo> {
         let detail = self.api.view(bvid).await?;
         let mut card = detail.card;
         card.tags = self.api.tags(bvid).await.unwrap_or_default();
         card.cid = card.cid.or(Some(detail.cid)).filter(|&c| c > 0);
         self.cards.remember(std::slice::from_ref(&card));
-        Ok((card, detail.pages.len().max(1)))
+        Ok(VideoInfo { card, parts: detail.pages, season: detail.season })
     }
 
     /// The BV id a video pointer stands for: av numbers are looked up, short links followed
@@ -106,6 +133,19 @@ impl Videos {
         }
     }
 
+    /// Where the signed-in user stopped watching `bvid`, when it is worth offering (not the
+    /// first seconds, not the very end). Guests and failures get `None`: it is only a hint.
+    pub async fn resume_point(&self, bvid: &str) -> Option<ResumePoint> {
+        let card = self.card(bvid).await.ok()?;
+        let cid = match card.cid {
+            Some(c) => c,
+            None => self.api.view(bvid).await.ok()?.cid,
+        };
+        let (cid, position_ms) = self.api.last_watched(bvid, cid).await.ok()??;
+        // Multi-part durations are per part; the card's total still bounds the end.
+        worth_resuming(position_ms, card.duration_s).then_some(ResumePoint { cid, position_ms })
+    }
+
     /// Streams of the video's first part at `qn` (the server caps it to what the account may play).
     pub async fn playback(&self, bvid: &str, qn: u32) -> Result<Playback> {
         // Shown cards usually carry the cid already; only look it up when they do not.
@@ -121,5 +161,18 @@ impl Videos {
         let mut url = self.api.playurl(bvid, cid, qn.min(MAX_FREE_QN)).await?;
         url.accept.retain(|(qn, _)| *qn <= MAX_FREE_QN);
         Ok(Playback { cid, url, headers: self.api.stream_headers() })
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn resume_skips_the_start_and_the_end() {
+        assert!(!worth_resuming(5_000, 600));
+        assert!(worth_resuming(432_000, 760));
+        assert!(!worth_resuming(750_000, 760), "finished");
+        assert!(worth_resuming(60_000, 0), "unknown length");
     }
 }

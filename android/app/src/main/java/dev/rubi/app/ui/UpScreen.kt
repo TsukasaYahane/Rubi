@@ -47,6 +47,9 @@ import kotlinx.coroutines.launch
 
 private val ORDERS = listOf("最新" to FfiUpOrder.NEWEST, "最多播放" to FfiUpOrder.MOST_VIEWED, "最多收藏" to FfiUpOrder.MOST_FAVORITED)
 
+/** Least time between two upload pages. */
+private const val UP_PAGE_GAP_MS = 1_000L
+
 /** An UP's page: profile, follow, and uploads in two columns (充电专属 videos left out). */
 @Composable
 fun UpScreen(app: RubiApp, nav: Nav, mid: ULong, name: String) {
@@ -54,51 +57,22 @@ fun UpScreen(app: RubiApp, nav: Nav, mid: ULong, name: String) {
     val scope = rememberCoroutineScope()
     var profile by remember { mutableStateOf<FfiUpProfile?>(null) }
     var order by remember { mutableStateOf(FfiUpOrder.NEWEST) }
-    val cards = remember { mutableStateListOf<FfiVideoCard>() }
-    var page by remember { mutableStateOf(1u) }
-    var hasMore by remember { mutableStateOf(true) }
-    var loading by remember { mutableStateOf(false) }
-    var hiddenCharging by remember { mutableStateOf(0u) }
-    var error by remember { mutableStateOf<String?>(null) }
     var note by remember { mutableStateOf("") }
     var confirmUnfollow by remember { mutableStateOf(false) }
     val grid = rememberLazyGridState()
 
-    var job by remember { mutableStateOf<Job?>(null) }
-
-    /**
-     * Loads the next page in the screen scope (an effect restart must not cancel it half way).
-     * `reset` starts over for a new order, dropping any page still in flight.
-     */
-    fun more(reset: Boolean = false) {
-        if (reset) {
-            job?.cancel()
-            cards.clear(); page = 1u; hasMore = true; hiddenCharging = 0u; error = null; loading = false
-        }
-        if (loading || !hasMore) return
-        loading = true
-        job = scope.launch {
-            try {
-                val got = app.core.upVideos(mid, page, order)
-                cards.addAll(got.items.filter { n -> cards.none { it.bvid == n.bvid } })
-                hiddenCharging += got.hiddenCharging
-                hasMore = got.hasMore
-                page++
-                error = null
-                loading = false
-            } catch (e: CancellationException) {
-                throw e
-            } catch (e: Exception) {
-                error = if (e is RubiException.RiskControl) "被 B 站风控拦截（请求过于频繁或未登录），稍等片刻再重试" else "加载失败：${e.message}"
-                loading = false
-            }
+    // Uploads by page number; the space API is touchy about bursts, so pages are spaced.
+    val uploads = remember(mid) {
+        Paged<FfiVideoCard, UInt>(scope, key = { it.bvid }, minGapMs = UP_PAGE_GAP_MS) { pn ->
+            val at = pn ?: 1u
+            val got = app.core.upVideos(mid, at, order)
+            Page(got.items, if (got.hasMore) at + 1u else null, got.hiddenCharging)
         }
     }
 
     LaunchedEffect(mid, nav.stack.size) { profile = runCatching { app.core.upProfile(mid) }.getOrNull() ?: profile }
-    LaunchedEffect(mid, order) { more(reset = true) }
-    val nearEnd by remember { derivedStateOf { (grid.layoutInfo.visibleItemsInfo.lastOrNull()?.index ?: 0) >= cards.size - 4 } }
-    LaunchedEffect(nearEnd, cards.size) { if (nearEnd && cards.isNotEmpty() && error == null) more() }
+    LaunchedEffect(uploads, order) { uploads.reset() }
+    LoadMoreNearEnd(grid, uploads)
 
     fun toggleFollow(p: FfiUpProfile) {
         if (p.followed && !confirmUnfollow) {
@@ -172,17 +146,17 @@ fun UpScreen(app: RubiApp, nav: Nav, mid: ULong, name: String) {
                             )
                         }
                     }
-                    if (hiddenCharging > 0u) Meta("已隐藏充电专属视频 $hiddenCharging 个")
-                    error?.let { e ->
-                        Text(e, color = c.fg2, fontSize = 13.sp)
-                        TextAction("重试", onClick = { more() })
+                    if (uploads.hidden > 0u) Meta("已隐藏充电专属视频 ${uploads.hidden} 个")
+                    uploads.error?.let { e ->
+                        Text(errorText(e), color = c.fg2, fontSize = 13.sp)
+                        TextAction("重试", onClick = uploads::retry)
                     }
                 }
             }
-            items(cards, key = { it.bvid }) { card ->
+            items(uploads.items, key = { it.bvid }) { card ->
                 VideoCardView(card, big = false, onOpen = { nav.push(Screen.Player(card.bvid, card.title)) })
             }
-            if (!hasMore && cards.isNotEmpty()) {
+            if (uploads.ended && uploads.items.isNotEmpty()) {
                 item(span = { GridItemSpan(maxLineSpan) }) { Meta("没有更多了") }
             }
         }

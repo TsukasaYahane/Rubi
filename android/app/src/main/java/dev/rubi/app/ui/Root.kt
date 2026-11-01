@@ -38,7 +38,6 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import dev.rubi.app.RubiApp
-import dev.rubi.app.playback.AudioQueue
 import dev.rubi.app.data.UiPrefs
 import dev.rubi.core.FfiCommentRef
 import dev.rubi.core.FfiVideoRef
@@ -59,6 +58,11 @@ sealed interface Screen {
         val startMs: Long = 0L,
     ) : Screen
     data object Listen : Screen
+    data object Downloads : Screen
+    /** 全部关注, picking an UP for the 关注 tab. */
+    data object Followings : Screen
+    /** A 专栏 / 图文 to read: an `opus/ID` or `read/cvN` link, or `cvN`. */
+    data class Article(val link: String) : Screen
     /** Each entry carries its own state, so results survive opening a video from them. */
     class Search(val state: SearchState) : Screen
     data object Inbox : Screen
@@ -109,10 +113,15 @@ class Nav {
     }
     fun pop() = stack.removeLastOrNull()
 
-    /** Leaves every page on top (a whole chain of videos) for the 首页 tab. */
-    fun home() {
-        stack.clear()
-        tab = Tab.Home
+    /**
+     * The video chain on top: video pages opened one from another (推荐 → 推荐 → …). A video
+     * opened from a list (history, search, a tab) starts a chain of one.
+     */
+    val chainLength: Int get() = stack.takeLastWhile { it is Screen.Player }.size
+
+    /** Leaves the whole chain for the page it started from (history, search… or the tab). */
+    fun leaveChain() {
+        repeat(chainLength) { stack.removeAt(stack.lastIndex) }
     }
 
     /** Whether any video page is open; when this turns false the user has left the video chain. */
@@ -159,18 +168,18 @@ fun RubiRoot(app: RubiApp) {
             watching = now
         }
     }
-    val listenRequested by AudioQueue.pageRequested
+    val listenRequested by app.media.listening.pageRequested
     LaunchedEffect(listenRequested) {
         if (!listenRequested) return@LaunchedEffect
-        AudioQueue.pageRequested.value = false
-        if (AudioQueue.current.value != null && nav.stack.lastOrNull() != Screen.Listen) nav.push(Screen.Listen)
+        app.media.listening.pageRequested.value = false
+        if (app.media.listening.current.value != null && nav.stack.lastOrNull() != Screen.Listen) nav.push(Screen.Listen)
     }
 
     CompositionLocalProvider(
         LocalEmotes provides emotes,
         LocalAddToPlaylist provides { card -> addToPlaylist(app, rootScope, card) },
     ) {
-    val edgeToEdge by fullscreenActive
+    val edgeToEdge by app.media.fullscreen
     Box(if (edgeToEdge) Modifier.fillMaxSize().background(Color.Black) else Modifier.fillMaxSize().background(c.bg).safeDrawingPadding()) {
         when (val top = nav.stack.lastOrNull()) {
             null -> Column(Modifier.fillMaxSize()) {
@@ -191,6 +200,9 @@ fun RubiRoot(app: RubiApp) {
             // A fresh composition per video: no danmaku, comments or tab state carried over.
             is Screen.Player -> key(top) { PlayerScreen(app, nav, top.bvid, top.title, top.focus, top.fromPlaylist, top.startMs) }
             Screen.Listen -> ListenScreen(app, nav)
+            Screen.Downloads -> DownloadsScreen(app, nav)
+            Screen.Followings -> FollowingsScreen(app, nav, follow)
+            is Screen.Article -> key(top) { ArticleScreen(app, nav, top.link) }
             is Screen.Search -> SearchScreen(app, nav, top.state)
             Screen.Inbox -> InboxScreen(app, nav)
             is Screen.Chat -> ChatScreen(app, nav, top.mid, top.name)

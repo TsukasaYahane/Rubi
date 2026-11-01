@@ -85,6 +85,21 @@ impl HttpClient {
         Ok(resp.bytes().await?.to_vec())
     }
 
+    /// GET of a media stream with the headers players send (no cookies), optionally with one
+    /// more header (a `Range`). The caller reads the body.
+    pub(crate) async fn media(
+        &self,
+        url: &str,
+        extra: Option<(reqwest::header::HeaderName, &str)>,
+    ) -> Result<reqwest::Response> {
+        self.limiter.acquire().await;
+        let mut req = self.client.get(url).header(REFERER, REFERER_URL);
+        if let Some((name, value)) = extra {
+            req = req.header(name, value);
+        }
+        Ok(req.send().await?)
+    }
+
     /// Where `url` redirects to (its `Location`), without fetching the target.
     pub async fn redirect_target(&self, url: &str) -> Result<Option<String>> {
         self.limiter.acquire().await;

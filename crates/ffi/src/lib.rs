@@ -6,6 +6,7 @@ mod account;
 mod actions;
 mod comments;
 mod discover;
+mod downloads;
 mod error;
 mod following;
 mod home;
@@ -13,6 +14,7 @@ mod library;
 mod messages;
 mod player;
 mod playlist;
+mod reading;
 mod settings;
 mod space;
 mod types;
@@ -22,8 +24,8 @@ use std::sync::Arc;
 
 use rubi_api::Session;
 use rubi_core::{
-    Account, Actions, Comments, Danmakus, Discover, Emotes, Following, Home, Library, Messages, Playlists, Preferences,
-    Services, Space, Stein, Videos,
+    Account, Actions, Comments, Danmakus, Discover, Downloads, Emotes, Following, Home, Library, Messages, Playlists,
+    Preferences, Reading, Services, Space, Stein, Videos,
 };
 
 pub use error::RubiError;
@@ -51,6 +53,8 @@ pub struct RubiCore {
     messages: Messages,
     playlists: Playlists,
     preferences: Preferences,
+    reading: Reading,
+    downloads: Downloads,
 }
 
 #[uniffi::export]
@@ -76,7 +80,9 @@ impl RubiCore {
             playlists,
             preferences,
             emotes,
-        } = Services::open(PathBuf::from(data_dir).join("rubi.db"), session)?;
+            reading,
+            downloads,
+        } = Services::open(PathBuf::from(data_dir), session)?;
         Ok(Arc::new(Self {
             account,
             home,
@@ -93,6 +99,8 @@ impl RubiCore {
             messages,
             playlists,
             preferences,
+            reading,
+            downloads,
         }))
     }
 }

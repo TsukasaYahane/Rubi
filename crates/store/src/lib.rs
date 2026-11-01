@@ -7,7 +7,7 @@ use std::collections::HashMap;
 use std::path::Path;
 use std::sync::Mutex;
 
-use rubi_model::{FeedbackEvent, Signal, VideoCard};
+use rubi_model::{Download, FeedbackEvent, Signal, VideoCard};
 use rusqlite::{Connection, OptionalExtension, params};
 use serde::{Deserialize, Serialize, de::DeserializeOwned};
 
@@ -65,6 +65,15 @@ pub trait PlaylistRepo {
     fn playlist(&self) -> Result<Vec<VideoCard>>;
     /// Replaces the whole list (it is short).
     fn set_playlist(&self, items: &[VideoCard]) -> Result<()>;
+}
+
+/// 离线缓存 records.
+pub trait DownloadRepo {
+    /// Newest first.
+    fn downloads(&self) -> Result<Vec<Download>>;
+    /// Adds or replaces the record of `d.card.bvid`.
+    fn put_download(&self, d: &Download) -> Result<()>;
+    fn remove_download(&self, bvid: &str) -> Result<()>;
 }
 
 /// Typed key/value settings (rule table, weights, profile…).
@@ -333,6 +342,37 @@ impl KvRepo for SqliteStore {
     }
 }
 
+impl DownloadRepo for SqliteStore {
+    fn downloads(&self) -> Result<Vec<Download>> {
+        self.with(|c| {
+            let mut stmt = c.prepare("SELECT body FROM downloads ORDER BY created_at DESC")?;
+            let rows = stmt.query_map([], |r| r.get::<_, String>(0))?;
+            let mut out = Vec::new();
+            for row in rows {
+                out.push(serde_json::from_str(&row?)?);
+            }
+            Ok(out)
+        })
+    }
+
+    fn put_download(&self, d: &Download) -> Result<()> {
+        self.with(|c| {
+            c.execute(
+                "INSERT OR REPLACE INTO downloads(bvid, created_at, body) VALUES (?1, ?2, ?3)",
+                params![d.card.bvid, d.created_at, serde_json::to_string(d)?],
+            )?;
+            Ok(())
+        })
+    }
+
+    fn remove_download(&self, bvid: &str) -> Result<()> {
+        self.with(|c| {
+            c.execute("DELETE FROM downloads WHERE bvid = ?1", params![bvid])?;
+            Ok(())
+        })
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -340,6 +380,28 @@ mod tests {
 
     fn card(bvid: &str, source: SourceKind) -> VideoCard {
         VideoCard { bvid: bvid.into(), sources: vec![source], ..Default::default() }
+    }
+
+    #[test]
+    fn downloads_are_listed_newest_first_and_replaced_in_place() {
+        use rubi_model::{Download, DownloadState};
+        let s = SqliteStore::in_memory().unwrap();
+        let d = |bvid: &str, at| Download {
+            card: card(bvid, SourceKind::Popular),
+            quality: 80,
+            state: DownloadState::Queued,
+            done_bytes: 0,
+            total_bytes: 0,
+            created_at: at,
+        };
+        s.put_download(&d("a", 1)).unwrap();
+        s.put_download(&d("b", 2)).unwrap();
+        s.put_download(&Download { state: DownloadState::Done, ..d("a", 1) }).unwrap();
+        let all = s.downloads().unwrap();
+        assert_eq!(all.iter().map(|d| d.card.bvid.as_str()).collect::<Vec<_>>(), ["b", "a"]);
+        assert_eq!(all[1].state, DownloadState::Done);
+        s.remove_download("b").unwrap();
+        assert_eq!(s.downloads().unwrap().len(), 1);
     }
 
     #[test]

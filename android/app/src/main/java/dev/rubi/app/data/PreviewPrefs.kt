@@ -15,7 +15,7 @@ data class PreviewPrefs(
     val danmaku: Boolean = false,
 ) {
     /** Whether a preview may play right now (setting on, and on Wi-Fi when asked). */
-    fun allowed(context: Context): Boolean = enabled && (!wifiOnly || unmetered(context))
+    fun allowed(context: Context): Boolean = enabled && (!wifiOnly || context.onUnmeteredNetwork())
 
     companion object {
         private const val KEY = "preview"
@@ -41,12 +41,6 @@ data class PreviewPrefs(
                     .put("danmaku", p.danmaku),
             )
             core.setSettingsJson(settings.toString())
-        }
-
-        private fun unmetered(context: Context): Boolean {
-            val cm = context.getSystemService(ConnectivityManager::class.java) ?: return false
-            val caps = cm.getNetworkCapabilities(cm.activeNetwork) ?: return false
-            return caps.hasCapability(NetworkCapabilities.NET_CAPABILITY_NOT_METERED)
         }
     }
 }

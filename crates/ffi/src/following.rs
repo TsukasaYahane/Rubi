@@ -1,6 +1,8 @@
 //! 关注: followed UPs' videos and posts.
 
-use crate::{FfiDynamic, FfiDynamicPage, FfiFollowPage, FfiFollowedUp, FfiVideoCard, Res, RubiCore};
+use crate::{
+    FfiDynamic, FfiDynamicPage, FfiFollowPage, FfiFollowedUp, FfiFollowing, FfiFollowings, FfiVideoCard, Res, RubiCore,
+};
 
 #[uniffi::export(async_runtime = "tokio")]
 impl RubiCore {
@@ -23,6 +25,25 @@ impl RubiCore {
     pub async fn up_dynamics(&self, mid: u64, offset: Option<String>) -> Res<FfiDynamicPage> {
         let (items, next) = self.following.up_posts(mid, offset.as_deref()).await?;
         Ok(FfiDynamicPage { items: items.iter().map(FfiDynamic::of).collect(), next })
+    }
+
+    /// 全部关注: every followed UP, those who posted lately first (with when).
+    pub async fn all_followings(&self) -> Res<FfiFollowings> {
+        let all = self.following.all().await?;
+        Ok(FfiFollowings {
+            ups: all
+                .ups
+                .into_iter()
+                .map(|u| FfiFollowing {
+                    mid: u.mid,
+                    name: u.name,
+                    face: u.face,
+                    last_post_at: u.last_post_at.unwrap_or(0),
+                    has_update: u.has_update,
+                })
+                .collect(),
+            checked_since: all.checked_since,
+        })
     }
 
     /// Copies the following list into the recommender's 关注 UP factor. Returns how many.

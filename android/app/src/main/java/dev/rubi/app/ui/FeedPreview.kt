@@ -1,5 +1,6 @@
 package dev.rubi.app.ui
 
+import dev.rubi.app.playback.LocalMedia
 import android.view.LayoutInflater
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.lazy.grid.LazyGridState
@@ -27,7 +28,6 @@ import dev.rubi.app.RubiApp
 import dev.rubi.app.data.DanmakuDisplay
 import dev.rubi.app.data.PreviewPrefs
 import dev.rubi.app.playback.PREVIEW_QN
-import dev.rubi.app.playback.PreviewPlayer
 import dev.rubi.core.FfiDanmakuSet
 import dev.rubi.core.FfiVideoCard
 import kotlinx.coroutines.delay
@@ -76,7 +76,8 @@ fun rememberPreviewTarget(grid: LazyGridState, enabled: Boolean): String? {
 @Composable
 fun FeedPreview(app: RubiApp, card: FfiVideoCard, prefs: PreviewPrefs) {
     val ctx = LocalContext.current
-    val player = remember { PreviewPlayer.get(ctx) }
+    val media = LocalMedia.current
+    val player = remember { media.preview.get() }
     var ready by remember { mutableStateOf(false) }
     var danmaku by remember { mutableStateOf<FfiDanmakuSet?>(null) }
     // Bumped when the app returns to the foreground, to start the preview again.
@@ -86,7 +87,7 @@ fun FeedPreview(app: RubiApp, card: FfiVideoCard, prefs: PreviewPrefs) {
     DisposableEffect(lifecycle) {
         val observer = LifecycleEventObserver { _, event ->
             when (event) {
-                Lifecycle.Event.ON_STOP -> { ready = false; PreviewPlayer.stop() }
+                Lifecycle.Event.ON_STOP -> { ready = false; media.preview.stop() }
                 Lifecycle.Event.ON_START -> round++
                 else -> {}
             }
@@ -101,14 +102,14 @@ fun FeedPreview(app: RubiApp, card: FfiVideoCard, prefs: PreviewPrefs) {
         player.addListener(listener)
         onDispose {
             player.removeListener(listener)
-            PreviewPlayer.stop()
+            media.preview.stop()
         }
     }
     LaunchedEffect(card.bvid, round) {
         ready = false
         runCatching {
             val playback = app.core.playback(card.bvid, PREVIEW_QN)
-            PreviewPlayer.play(ctx, playback, prefs.volume)
+            media.preview.play(playback, prefs.volume)
             if (prefs.danmaku) {
                 val durationMs = maxOf(card.durationS.toULong() * 1000u, playback.durationMs).toUInt()
                 danmaku = app.core.danmakuSession(playback.cid, durationMs).load(listOf(1u))

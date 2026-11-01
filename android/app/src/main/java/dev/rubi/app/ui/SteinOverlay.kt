@@ -1,5 +1,6 @@
 package dev.rubi.app.ui
 
+import dev.rubi.app.playback.LocalMedia
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
@@ -24,7 +25,6 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.media3.common.Player
-import dev.rubi.app.playback.PlayerHolder
 import dev.rubi.app.ui.theme.LocalMetro
 import dev.rubi.core.FfiSteinChoice
 import dev.rubi.core.FfiSteinNode
@@ -50,7 +50,7 @@ fun SteinOverlay(
     modifier: Modifier = Modifier,
 ) {
     val c = LocalMetro.current
-    val ctx = LocalContext.current
+    val media = LocalMedia.current
     val scope = rememberCoroutineScope()
     var showing by remember(node) { mutableStateOf(false) }
     var ended by remember(node) { mutableStateOf(false) }
@@ -73,7 +73,7 @@ fun SteinOverlay(
     // Wait for this node's part to be the one loaded, then for its end to come near.
     LaunchedEffect(node, playingCid, nodeCid) {
         if (playingCid == null || playingCid != nodeCid) return@LaunchedEffect
-        val player = PlayerHolder.get(ctx)
+        val player = media.player.get()
         while (true) {
             val state = player.playbackState
             val dur = player.duration
@@ -102,7 +102,7 @@ fun SteinOverlay(
     // that waits keeps the last frame (the part has ended) until a choice is made.
     LaunchedEffect(showing) {
         if (!showing || q == null || q.pause) return@LaunchedEffect
-        val player = PlayerHolder.get(ctx)
+        val player = media.player.get()
         while (showing && player.playbackState != Player.STATE_ENDED) delay(200)
         if (showing) default()?.let(::pick)
     }

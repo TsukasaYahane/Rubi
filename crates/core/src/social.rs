@@ -1,6 +1,6 @@
 //! The rule table applied to comments, hot words and chats; used by the services.
 
-use rubi_api::{CommentApi, CommentPage, CommentSort, HotWord};
+use rubi_api::{CommentApi, CommentArea, CommentPage, CommentSort, HotWord};
 use rubi_filter::{RuleSet, Target};
 use rubi_model::{ChatSession, Comment};
 
@@ -20,11 +20,11 @@ pub(crate) struct FilteredComments {
 pub(crate) async fn load_comments(
     api: &dyn CommentApi,
     rules: &RuleSet,
-    aid: u64,
+    area: CommentArea,
     sort: CommentSort,
     offset: Option<&str>,
 ) -> Result<FilteredComments> {
-    let mut page = api.page(aid, sort, offset).await?;
+    let mut page = api.page(area, sort, offset).await?;
     let pipeline = rules.raw_pipeline(Target::Comment);
     let before = page.pinned.len();
     page.pinned.retain(|c| !pipeline.judge(&c.raw).is_blocked());
@@ -33,10 +33,15 @@ pub(crate) async fn load_comments(
 
 /// Every reply under `root` (up to `max_pages` pages), flat. Feed it to
 /// [`rubi_model::flatten_thread`] to get the fishbone rows.
-pub(crate) async fn load_thread(api: &dyn CommentApi, aid: u64, root: u64, max_pages: u32) -> Result<Vec<Comment>> {
+pub(crate) async fn load_thread(
+    api: &dyn CommentApi,
+    area: CommentArea,
+    root: u64,
+    max_pages: u32,
+) -> Result<Vec<Comment>> {
     let mut all = Vec::new();
     for pn in 1..=max_pages.max(1) {
-        let (replies, total) = api.replies(aid, root, pn, THREAD_PAGE).await?;
+        let (replies, total) = api.replies(area, root, pn, THREAD_PAGE).await?;
         let done = replies.is_empty();
         all.extend(replies);
         if done || all.len() as u32 >= total {
@@ -72,7 +77,7 @@ mod tests {
 
     #[async_trait]
     impl CommentApi for Fake {
-        async fn page(&self, _: u64, _: CommentSort, _: Option<&str>) -> rubi_api::Result<CommentPage> {
+        async fn page(&self, _: CommentArea, _: CommentSort, _: Option<&str>) -> rubi_api::Result<CommentPage> {
             let pinned = |rpid, msg: &str| Comment {
                 rpid,
                 pinned: true,
@@ -84,26 +89,32 @@ mod tests {
             })
         }
 
-        async fn replies(&self, _: u64, _: u64, pn: u32, _: u32) -> rubi_api::Result<(Vec<Comment>, u32)> {
+        async fn replies(&self, _: CommentArea, _: u64, pn: u32, _: u32) -> rubi_api::Result<(Vec<Comment>, u32)> {
             let c = Comment { rpid: u64::from(pn), ..Default::default() };
             Ok((vec![c], 2))
         }
 
-        async fn root(&self, _: u64, root: u64) -> rubi_api::Result<Comment> {
+        async fn root(&self, _: CommentArea, root: u64) -> rubi_api::Result<Comment> {
             Ok(Comment { rpid: root, ..Default::default() })
+        }
+        async fn like(&self, _: CommentArea, _: u64, _: bool) -> rubi_api::Result<()> {
+            Ok(())
+        }
+        async fn reply(&self, _: CommentArea, _: u64, _: u64, _: &str) -> rubi_api::Result<Comment> {
+            Ok(Comment::default())
         }
     }
 
     #[tokio::test]
     async fn pinned_goods_comment_is_hidden() {
-        let r = load_comments(&Fake, &RuleSet::builtin(), 1, CommentSort::Hot, None).await.unwrap();
+        let r = load_comments(&Fake, &RuleSet::builtin(), CommentArea::video(1), CommentSort::Hot, None).await.unwrap();
         assert_eq!(r.hidden_pinned, 1);
         assert_eq!(r.page.pinned[0].rpid, 2);
     }
 
     #[tokio::test]
     async fn thread_stops_at_total() {
-        let all = load_thread(&Fake, 1, 1, 5).await.unwrap();
+        let all = load_thread(&Fake, CommentArea::video(1), 1, 5).await.unwrap();
         assert_eq!(all.len(), 2);
     }
 

@@ -1,5 +1,7 @@
 package dev.rubi.app.ui
 
+import androidx.compose.foundation.border
+import androidx.compose.foundation.lazy.LazyListState
 import kotlinx.coroutines.CoroutineScope
 import dev.rubi.core.RubiCore
 import android.content.Intent
@@ -67,6 +69,7 @@ import kotlinx.coroutines.launch
 class FollowState(private val core: RubiCore, private val scope: CoroutineScope) {
     val ups = mutableStateListOf<FfiFollowedUp>()
     val grid = LazyGridState()
+    val bar = LazyListState()
     var note by mutableStateOf("")
     var selected by mutableStateOf<FfiFollowedUp?>(null)
         private set
@@ -81,6 +84,16 @@ class FollowState(private val core: RubiCore, private val scope: CoroutineScope)
     fun select(up: FfiFollowedUp?) {
         selected = up
         if (up != null) posts = postsOf(up.mid).also { it.more() }
+    }
+
+    /** Shows `up`'s posts from outside the bar (全部关注): it joins the bar's front if missing. */
+    fun show(up: FfiFollowedUp) {
+        if (ups.none { it.mid == up.mid }) ups.add(0, up)
+        select(up)
+        scope.launch {
+            bar.scrollToItem(0)
+            grid.scrollToItem(0)
+        }
     }
 
     fun loadUps() {
@@ -128,7 +141,18 @@ fun FollowScreen(app: RubiApp, nav: Nav, state: FollowState, dual: Boolean) {
                 }
             }, dim = true)
         }
-        UpBar(state.ups, state.selected, onSelect = ::select)
+        UpBar(state.bar, state.ups, state.selected, onSelect = ::select, onMore = { nav.push(Screen.Followings) })
+        // Swiped to the end of the bar without finding them: the full list is a tap away.
+        val atEnd by remember { derivedStateOf { state.ups.isNotEmpty() && state.bar.canScrollBackward && !state.bar.canScrollForward } }
+        if (atEnd) {
+            Row(
+                Modifier.fillMaxWidth().background(c.accent.copy(alpha = 0.15f)).clickable { nav.push(Screen.Followings) }.padding(horizontal = 16.dp, vertical = 8.dp),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Text("没找到想看的 UP？", fontSize = 13.sp, color = c.fg, modifier = Modifier.weight(1f))
+                Text("查看全部关注 ›", fontSize = 13.sp, color = c.accent)
+            }
+        }
         val status = listOfNotNull(
             state.note.takeIf { it.isNotEmpty() },
             "已过滤 ${state.videos.hidden}".takeIf { state.videos.hidden > 0u && all },
@@ -151,7 +175,7 @@ fun FollowScreen(app: RubiApp, nav: Nav, state: FollowState, dual: Boolean) {
                     }
                 } else {
                     items(state.posts.items, key = { it.id }) { post ->
-                        DynamicCard(post, onOpenVideo = { nav.push(Screen.Player(it.bvid, it.title)) }, onOpenLink = { url ->
+                        DynamicCard(post, onOpenVideo = { nav.push(Screen.Player(it.bvid, it.title)) }, onOpenArticle = { nav.push(Screen.Article(it)) }, onOpenLink = { url ->
                             ctx.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(url)))
                         })
                     }
@@ -181,9 +205,10 @@ fun FollowScreen(app: RubiApp, nav: Nav, state: FollowState, dual: Boolean) {
 
 /** 全部 first, then followed UPs with recent posts; the selected one is underlined in accent. */
 @Composable
-private fun UpBar(ups: List<FfiFollowedUp>, selected: FfiFollowedUp?, onSelect: (FfiFollowedUp?) -> Unit) {
+private fun UpBar(state: LazyListState, ups: List<FfiFollowedUp>, selected: FfiFollowedUp?, onSelect: (FfiFollowedUp?) -> Unit, onMore: () -> Unit) {
     val c = LocalMetro.current
     LazyRow(
+        state = state,
         contentPadding = PaddingValues(horizontal = 16.dp, vertical = 8.dp),
         horizontalArrangement = Arrangement.spacedBy(14.dp),
     ) {
@@ -199,6 +224,14 @@ private fun UpBar(ups: List<FfiFollowedUp>, selected: FfiFollowedUp?, onSelect: 
                 Box {
                     AsyncImage(model = up.face, contentDescription = up.name, contentScale = ContentScale.Crop, modifier = Modifier.size(48.dp).background(c.bg2))
                     if (up.hasUpdate) Box(Modifier.size(8.dp).background(c.accent).align(Alignment.TopEnd))
+                }
+            }
+        }
+        // The bar lists only UPs who posted lately; everyone else is in 全部关注.
+        item(key = "more") {
+            BarItem(false, label = "全部关注", onClick = onMore) {
+                Box(Modifier.size(48.dp).border(2.dp, c.fg), contentAlignment = Alignment.Center) {
+                    GlyphIcon(Glyph.More)
                 }
             }
         }
@@ -229,7 +262,7 @@ private fun BarItem(on: Boolean, label: String, onClick: () -> Unit, picture: @C
 
 /** One post: author and time, then what it holds; a repost shows its original indented. */
 @Composable
-private fun DynamicCard(post: FfiDynamic, onOpenVideo: (FfiVideoCard) -> Unit, onOpenLink: (String) -> Unit) {
+private fun DynamicCard(post: FfiDynamic, onOpenVideo: (FfiVideoCard) -> Unit, onOpenArticle: (String) -> Unit, onOpenLink: (String) -> Unit) {
     val c = LocalMetro.current
     Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
         Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
@@ -237,7 +270,7 @@ private fun DynamicCard(post: FfiDynamic, onOpenVideo: (FfiVideoCard) -> Unit, o
             Meta(formatAge(post.publishedAt))
             kindLabel(post.body.kind)?.let { Tag(it) }
         }
-        DynamicBody(post.body, onOpenVideo, onOpenLink)
+        DynamicBody(post.body, onOpenVideo, onOpenArticle, onOpenLink)
         post.orig?.let { orig ->
             Column(
                 Modifier.fillMaxWidth().drawBehind {
@@ -246,14 +279,14 @@ private fun DynamicCard(post: FfiDynamic, onOpenVideo: (FfiVideoCard) -> Unit, o
                 verticalArrangement = Arrangement.spacedBy(6.dp),
             ) {
                 Meta("@${orig.authorName}")
-                DynamicBody(orig, onOpenVideo, onOpenLink)
+                DynamicBody(orig, onOpenVideo, onOpenArticle, onOpenLink)
             }
         }
     }
 }
 
 @Composable
-private fun DynamicBody(body: FfiDynamicBody, onOpenVideo: (FfiVideoCard) -> Unit, onOpenLink: (String) -> Unit) {
+private fun DynamicBody(body: FfiDynamicBody, onOpenVideo: (FfiVideoCard) -> Unit, onOpenArticle: (String) -> Unit, onOpenLink: (String) -> Unit) {
     val c = LocalMetro.current
     if (body.title.isNotBlank()) Text(body.title, fontSize = 16.sp, fontWeight = FontWeight.SemiBold, color = c.fg)
     if (body.text.isNotBlank()) {
@@ -275,8 +308,10 @@ private fun DynamicBody(body: FfiDynamicBody, onOpenVideo: (FfiVideoCard) -> Uni
     if (body.pictures.isNotEmpty() && body.video == null) {
         CommentPictures(body.pictures.map { FfiPicture(it, 0u, 0u) })
     }
-    // Articles and posts open in the browser until Rubi reads them itself (文字专栏, phase 2).
-    if (body.link.isNotBlank() && body.kind in setOf(FfiDynamicKind.ARTICLE, FfiDynamicKind.OPUS, FfiDynamicKind.OTHER)) {
+    // Articles and 图文 open in the reader; other kinds of post only on the web.
+    if (body.link.isNotBlank() && body.kind in setOf(FfiDynamicKind.ARTICLE, FfiDynamicKind.OPUS)) {
+        TextAction("查看全文", onClick = { onOpenArticle(body.link) })
+    } else if (body.link.isNotBlank() && body.kind == FfiDynamicKind.OTHER) {
         TextAction("查看全文", onClick = { onOpenLink(body.link) })
     }
 }

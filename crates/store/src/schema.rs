@@ -40,6 +40,11 @@ const MIGRATIONS: &[&str] = &[
         bvid TEXT PRIMARY KEY,
         card TEXT NOT NULL
      );",
+    "CREATE TABLE downloads(
+        bvid TEXT PRIMARY KEY,
+        created_at INTEGER NOT NULL,
+        body TEXT NOT NULL
+     );",
 ];
 
 pub fn migrate(conn: &Connection) -> rusqlite::Result<()> {

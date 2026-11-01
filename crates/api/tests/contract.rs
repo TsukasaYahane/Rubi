@@ -4,8 +4,9 @@
 use std::sync::Arc;
 
 use rubi_api::{
-    AuthApi, CommentApi, CommentSort, DanmakuApi, FeedApi, HttpClient, SearchApi, Session, SpaceApi, SteinApi, UpOrder,
-    VideoApi, WebAuth, WebComment, WebDanmaku, WebFeed, WebSearch, WebSpace, WebVideo,
+    ArticleApi, AuthApi, CommentApi, CommentArea, CommentSort, DanmakuApi, FeedApi, HttpClient, SearchApi, Session,
+    SpaceApi, SteinApi, UpOrder, VideoApi, WebArticle, WebAuth, WebComment, WebDanmaku, WebFeed, WebSearch, WebSpace,
+    WebVideo,
 };
 use rubi_model::VideoCard;
 
@@ -57,13 +58,14 @@ async fn comments_and_search() {
     let http = guest().await;
     let card = sample(&http).await;
     let comments = WebComment::new(http.clone());
-    let page = comments.page(card.aid, CommentSort::Hot, None).await.expect("comments");
+    let page = comments.page(CommentArea::video(card.aid), CommentSort::Hot, None).await.expect("comments");
     assert!(!page.threads.is_empty());
     let first = page.threads[0].root.rpid;
-    assert_eq!(comments.root(card.aid, first).await.expect("thread root").rpid, first);
+    assert_eq!(comments.root(CommentArea::video(card.aid), first).await.expect("thread root").rpid, first);
     // The cursor leads to a second page of other threads.
     if let Some(next) = page.next_offset.as_deref() {
-        let more = comments.page(card.aid, CommentSort::Hot, Some(next)).await.expect("comments page 2");
+        let more =
+            comments.page(CommentArea::video(card.aid), CommentSort::Hot, Some(next)).await.expect("comments page 2");
         assert!(more.threads.iter().all(|t| t.root.rpid != first));
     }
     let search = WebSearch::new(http.clone());
@@ -128,4 +130,17 @@ async fn region_feed() {
     let region = WebFeed::new(http.clone()).region_feed(1008, 1, 5).await.expect("region feed");
     assert!(!region.is_empty());
     assert!(region.iter().all(|c| !c.bvid.is_empty() && c.owner.mid > 0 && c.stats.view > 0));
+}
+
+/// A 专栏 reads from the article view; a 图文 from its opus detail.
+#[tokio::test]
+#[ignore = "live API"]
+async fn articles_and_opus_read() {
+    let http = guest().await;
+    let api = WebArticle::new(http);
+    // Captured on 2026-11-01: an old article that never moved to a 图文 page, and a news 图文.
+    let a = api.article(52157219).await.expect("article view");
+    assert!(!a.title.is_empty() && !a.blocks.is_empty());
+    let o = api.opus("1265393890559524872").await.expect("opus detail");
+    assert!(!o.title.is_empty() && !o.blocks.is_empty());
 }

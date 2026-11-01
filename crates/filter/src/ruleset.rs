@@ -259,6 +259,31 @@ mod tests {
         VideoCard { bvid: bvid.into(), raw, ..Default::default() }
     }
 
+    /// 2026-11-01: an UP's pinned Taobao links (b23.tv/mall-…, goods_item_id, no prefetch cache).
+    #[test]
+    fn pinned_mall_links_are_goods() {
+        let p = RuleSet::builtin().raw_pipeline(Target::Comment);
+        let pinned = json!({"content": {"message": "推荐 https://b23.tv/mall-1PEUvH-75mBT",
+            "jump_url": {"https://b23.tv/mall-1PEUvH-75mBT": {"extra": {"goods_item_id": 104811215, "is_word_search": false}}}}});
+        assert!(p.judge(&pinned).is_blocked());
+        let highlight =
+            json!({"content": {"message": "看看 话题", "jump_url": {"话题": {"extra": {"is_word_search": true}}}}});
+        assert!(!p.judge(&highlight).is_blocked());
+    }
+
+    #[test]
+    fn article_promo_cards_are_blocked() {
+        let p = RuleSet::builtin().raw_pipeline(Target::ArticleBlock);
+        assert!(
+            p.judge(&json!({"para_type": 6, "link_card": {"card": {"type": "LINK_CARD_TYPE_GOODS"}}})).is_blocked()
+        );
+        let shop = json!({"para_type": 1, "text": {"nodes": [{"rich": {"jump_url": "https://b23.tv/cm-abc"}}]}});
+        assert!(p.judge(&shop).is_blocked());
+        let video = json!({"para_type": 6, "link_card": {"card": {"type": "LINK_CARD_TYPE_UGC"}}});
+        assert!(!p.judge(&video).is_blocked());
+        assert!(!p.judge(&json!({"para_type": 1, "text": {"nodes": [{"word": {"words": "正文"}}]}})).is_blocked());
+    }
+
     #[test]
     fn builtin_parses_and_round_trips() {
         let rs = RuleSet::builtin();

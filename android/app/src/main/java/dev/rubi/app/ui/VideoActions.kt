@@ -1,5 +1,6 @@
 package dev.rubi.app.ui
 
+import dev.rubi.core.FfiDownloadState
 import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.combinedClickable
@@ -39,7 +40,7 @@ import dev.rubi.core.FfiVideoRelation
 import dev.rubi.core.RubiException
 import kotlinx.coroutines.launch
 
-private enum class ActionSheet { None, Coin, Favorite }
+private enum class ActionSheet { None, Coin, Favorite, Download }
 
 /**
  * 赞 / 币 / 藏 / 稍后 / 关注 under the video title. Done actions are drawn in the accent colour;
@@ -62,6 +63,18 @@ fun VideoActions(app: RubiApp, nav: Nav, d: FfiVideoDetail) {
     // The play list is local: no login needed.
     var listed by remember { mutableStateOf(false) }
     LaunchedEffect(d.bvid) { listed = runCatching { app.core.playlistContains(d.bvid) }.getOrDefault(false) }
+    // 离线缓存 of this video: 离线 (none yet), 下载中, 已缓存…
+    var downloadState by remember { mutableStateOf("离线") }
+    LaunchedEffect(d.bvid, sheet) {
+        val mine = runCatching { app.core.downloads() }.getOrNull()?.firstOrNull { it.card.bvid == d.bvid }
+        downloadState = when (mine?.state) {
+            null -> "离线"
+            FfiDownloadState.DONE -> "已缓存"
+            FfiDownloadState.FAILED -> "失败"
+            FfiDownloadState.PAUSED -> "已暂停"
+            else -> "下载中"
+        }
+    }
 
     // Re-checked when coming back from the login page.
     LaunchedEffect(d.bvid, nav.stack.size) {
@@ -156,6 +169,7 @@ fun VideoActions(app: RubiApp, nav: Nav, d: FfiVideoDetail) {
                         .onFailure { listed = !add; note = "操作失败：${it.message}" }
                 }
             }
+            Action("缓存", downloadState, downloadState != "离线", Modifier.weight(1f)) { sheet = ActionSheet.Download }
             Action("关注", if (r?.followingUp == true) "已关注" else "UP", r?.followingUp == true, Modifier.weight(1f)) {
                 act { cur ->
                     // Unfollowing takes a second tap so a stray touch does not drop the UP.
@@ -207,6 +221,10 @@ fun VideoActions(app: RubiApp, nav: Nav, d: FfiVideoDetail) {
                     }
                     .onFailure { failed(it) }
             }
+        }
+        ActionSheet.Download -> DownloadSheet(onDismiss = { sheet = ActionSheet.None }) { qn, label ->
+            sheet = ActionSheet.None
+            scope.launch { note = startDownload(app, d.bvid, qn, label) }
         }
         ActionSheet.None -> Unit
     }

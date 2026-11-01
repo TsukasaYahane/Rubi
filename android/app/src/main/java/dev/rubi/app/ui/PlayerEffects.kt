@@ -1,5 +1,7 @@
 package dev.rubi.app.ui
 
+import androidx.compose.runtime.rememberUpdatedState
+import dev.rubi.app.playback.LocalMedia
 import android.os.SystemClock
 import android.util.Log
 import androidx.compose.runtime.Composable
@@ -14,9 +16,6 @@ import androidx.lifecycle.compose.LocalLifecycleOwner
 import androidx.media3.common.Player
 import dev.rubi.app.RubiApp
 import dev.rubi.app.data.PlaybackPrefs
-import dev.rubi.app.playback.AudioQueue
-import dev.rubi.app.playback.Pip
-import dev.rubi.app.playback.PlayerHolder
 import dev.rubi.core.FfiDanmakuSet
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
@@ -34,24 +33,25 @@ private const val HEARTBEAT_S = 15
  */
 @Composable
 fun PlayerPageLifecycle(app: RubiApp) {
+    val media = LocalMedia.current
     val ctx = LocalContext.current
     val activity = remember(ctx) { ctx.activity() }
     DisposableEffect(Unit) {
-        Pip.onPlayer = true
-        Pip.autoEnter = PlaybackPrefs.autoPip(app.core)
-        activity?.let(Pip::sync)
+        media.pip.onPlayer = true
+        media.pip.autoEnter = PlaybackPrefs.autoPip(app.core)
+        activity?.let(media.pip::sync)
         onDispose {
-            Pip.onPlayer = false
-            activity?.let(Pip::sync)
-            PlayerHolder.clear()
+            media.pip.onPlayer = false
+            activity?.let(media.pip::sync)
+            media.player.clear()
         }
     }
-    LaunchedEffect(Unit) { AudioQueue.stop() }
+    LaunchedEffect(Unit) { media.listening.stop() }
     val lifecycle = LocalLifecycleOwner.current.lifecycle
     DisposableEffect(lifecycle) {
         val observer = LifecycleEventObserver { _, event ->
             if (event == Lifecycle.Event.ON_STOP && !PlaybackPrefs.backgroundPlay(app.core)) {
-                PlayerHolder.get(ctx).pause()
+                media.player.get().pause()
             }
         }
         lifecycle.addObserver(observer)
@@ -66,11 +66,11 @@ fun PlayerPageLifecycle(app: RubiApp) {
  */
 @Composable
 fun ReportWatching(app: RubiApp, bvid: String, cid: ULong?) {
-    val ctx = LocalContext.current
+    val media = LocalMedia.current
     val watched = remember { longArrayOf(0L, 0L) } // played s, real s
     LaunchedEffect(cid) {
         val part = cid ?: return@LaunchedEffect
-        val player = PlayerHolder.get(ctx)
+        val player = media.player.get()
         val started = SystemClock.elapsedRealtime()
         watched[0] = 0L
         watched[1] = 0L
@@ -97,14 +97,32 @@ fun ReportWatching(app: RubiApp, bvid: String, cid: ULong?) {
     }
 }
 
+/** Calls `onEnded` each time playback reaches the end, while `enabled`. */
+@Composable
+fun OnPlaybackEnded(enabled: Boolean, onEnded: () -> Unit) {
+    val media = LocalMedia.current
+    val latest = rememberUpdatedState(onEnded)
+    DisposableEffect(enabled) {
+        if (!enabled) return@DisposableEffect onDispose {}
+        val player = media.player.get()
+        val listener = object : Player.Listener {
+            override fun onPlaybackStateChanged(state: Int) {
+                if (state == Player.STATE_ENDED) latest.value()
+            }
+        }
+        player.addListener(listener)
+        onDispose { player.removeListener(listener) }
+    }
+}
+
 /** Opened from the play list: when the video ends, the list's next one (by its mode) follows. */
 @Composable
 fun ContinuePlaylistOnEnd(app: RubiApp, nav: Nav, bvid: String, enabled: Boolean) {
-    val ctx = LocalContext.current
+    val media = LocalMedia.current
     val scope = rememberCoroutineScope()
     DisposableEffect(enabled) {
         if (!enabled) return@DisposableEffect onDispose {}
-        val player = PlayerHolder.get(ctx)
+        val player = media.player.get()
         val listener = object : Player.Listener {
             override fun onPlaybackStateChanged(state: Int) {
                 if (state != Player.STATE_ENDED) return
@@ -126,15 +144,15 @@ fun ContinuePlaylistOnEnd(app: RubiApp, nav: Nav, bvid: String, enabled: Boolean
 
 /**
  * Loads a part's danmaku segment by segment: the one at `positionMs` first, then the rest from
- * nearest to farthest, reporting the set so far and a status line after each batch. A failure
- * reports a null set and says whether some danmaku were already shown.
+ * nearest to farthest, reporting the set so far after each batch. A failure reports a null set
+ * and what went wrong (and whether some danmaku were already shown).
  */
 suspend fun loadDanmakuNearFirst(
     app: RubiApp,
     cid: ULong,
     durationMs: UInt,
     positionMs: Long,
-    onUpdate: (FfiDanmakuSet?, String) -> Unit,
+    onUpdate: (FfiDanmakuSet?, String?) -> Unit,
 ) {
     var shown = false
     runCatching {
@@ -142,17 +160,9 @@ suspend fun loadDanmakuNearFirst(
         val total = session.segmentCount()
         val here = session.segmentAt(positionMs.toUInt())
         val order = (1u..total).sortedBy { kotlin.math.abs(it.toInt() - here.toInt()) }
-        var done = 0
         for (batch in listOf(order.take(1)) + order.drop(1).chunked(3)) {
-            val set = session.load(batch)
-            done += batch.size
+            onUpdate(session.load(batch), null)
             shown = true
-            onUpdate(
-                set,
-                "弹幕 ${set.items.size}" +
-                    (if (set.jumpMarks.isNotEmpty()) " · 空降点 ${set.jumpMarks.size}" else "") +
-                    if (done < total.toInt()) " · 加载中 $done/$total" else "",
-            )
         }
         Log.i(TAG, "danmaku loaded in $total segments")
     }.onFailure { e ->

@@ -4,7 +4,7 @@
 use std::sync::Arc;
 
 use async_trait::async_trait;
-use rubi_model::{FavFolder, HistoryEntry, Owner, SourceKind, Stats, VideoCard, VideoRelation};
+use rubi_model::{FavFolder, Following, HistoryEntry, Owner, SourceKind, Stats, VideoCard, VideoRelation};
 use serde_json::Value;
 
 use crate::error::{ApiError, Result};
@@ -49,7 +49,8 @@ pub trait LibraryApi: Send + Sync {
     async fn watch_later_list(&self) -> Result<Vec<VideoCard>>;
     async fn fav_items(&self, folder_id: u64, pn: u32) -> Result<(Vec<VideoCard>, bool)>;
     /// Mids the user follows, one page of 50; returns the total too.
-    async fn followings(&self, pn: u32) -> Result<(Vec<u64>, u32)>;
+    /// One page (50) of the user's followings, newest follow first; also the total.
+    async fn followings(&self, pn: u32) -> Result<(Vec<Following>, u32)>;
     /// Playback heartbeat: puts the video in 历史记录 with its progress. `play_type` is 1 when
     /// playback starts, 0 while playing, 2 on pause / leaving. Times in seconds.
     async fn heartbeat(&self, aid: u64, cid: u64, played_s: u64, realtime_s: u64, play_type: u8) -> Result<()>;
@@ -243,11 +244,23 @@ impl LibraryApi for WebAccount {
         self.http.post_form(HEARTBEAT, form).await.map(|_| ())
     }
 
-    async fn followings(&self, pn: u32) -> Result<(Vec<u64>, u32)> {
+    async fn followings(&self, pn: u32) -> Result<(Vec<Following>, u32)> {
         let mid = self.my_mid()?;
         let d = self.http.get_json(FOLLOWINGS, params!["vmid" => mid, "pn" => pn, "ps" => 50], false).await?;
-        let mids = d["list"].as_array().map(|a| a.iter().map(|u| u64_of(&u["mid"])).collect()).unwrap_or_default();
-        Ok((mids, u64_of(&d["total"]) as u32))
+        let list = d["list"]
+            .as_array()
+            .map(|a| {
+                a.iter()
+                    .map(|u| Following {
+                        mid: u64_of(&u["mid"]),
+                        name: str_of(&u["uname"]),
+                        face: image_of(&u["face"]),
+                        followed_at: u64_of(&u["mtime"]) as i64,
+                    })
+                    .collect()
+            })
+            .unwrap_or_default();
+        Ok((list, u64_of(&d["total"]) as u32))
     }
 }
 

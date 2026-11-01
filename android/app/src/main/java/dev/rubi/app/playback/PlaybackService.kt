@@ -14,6 +14,7 @@ import androidx.media3.common.MediaMetadata
 import androidx.media3.common.PlaybackException
 import androidx.media3.common.Player
 import androidx.media3.common.util.UnstableApi
+import androidx.media3.datasource.DefaultDataSource
 import androidx.media3.datasource.DefaultHttpDataSource
 import androidx.media3.exoplayer.DefaultLoadControl
 import androidx.media3.exoplayer.ExoPlayer
@@ -23,16 +24,20 @@ import androidx.media3.session.MediaController
 import androidx.media3.session.MediaSession
 import androidx.media3.session.MediaSessionService
 import androidx.media3.session.SessionToken
+import dev.rubi.app.RubiApp
 import dev.rubi.core.FfiPlayback
 import dev.rubi.core.FfiStream
 
 private const val TAG = "RubiPlayback"
 
 /**
- * One ExoPlayer for the whole process. The activity draws it; [PlaybackService] exposes
- * it through a MediaSession, which gives background play, the notification and headset keys.
+ * The one ExoPlayer for real playback (videos and 听视频). The activity draws it;
+ * [PlaybackService] exposes it through a MediaSession, which gives background play, the
+ * notification and headset keys. Owned by [Media]; created on first use.
  */
-object PlayerHolder {
+class MainPlayer(context: Context) {
+    private val context = context.applicationContext
+
     @Volatile
     private var player: ExoPlayer? = null
 
@@ -48,9 +53,9 @@ object PlayerHolder {
     private var current: Current? = null
 
     @OptIn(UnstableApi::class)
-    fun get(context: Context): ExoPlayer =
+    fun get(): ExoPlayer =
         player ?: synchronized(this) {
-            player ?: ExoPlayer.Builder(context.applicationContext)
+            player ?: ExoPlayer.Builder(context, Decoders.renderers(context))
                 // Start after 0.5 s of media instead of the default 2.5 s; keep a normal buffer after that.
                 .setLoadControl(
                     DefaultLoadControl.Builder()
@@ -59,32 +64,47 @@ object PlayerHolder {
                 )
                 .build()
                 .also { p ->
-                    p.addListener(Listener(context.applicationContext))
+                    p.addListener(Listener())
                     player = p
                 }
         }
 
     /** Plays the DASH pair (video + audio) chosen from [playback], from `positionMs`. */
-    fun play(context: Context, playback: FfiPlayback, title: String, positionMs: Long = 0L) {
+    fun play(playback: FfiPlayback, title: String, positionMs: Long = 0L) {
         val video = pickVideo(playback) ?: return
         val c = Current(playback, title, video, pickAudio(playback))
         current = c
-        load(context, c, positionMs)
-        bindService(context)
+        load(c, positionMs)
+        bindService()
+    }
+
+    /** An offline copy: the video file and its audio file, from `positionMs`. */
+    @OptIn(UnstableApi::class)
+    fun playLocal(videoPath: String, audioPath: String?, title: String, positionMs: Long = 0L) {
+        current = null
+        val factory = ProgressiveMediaSource.Factory(DefaultDataSource.Factory(context))
+        val sources = listOfNotNull(videoPath, audioPath).map {
+            factory.createMediaSource(item(Uri.fromFile(java.io.File(it)).toString(), title))
+        }
+        val p = get()
+        p.setMediaSource(MergingMediaSource(*sources.toTypedArray()), positionMs)
+        p.prepare()
+        p.playWhenReady = true
+        bindService()
     }
 
     /** 听视频: the audio stream only, with UP and cover for the notification and lock screen. */
     @OptIn(UnstableApi::class)
-    fun playAudioOnly(context: Context, playback: FfiPlayback, title: String, artist: String, cover: String) {
+    fun playAudioOnly(playback: FfiPlayback, title: String, artist: String, cover: String) {
         val audio = pickAudio(playback) ?: return
         current = null
-        val p = get(context)
+        val p = get()
         val meta = MediaMetadata.Builder().setTitle(title).setArtist(artist).setArtworkUri(Uri.parse(cover)).build()
         val media = MediaItem.Builder().setUri(audio.url).setMediaMetadata(meta).build()
         p.setMediaSource(ProgressiveMediaSource.Factory(http(playback)).createMediaSource(media))
         p.prepare()
         p.playWhenReady = true
-        bindService(context)
+        bindService()
     }
 
     /**
@@ -106,13 +126,13 @@ object PlayerHolder {
     }
 
     @OptIn(UnstableApi::class)
-    private fun load(context: Context, c: Current, positionMs: Long) {
+    private fun load(c: Current, positionMs: Long) {
         val factory = ProgressiveMediaSource.Factory(http(c.playback))
         val sources = buildList {
             add(factory.createMediaSource(item(urlAt(c.video, c.attempt), c.title)))
             c.audio?.let { add(factory.createMediaSource(item(urlAt(it, c.attempt), c.title))) }
         }
-        val p = get(context)
+        val p = get()
         p.setMediaSource(MergingMediaSource(*sources.toTypedArray()), positionMs)
         p.prepare()
         p.playWhenReady = true
@@ -125,7 +145,7 @@ object PlayerHolder {
         return all[attempt % all.size]
     }
 
-    private class Listener(private val context: Context) : Player.Listener {
+    private inner class Listener : Player.Listener {
         override fun onRenderedFirstFrame() {
             val c = current ?: return
             if (!c.firstFrameLogged) {
@@ -139,7 +159,7 @@ object PlayerHolder {
             Log.w(TAG, "playback error on attempt ${c.attempt + 1}: ${error.errorCodeName}", error)
             if (c.attempt + 1 < c.attempts) {
                 c.attempt++
-                load(context, c, player?.currentPosition ?: 0L)
+                load(c, player?.currentPosition ?: 0L)
             }
         }
     }
@@ -163,7 +183,7 @@ object PlayerHolder {
 
     private fun pickAudio(p: FfiPlayback): FfiStream? = p.audio.maxByOrNull { it.bandwidth }
 
-    private fun bindService(context: Context) {
+    private fun bindService() {
         val token = SessionToken(context, ComponentName(context, PlaybackService::class.java))
         MediaController.Builder(context, token).buildAsync()
     }
@@ -181,7 +201,8 @@ class PlaybackService : MediaSessionService() {
             Intent(this, dev.rubi.app.MainActivity::class.java).setAction(ACTION_LISTEN).addFlags(Intent.FLAG_ACTIVITY_SINGLE_TOP),
             PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT,
         )
-        session = MediaSession.Builder(this, QueuePlayer(PlayerHolder.get(this))).setSessionActivity(open).build()
+        val media = (application as RubiApp).media
+        session = MediaSession.Builder(this, QueuePlayer(media.player.get(), media.listening)).setSessionActivity(open).build()
     }
 
     override fun onGetSession(controllerInfo: MediaSession.ControllerInfo): MediaSession? = session
@@ -189,7 +210,7 @@ class PlaybackService : MediaSessionService() {
     override fun onDestroy() {
         session?.release()
         session = null
-        PlayerHolder.release()
+        (application as RubiApp).media.player.release()
         super.onDestroy()
     }
 }
@@ -198,10 +219,10 @@ const val ACTION_LISTEN = "dev.rubi.app.LISTEN"
 
 /**
  * The player as the notification, lock screen and headset see it: while 听视频 runs, 上一首 /
- * 下一首 are offered and go to [AudioQueue] instead of the player's own one-item timeline.
+ * 下一首 are offered and go to [Listening] instead of the player's own one-item timeline.
  */
-private class QueuePlayer(player: Player) : ForwardingPlayer(player) {
-    private val listening get() = AudioQueue.current.value != null
+private class QueuePlayer(player: Player, private val queue: Listening) : ForwardingPlayer(player) {
+    private val listening get() = queue.current.value != null
 
     override fun getAvailableCommands(): Player.Commands {
         val base = super.getAvailableCommands()
@@ -213,9 +234,9 @@ private class QueuePlayer(player: Player) : ForwardingPlayer(player) {
 
     override fun isCommandAvailable(command: Int): Boolean = getAvailableCommands().contains(command)
 
-    // The session calls these on the main thread, where AudioQueue lives.
-    override fun seekToNext() = if (listening) AudioQueue.next() else super.seekToNext()
-    override fun seekToNextMediaItem() = if (listening) AudioQueue.next() else super.seekToNextMediaItem()
-    override fun seekToPrevious() = if (listening) AudioQueue.previous() else super.seekToPrevious()
-    override fun seekToPreviousMediaItem() = if (listening) AudioQueue.previous() else super.seekToPreviousMediaItem()
+    // The session calls these on the main thread, where Listening lives.
+    override fun seekToNext() = if (listening) queue.next() else super.seekToNext()
+    override fun seekToNextMediaItem() = if (listening) queue.next() else super.seekToNextMediaItem()
+    override fun seekToPrevious() = if (listening) queue.previous() else super.seekToPrevious()
+    override fun seekToPreviousMediaItem() = if (listening) queue.previous() else super.seekToPreviousMediaItem()
 }

@@ -1,5 +1,6 @@
 package dev.rubi.app.ui
 
+import dev.rubi.app.playback.LocalMedia
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
@@ -44,7 +45,6 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import coil3.compose.AsyncImage
 import dev.rubi.app.RubiApp
-import dev.rubi.app.playback.AudioQueue
 import dev.rubi.app.ui.theme.LocalMetro
 import dev.rubi.core.FfiPlaylistMode
 import dev.rubi.core.FfiVideoCard
@@ -66,8 +66,9 @@ private fun modeLabel(m: FfiPlaylistMode) = when (m) {
 @Composable
 fun ListenScreen(app: RubiApp, nav: Nav) {
     val c = LocalMetro.current
-    val now by AudioQueue.current
-    val playing by AudioQueue.playing
+    val listening = LocalMedia.current.listening
+    val now by listening.current
+    val playing by listening.playing
     var items by remember { mutableStateOf(emptyList<FfiVideoCard>()) }
     var mode by remember { mutableStateOf(FfiPlaylistMode.SEQUENTIAL) }
     var open by remember { mutableStateOf(false) }
@@ -82,7 +83,7 @@ fun ListenScreen(app: RubiApp, nav: Nav) {
     }
     LaunchedEffect(Unit) {
         while (true) {
-            val (p, l) = AudioQueue.progress()
+            val (p, l) = listening.progress()
             position = p
             length = l
             delay(500)
@@ -132,12 +133,12 @@ fun ListenScreen(app: RubiApp, nav: Nav) {
                 Canvas(
                     Modifier.fillMaxWidth().height(28.dp)
                         .pointerInput(length) {
-                            detectTapGestures { o -> if (length > 0) AudioQueue.seekTo((o.x / size.width * length).toLong()) }
+                            detectTapGestures { o -> if (length > 0) listening.seekTo((o.x / size.width * length).toLong()) }
                         }
                         .pointerInput(length) {
                             detectHorizontalDragGestures(
                                 onDragStart = { o -> dragging = (o.x / size.width).coerceIn(0f, 1f) },
-                                onDragEnd = { dragging?.let { if (length > 0) AudioQueue.seekTo((it * length).toLong()) }; dragging = null },
+                                onDragEnd = { dragging?.let { if (length > 0) listening.seekTo((it * length).toLong()) }; dragging = null },
                                 onDragCancel = { dragging = null },
                             ) { change, _ -> dragging = (change.position.x / size.width).coerceIn(0f, 1f) }
                         },
@@ -166,14 +167,14 @@ fun ListenScreen(app: RubiApp, nav: Nav) {
                     val m = MODE_ORDER[(MODE_ORDER.indexOf(mode) + 1) % MODE_ORDER.size]
                     if (runCatching { app.core.setPlaylistMode(m) }.isSuccess) mode = m
                 }) { Icon(24.dp, c.fg) { modeIcon(it, mode) } }
-                IconButton(52.dp, onClick = { AudioQueue.previous() }) { Icon(26.dp, c.fg) { skip(it, forward = false) } }
-                IconButton(72.dp, background = c.accent, onClick = { AudioQueue.toggle() }) {
+                IconButton(52.dp, onClick = { listening.previous() }) { Icon(26.dp, c.fg) { skip(it, forward = false) } }
+                IconButton(72.dp, background = c.accent, onClick = { listening.toggle() }) {
                     Icon(28.dp, Color.White) { if (playing) pause(it) else play(it) }
                 }
-                IconButton(52.dp, onClick = { AudioQueue.next() }) { Icon(26.dp, c.fg) { skip(it, forward = true) } }
+                IconButton(52.dp, onClick = { listening.next() }) { Icon(26.dp, c.fg) { skip(it, forward = true) } }
                 IconButton(48.dp, onClick = {
                     // Leaves listening for the video page, picking up where the audio is.
-                    val from = AudioQueue.progress().first
+                    val from = listening.progress().first
                     nav.replaceTop(Screen.Player(card.bvid, card.title, fromPlaylist = true, startMs = from))
                 }) { Icon(24.dp, c.fg) { tv(it) } }
             }
@@ -198,7 +199,7 @@ fun ListenScreen(app: RubiApp, nav: Nav) {
             items(items, key = { it.bvid }) { item ->
                 val on = item.bvid == card.bvid
                 Row(
-                    Modifier.fillMaxWidth().clickable { if (!on) AudioQueue.jump(item) }.padding(horizontal = 16.dp, vertical = 8.dp),
+                    Modifier.fillMaxWidth().clickable { if (!on) listening.jump(item) }.padding(horizontal = 16.dp, vertical = 8.dp),
                     verticalAlignment = Alignment.CenterVertically,
                     horizontalArrangement = Arrangement.spacedBy(10.dp),
                 ) {

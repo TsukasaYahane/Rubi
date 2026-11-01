@@ -92,7 +92,8 @@ category = "pinned_comment"
 target = "comment"
 # 2026-10-31 抓包：jump_url 也用于搜索词高亮（extra.is_word_search）和番剧链接，不能整体判为带货；
 # 商品链接一项的 extra 带 goods_prefetched_cache，正文常是 b23.tv/cm-… 商业短链。
-when = { op = "any", of = [{ op = "exists", path = "content.jump_url.*.extra.goods_prefetched_cache" }, { op = "contains", path = "content.message", text = "b23.tv/cm-" }, { op = "contains", path = "content.message", text = "淘宝" }, { op = "contains", path = "content.message", text = "京东" }, { op = "contains", path = "content.message", text = "拼多多" }, { op = "contains", path = "content.message", text = "购买链接" }] }
+# 2026-11-01：UP 置顶的淘宝商品链接是 b23.tv/mall-…，jump_url 带 extra.goods_item_id 与 app_package_name（不带 goods_prefetched_cache）。
+when = { op = "any", of = [{ op = "exists", path = "content.jump_url.*.extra.goods_prefetched_cache" }, { op = "exists", path = "content.jump_url.*.extra.goods_item_id" }, { op = "contains", path = "content.message", text = "b23.tv/mall-" }, { op = "contains", path = "content.message", text = "b23.tv/cm-" }, { op = "contains", path = "content.message", text = "淘宝" }, { op = "contains", path = "content.message", text = "京东" }, { op = "contains", path = "content.message", text = "拼多多" }, { op = "contains", path = "content.message", text = "购买链接" }] }
 verified = true
 
 # ---------- 消息中心 ----------
@@ -117,3 +118,13 @@ category = "ad"
 target = "hot_word"
 # 2026-10-31 抓包：s.search 热搜每条都有 stat_datas.is_commercial（字符串 "0"）；未见到 "1" 的样本。
 when = { op = "any", of = [{ op = "eq", path = "stat_datas.is_commercial", value = "1" }, { op = "eq", path = "is_commercial", value = "1" }, { op = "exists", path = "ad_info" }] }
+
+# ---------- 专栏 / 图文正文 ----------
+
+[[field_rules]]
+id = "article.promo_card"
+name = "专栏里的带货 / 广告卡片"
+category = "ad"
+target = "article_block"
+# 正文段落（para_type 6 是链接卡片）：商品卡、广告卡，以及正文里的 b23.tv/cm- 商业短链与购物平台链接。
+when = { op = "any", of = [{ op = "contains", path = "link_card.card.type", text = "GOODS" }, { op = "exists", path = "link_card.card.goods" }, { op = "contains", path = "link_card.card.type", text = "AD" }, { op = "contains", path = "text.nodes.*.rich.jump_url", text = "b23.tv/cm-" }, { op = "contains", path = "text.nodes.*.rich.jump_url", text = "taobao.com" }, { op = "contains", path = "text.nodes.*.rich.jump_url", text = "jd.com" }] }

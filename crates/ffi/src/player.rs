@@ -8,8 +8,8 @@ use rubi_filter::danmaku::layout::{Lane, LayoutConfig, MeasuredWidths, layout};
 use rubi_model::{Danmaku, VideoRef};
 
 use crate::{
-    FfiDanmaku, FfiDanmakuSet, FfiLane, FfiPlacement, FfiPlayback, FfiSteinNode, FfiVideoCard, FfiVideoDetail,
-    FfiVideoRef, Res, RubiCore,
+    FfiDanmaku, FfiDanmakuSet, FfiLane, FfiPlacement, FfiPlayback, FfiResumePoint, FfiSteinNode, FfiVideoCard,
+    FfiVideoDetail, FfiVideoRef, Res, RubiCore,
 };
 
 #[uniffi::export(async_runtime = "tokio")]
@@ -27,8 +27,7 @@ impl RubiCore {
 
     /// Full details for the player page (always fresh, with tags).
     pub async fn video_detail(&self, bvid: String) -> Res<FfiVideoDetail> {
-        let (card, parts) = self.videos.detail(&bvid).await?;
-        Ok(FfiVideoDetail::of(&card, parts as u32))
+        Ok(FfiVideoDetail::of(&self.videos.detail(&bvid).await?))
     }
 
     /// The BV id to open for a video pointer (av numbers are looked up, short links followed).
@@ -39,6 +38,11 @@ impl RubiCore {
             FfiVideoRef::Short { url } => VideoRef::Short(url),
         };
         Ok(self.videos.resolve(video).await?)
+    }
+
+    /// Where the user stopped watching this video, when worth offering; `None` otherwise.
+    pub async fn resume_point(&self, bvid: String) -> Option<FfiResumePoint> {
+        self.videos.resume_point(&bvid).await.map(|r| FfiResumePoint { cid: r.cid, position_ms: r.position_ms })
     }
 
     /// Stream URLs for `qn` (capped to the qualities Rubi offers).

@@ -10,8 +10,9 @@ import androidx.compose.runtime.mutableStateOf
 /**
  * Picture-in-picture for the player page. The activity reports mode changes here; the player
  * page says when it is showing and whether leaving the app should shrink it into a window.
+ * Owned by [Media].
  */
-object Pip {
+class Pip {
     /** Whether the activity is in picture-in-picture right now (drives the compact layout). */
     val active = mutableStateOf(false)
 

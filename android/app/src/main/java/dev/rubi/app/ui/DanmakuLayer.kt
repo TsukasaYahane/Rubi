@@ -1,5 +1,6 @@
 package dev.rubi.app.ui
 
+import dev.rubi.app.playback.LocalMedia
 import android.graphics.Paint
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.layout.BoxWithConstraints
@@ -35,7 +36,6 @@ import coil3.request.SuccessResult
 import coil3.request.allowHardware
 import coil3.toBitmap
 import dev.rubi.app.data.DanmakuDisplay
-import dev.rubi.app.playback.PlayerHolder
 import dev.rubi.core.FfiDanmaku
 import dev.rubi.core.FfiDanmakuSet
 import dev.rubi.core.FfiLane
@@ -131,7 +131,7 @@ fun DanmakuLayer(
             }
         }
 
-        val player = source ?: PlayerHolder.get(ctx)
+        val player = source ?: LocalMedia.current.player.get()
         var pos by remember { mutableLongStateOf(0L) }
         LaunchedEffect(player) { while (true) withFrameMillis { pos = player.currentPosition } }
 

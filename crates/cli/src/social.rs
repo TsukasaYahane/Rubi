@@ -1,6 +1,6 @@
 //! Commands for comments, search, the message center, chat and account actions.
 
-use rubi_api::UpOrder;
+use rubi_api::{CommentArea, UpOrder};
 use rubi_core::{Services, ThreadView};
 use rubi_model::NoticeKind;
 
@@ -128,15 +128,18 @@ async fn search(app: &Services, keyword: &str) -> Res<()> {
 
 async fn comments(app: &Services, bvid: &str, by_time: bool) -> Res<()> {
     let card = app.videos.card(bvid).await?;
-    let page = app.comments.page(card.aid, by_time, None).await?;
+    let page = app.comments.page(CommentArea::video(card.aid), by_time, None).await?;
     println!("{} · 已隐藏置顶带货评论 {} 条\n", card.title, page.hidden_pinned);
     for p in &page.pinned {
         println!("[置顶] {}: {}", p.name, short(&p.text, 50));
     }
     for (i, t) in page.threads.iter().enumerate() {
         // The first three threads are loaded in full; the rest show their previews.
-        let shown =
-            if i < 3 && t.total_replies > 0 { app.comments.thread(card.aid, t.root_rpid, 6).await? } else { t.clone() };
+        let shown = if i < 3 && t.total_replies > 0 {
+            app.comments.thread(CommentArea::video(card.aid), t.root_rpid, 6).await?
+        } else {
+            t.clone()
+        };
         print_thread(&shown);
         println!();
     }

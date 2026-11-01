@@ -29,6 +29,9 @@ pub struct Comment {
     /// The 专栏 id of the note this comment carries (笔记), 0 for ordinary comments.
     #[serde(default)]
     pub note_cvid: u64,
+    /// The signed-in user has liked it.
+    #[serde(default)]
+    pub liked: bool,
     /// The reply exactly as the API returned it; the pinned-comment rules match against this.
     #[serde(default)]
     pub raw: serde_json::Value,

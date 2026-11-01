@@ -135,6 +135,8 @@ pub enum Target {
     Notice,
     /// Trending search words.
     HotWord,
+    /// Paragraphs of a 专栏 / 图文 body (promotion cards, shop links).
+    ArticleBlock,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]

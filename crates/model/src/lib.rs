@@ -1,7 +1,9 @@
 //! Domain types shared by every Rubi crate. No I/O lives here.
 
+mod article;
 mod comment;
 mod danmaku;
+mod download;
 mod dynamic;
 mod feedback;
 mod library;
@@ -10,9 +12,11 @@ mod space;
 mod video;
 mod video_ref;
 
+pub use article::{Article, ArticleBlock};
 pub use comment::{Comment, CommentPicture, ThreadRow, VideoLink, flatten_thread};
 pub use danmaku::{CommandDanmaku, Danmaku, DanmakuMode, JumpMark};
-pub use dynamic::{Dynamic, DynamicKind, FollowedUp};
+pub use download::{Download, DownloadState};
+pub use dynamic::{Dynamic, DynamicKind, FollowedUp, Following, FollowingUp};
 pub use feedback::{DislikeReason, FeedbackEvent, ItemRef, Signal};
 pub use library::{FavFolder, HistoryEntry, VideoRelation};
 pub use message::{ChatMessage, ChatSession, CommentRef, Notice, NoticeKind, SharedVideo, UnreadCounts};

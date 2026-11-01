@@ -1,5 +1,8 @@
 package dev.rubi.app.ui
 
+import dev.rubi.core.FfiResumePoint
+import dev.rubi.core.FfiCommentArea
+import dev.rubi.app.playback.LocalMedia
 import android.os.SystemClock
 import android.util.Log
 import android.content.Intent
@@ -62,9 +65,6 @@ import androidx.lifecycle.LifecycleEventObserver
 import androidx.lifecycle.compose.LocalLifecycleOwner
 import dev.rubi.app.data.DanmakuDisplay
 import dev.rubi.app.data.PlaybackPrefs
-import dev.rubi.app.playback.AudioQueue
-import dev.rubi.app.playback.Pip
-import dev.rubi.app.playback.PlayerHolder
 import dev.rubi.app.ui.theme.LocalMetro
 import dev.rubi.app.ui.theme.MetroType
 import dev.rubi.core.FfiCommentRef
@@ -100,12 +100,13 @@ fun PlayerScreen(
 ) {
     val c = LocalMetro.current
     val ctx = LocalContext.current
+    val media = LocalMedia.current
     var video by remember { mutableStateOf<FfiVideoCard?>(null) }
     var danmaku by remember { mutableStateOf<FfiDanmakuSet?>(null) }
     var error by remember { mutableStateOf<String?>(null) }
     var tab by remember { mutableStateOf(if (focus != null) 1 else 0) }
     var display by remember { mutableStateOf(DanmakuDisplay.load(app.core)) }
-    var dmStatus by remember { mutableStateOf("弹幕加载中…") }
+    var dmProblem by remember { mutableStateOf<String?>(null) }
     var dmSheet by remember { mutableStateOf(false) }
     var detail by remember { mutableStateOf<FfiVideoDetail?>(null) }
     var detailOpen by remember { mutableStateOf(false) }
@@ -122,13 +123,32 @@ fun PlayerScreen(
     /** The part the current story node plays; its question waits until that part is loaded. */
     var nodeCid by remember { mutableStateOf<ULong?>(null) }
     val holdSpeed = remember { PlaybackPrefs.longPressSpeed(app.core) }
-    val inPip by Pip.active
+    val inPip by media.pip.active
     // Fullscreen and picture-in-picture both show the video alone.
     val compact = fullscreen || inPip
     val activity = remember(ctx) { ctx.activity() }
     PlayerPageLifecycle(app)
     val listState = rememberLazyListState()
     val scope = rememberCoroutineScope()
+    // Where each part was left, so going back to one carries on from there.
+    val partPositions = remember { mutableStateMapOf<ULong, Long>() }
+    var autoNext by remember { mutableStateOf(app.ui.autoNext) }
+    // Playing an offline copy (离线缓存).
+    var offline by remember { mutableStateOf(false) }
+    // 继续观看: where the user stopped last time, shown for a few seconds; playback starts at 0.
+    var resume by remember { mutableStateOf<FfiResumePoint?>(null) }
+    LaunchedEffect(bvid) {
+        // Opened at a set point (from 听视频) or from the play list: nothing to offer.
+        if (startMs == 0L && !fromPlaylist) resume = app.core.resumePoint(bvid)
+    }
+
+    /** Switches to part `i` of the video, remembering where the current one was left. */
+    fun pickPart(i: Int) {
+        val part = detail?.parts?.getOrNull(i) ?: return
+        if (part.cid == cid) return
+        cid?.let { partPositions[it] = media.player.get().currentPosition }
+        partCid = part.cid
+    }
 
     LaunchedEffect(bvid) { detail = runCatching { app.core.videoDetail(bvid) }.getOrNull() }
 
@@ -138,20 +158,38 @@ fun PlayerScreen(
     ReportWatching(app, bvid, cid)
     // Interactive videos follow their own story instead of the list.
     ContinuePlaylistOnEnd(app, nav, bvid, enabled = fromPlaylist && stein == null)
+    // 自动连播: the next part, then the next video of the 合集 (the play list has its own order).
+    OnPlaybackEnded(enabled = autoNext && !fromPlaylist && stein == null) {
+        val d = detail ?: return@OnPlaybackEnded
+        cid?.let { partPositions[it] = 0L }
+        val at = d.parts.indexOfFirst { it.cid == cid }
+        if (at in 0 until d.parts.lastIndex) {
+            pickPart(at + 1)
+        } else {
+            val all = d.season?.sections?.flatMap { it.episodes }.orEmpty()
+            all.getOrNull(all.indexOfFirst { it.bvid == bvid } + 1)?.let { nav.replaceTop(Screen.Player(it.bvid, it.title)) }
+        }
+    }
 
     LaunchedEffect(bvid, partCid) {
         // Drop the previous video (or branch) before fetching the next one.
-        PlayerHolder.clear()
+        media.player.clear()
         danmaku = null
-        dmStatus = "弹幕加载中…"
+        dmProblem = null
         runCatching {
             val t0 = SystemClock.elapsedRealtime()
             val qn = PlaybackPrefs.preferredQuality(app.core)
             val part = partCid
+            // 离线缓存: a finished copy plays from its files, network or not.
+            val local = if (part == null) runCatching { app.core.downloadLocal(bvid) }.getOrNull() else null
+            if (local != null) {
+                media.player.playLocal(local.videoPath, local.audioPath, title, startMs)
+                offline = true
+            }
             val pb = if (part == null) app.core.playback(bvid, qn) else app.core.playbackPart(bvid, part, qn)
             playback = pb
             Log.i(TAG, "playurl ready in ${SystemClock.elapsedRealtime() - t0} ms")
-            PlayerHolder.play(ctx, pb, title, if (part == null) startMs else 0L)
+            if (local == null) media.player.play(pb, title, if (part == null) startMs else partPositions[part] ?: 0L)
             cid = pb.cid
             val durationMs = if (part == null) {
                 val v = app.core.video(bvid).also { video = it }
@@ -163,13 +201,13 @@ fun PlayerScreen(
             } else {
                 pb.durationMs.toUInt()
             }
-            loadDanmakuNearFirst(app, pb.cid, durationMs, PlayerHolder.get(ctx).currentPosition) { set, status ->
+            loadDanmakuNearFirst(app, pb.cid, durationMs, media.player.get().currentPosition) { set, problem ->
                 if (set != null) danmaku = set
-                dmStatus = status
+                dmProblem = problem
             }
         }.onFailure {
-            error = playbackError(it)
-            dmStatus = ""
+            // Offline with a local copy: the copy plays; only extras (danmaku, details) are missing.
+            if (!offline) error = playbackError(it)
         }
     }
 
@@ -179,11 +217,14 @@ fun PlayerScreen(
     Column(Modifier.fillMaxSize()) {
         if (!compact) Row(Modifier.fillMaxWidth().padding(start = 4.dp, end = 16.dp), verticalAlignment = Alignment.CenterVertically) {
             Box(Modifier.size(44.dp).clickable { nav.pop() }, contentAlignment = Alignment.Center) { GlyphIcon(Glyph.Back) }
-            // Deep in a chain of videos (or opened from another page): straight back to 首页.
-            if (nav.stack.size > 1) {
-                Box(Modifier.size(44.dp).clickable { nav.home() }, contentAlignment = Alignment.Center) { GlyphIcon(Glyph.Home) }
+            // Several videos deep: straight back to where the chain started (首页 when it began
+            // on a tab).
+            if (nav.chainLength > 1) {
+                val glyph = if (nav.stack.size == nav.chainLength) Glyph.Home else Glyph.Exit
+                Box(Modifier.size(44.dp).clickable { nav.leaveChain() }, contentAlignment = Alignment.Center) { GlyphIcon(glyph) }
             }
-            Meta(dmStatus, Modifier.weight(1f))
+            // Only trouble is worth a line here; the danmaku count is not.
+            Meta(dmProblem.orEmpty(), Modifier.weight(1f))
             Text(
                 if (display.enabled) "弹 开" else "弹 关",
                 style = MetroType.meta.copy(fontSize = 12.sp),
@@ -207,12 +248,12 @@ fun PlayerScreen(
                     modifier = Modifier.height(44.dp).padding(start = 12.dp).wrapContentSize(Alignment.CenterEnd).clickable { qualitySheet = true },
                 )
             }
-            if (activity != null && Pip.supported(activity)) {
+            if (activity != null && media.pip.supported(activity)) {
                 Text(
                     "小窗",
                     style = MetroType.meta.copy(fontSize = 12.sp),
                     color = c.fg,
-                    modifier = Modifier.size(44.dp, 44.dp).wrapContentSize(Alignment.CenterEnd).clickable { Pip.enter(activity) },
+                    modifier = Modifier.size(44.dp, 44.dp).wrapContentSize(Alignment.CenterEnd).clickable { media.pip.enter(activity) },
                 )
             }
             Text(
@@ -229,7 +270,7 @@ fun PlayerScreen(
             AndroidView(
                 factory = {
                     (LayoutInflater.from(it).inflate(R.layout.player_view, null) as PlayerView).apply {
-                        player = PlayerHolder.get(it)
+                        player = media.player.get()
                         setFullscreenButtonClickListener { on -> fullscreen = on }
                         setControllerVisibilityListener(PlayerView.ControllerVisibilityListener { v -> controlsVisible = v == View.VISIBLE })
                         playerView = this
@@ -246,7 +287,7 @@ fun PlayerScreen(
             // No danmaku in the small window: too little room to read them.
             if (display.enabled && set != null && !inPip) DanmakuLayer(app.core, set, display, Modifier.fillMaxSize())
             // Only while the controls are hidden: their buttons must get their own taps.
-            if (fullscreen && !inPip && !controlsVisible) FullscreenGestures(PlayerHolder.get(ctx), playerView, holdSpeed)
+            if (fullscreen && !inPip && !controlsVisible) FullscreenGestures(media.player.get(), playerView, holdSpeed)
             val session = stein
             val node = steinNode
             if (session != null && node != null && !inPip) {
@@ -259,6 +300,29 @@ fun PlayerScreen(
                     choose = { session.choose(it) },
                     onError = { error = it },
                     modifier = Modifier.align(Alignment.Center),
+                )
+            }
+            val hint = resume
+            val parts = detail?.parts.orEmpty()
+            if (hint != null && cid != null && !inPip && stein == null) {
+                val at = parts.indexOfFirst { it.cid == hint.cid }
+                val elsewhere = at >= 0 && hint.cid != cid
+                val partMs = parts.getOrNull(at)?.durationS?.toLong()?.times(1000)
+                ResumeHint(
+                    positionMs = hint.positionMs.toLong(),
+                    durationMs = partMs ?: media.player.get().duration.coerceAtLeast(0L),
+                    otherPart = if (elsewhere) "P${at + 1}" else null,
+                    onResume = {
+                        resume = null
+                        if (elsewhere) {
+                            partPositions[hint.cid] = hint.positionMs.toLong()
+                            pickPart(at)
+                        } else {
+                            media.player.get().seekTo(hint.positionMs.toLong())
+                        }
+                    },
+                    onGone = { resume = null },
+                    modifier = Modifier.align(Alignment.BottomStart),
                 )
             }
             if (fullscreen && !inPip) {
@@ -276,7 +340,7 @@ fun PlayerScreen(
                     onQuality = { qualitySheet = true },
                     send = { text, mode, color ->
                         val id = cid ?: throw IllegalStateException("视频还没加载完")
-                        val at = PlayerHolder.get(ctx).currentPosition.toUInt()
+                        val at = media.player.get().currentPosition.toUInt()
                         app.core.sendDanmaku(bvid, id, at, text, mode, color)
                     },
                     // Show it at once: the next segment fetch would not include it yet.
@@ -304,7 +368,7 @@ fun PlayerScreen(
                         maxLines = 1,
                         softWrap = false,
                         modifier = Modifier.heightIn(min = 32.dp).wrapContentSize(Alignment.Center).clickable {
-                            PlayerHolder.get(ctx).seekTo(m.targetMs.toLong())
+                            media.player.get().seekTo(m.targetMs.toLong())
                         },
                     )
                 }
@@ -321,7 +385,10 @@ fun PlayerScreen(
             item(key = "head") {
                 Column(Modifier.padding(start = 16.dp, end = 16.dp, top = 16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
                     Text(video?.title ?: title, style = MetroType.title, color = c.fg)
-                    video?.let { Meta("${formatCount(it.views)} 播放 · ${formatAge(it.pubdate)} · ${it.zone ?: ""}") }
+                    // Counts from the fresh details; a card from a list may have none (history).
+                    val d = detail
+                    if (d != null) Meta("${formatCount(d.views)} 播放 · ${formatAge(d.pubdate)} · ${d.zone ?: ""}")
+                    else video?.let { Meta("${formatCount(it.views)} 播放 · ${formatAge(it.pubdate)} · ${it.zone ?: ""}") }
                     video?.let { v ->
                         Text(
                             "${v.upName}  ›",
@@ -338,6 +405,28 @@ fun PlayerScreen(
                     detail?.let {
                         key(it.bvid) { VideoActions(app, nav, it) }
                         VideoDetailBlock(it, detailOpen) { detailOpen = !detailOpen }
+                    }
+                    // 分P and 合集 (interactive videos use parts as their story, so not there).
+                    val d = detail
+                    if (d != null && stein == null && (d.parts.size > 1 || d.season != null)) {
+                        Column(Modifier.bleed(16.dp)) {
+                            if (d.parts.size > 1) {
+                                PartsRow(
+                                    d.parts,
+                                    current = d.parts.indexOfFirst { it.cid == cid },
+                                    progressOf = { p ->
+                                        val total = p.durationS.toFloat() * 1000f
+                                        if (total > 0f) (partPositions[p.cid] ?: 0L) / total else 0f
+                                    },
+                                    onPick = ::pickPart,
+                                )
+                            }
+                            d.season?.let { s -> SeasonBlock(s, bvid) { ep -> nav.replaceTop(Screen.Player(ep.bvid, ep.title)) } }
+                            AutoNextRow(autoNext) {
+                                autoNext = !autoNext
+                                app.ui.autoNext = autoNext
+                            }
+                        }
                     }
                     error?.let { Text(it, color = c.fg2, fontSize = 13.sp) }
                     danmaku?.removed?.takeIf { it.isNotEmpty() }?.let { Meta("已过滤 · " + it.joinToString(" · ")) }
@@ -360,9 +449,10 @@ fun PlayerScreen(
                         // Opened from a notice: bring the comment list up under the player.
                         CommentSection(
                             app,
-                            v.aid,
+                            remember(v.aid) { FfiCommentArea(1u, v.aid) },
                             focus,
                             onOpenVideo = { link -> nav.openVideo(scope, app, link.video, link.title) },
+                            onOpenArticle = { link -> nav.push(Screen.Article(link)) },
                         ) { scope.launch { listState.scrollToItem(TABS_INDEX) } }
                     }
                 }
@@ -377,9 +467,9 @@ fun PlayerScreen(
             PlaybackPrefs.setPreferredQuality(app.core, q.qn)
             scope.launch {
                 // Same video, other streams: carry on from where it was.
-                val at = PlayerHolder.get(ctx).currentPosition
+                val at = media.player.get().currentPosition
                 runCatching { cid?.let { app.core.playbackPart(bvid, it, q.qn) } ?: app.core.playback(bvid, q.qn) }
-                    .onSuccess { p -> playback = p; PlayerHolder.play(ctx, p, video?.title ?: title, at) }
+                    .onSuccess { p -> playback = p; media.player.play(p, video?.title ?: title, at) }
                     .onFailure { error = "切换清晰度失败：${it.message}" }
             }
         }
