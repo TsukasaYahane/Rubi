@@ -9,7 +9,6 @@ import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.width
 import androidx.compose.material3.ExperimentalMaterial3Api
-import androidx.compose.material3.ModalBottomSheet
 import androidx.compose.material3.Slider
 import androidx.compose.material3.SliderDefaults
 import androidx.compose.material3.Text
@@ -20,7 +19,6 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.graphics.RectangleShape
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
@@ -31,9 +29,9 @@ import dev.rubi.app.ui.theme.MetroType
 /** The player's 弹幕设置 sheet: changes apply immediately and are saved by the caller. */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-fun DanmakuSettingsSheet(display: DanmakuDisplay, onChange: (DanmakuDisplay) -> Unit, onDismiss: () -> Unit) {
+fun DanmakuSettingsSheet(display: DanmakuDisplay, onChange: (DanmakuDisplay) -> Unit, onDismiss: () -> Unit, side: Boolean = false) {
     val c = LocalMetro.current
-    ModalBottomSheet(onDismissRequest = onDismiss, containerColor = c.bg2, shape = RectangleShape, dragHandle = null) {
+    PlayerSheet(side, onDismiss) {
         Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
             Text("弹幕设置", style = MetroType.section, color = c.fg)
 

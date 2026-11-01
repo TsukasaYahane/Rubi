@@ -1,11 +1,15 @@
 package dev.rubi.app.playback
 
+import android.app.PendingIntent
 import android.content.ComponentName
 import android.content.Context
+import android.content.Intent
+import android.net.Uri
 import android.os.SystemClock
 import android.util.Log
 import androidx.annotation.OptIn
 import androidx.media3.common.MediaItem
+import androidx.media3.common.ForwardingPlayer
 import androidx.media3.common.MediaMetadata
 import androidx.media3.common.PlaybackException
 import androidx.media3.common.Player
@@ -69,13 +73,15 @@ object PlayerHolder {
         bindService(context)
     }
 
-    /** Audio-only entry point reserved for the 听视频 mode (no UI yet). */
+    /** 听视频: the audio stream only, with UP and cover for the notification and lock screen. */
     @OptIn(UnstableApi::class)
-    fun playAudioOnly(context: Context, playback: FfiPlayback, title: String) {
+    fun playAudioOnly(context: Context, playback: FfiPlayback, title: String, artist: String, cover: String) {
         val audio = pickAudio(playback) ?: return
         current = null
         val p = get(context)
-        p.setMediaSource(ProgressiveMediaSource.Factory(http(playback)).createMediaSource(item(audio.url, title)))
+        val meta = MediaMetadata.Builder().setTitle(title).setArtist(artist).setArtworkUri(Uri.parse(cover)).build()
+        val media = MediaItem.Builder().setUri(audio.url).setMediaMetadata(meta).build()
+        p.setMediaSource(ProgressiveMediaSource.Factory(http(playback)).createMediaSource(media))
         p.prepare()
         p.playWhenReady = true
         bindService(context)
@@ -168,7 +174,14 @@ class PlaybackService : MediaSessionService() {
 
     override fun onCreate() {
         super.onCreate()
-        session = MediaSession.Builder(this, PlayerHolder.get(this)).build()
+        // Tapping the notification opens the app; while listening, on the 听视频 page.
+        val open = PendingIntent.getActivity(
+            this,
+            0,
+            Intent(this, dev.rubi.app.MainActivity::class.java).setAction(ACTION_LISTEN).addFlags(Intent.FLAG_ACTIVITY_SINGLE_TOP),
+            PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT,
+        )
+        session = MediaSession.Builder(this, QueuePlayer(PlayerHolder.get(this))).setSessionActivity(open).build()
     }
 
     override fun onGetSession(controllerInfo: MediaSession.ControllerInfo): MediaSession? = session
@@ -179,4 +192,30 @@ class PlaybackService : MediaSessionService() {
         PlayerHolder.release()
         super.onDestroy()
     }
+}
+
+const val ACTION_LISTEN = "dev.rubi.app.LISTEN"
+
+/**
+ * The player as the notification, lock screen and headset see it: while 听视频 runs, 上一首 /
+ * 下一首 are offered and go to [AudioQueue] instead of the player's own one-item timeline.
+ */
+private class QueuePlayer(player: Player) : ForwardingPlayer(player) {
+    private val listening get() = AudioQueue.current.value != null
+
+    override fun getAvailableCommands(): Player.Commands {
+        val base = super.getAvailableCommands()
+        if (!listening) return base
+        return base.buildUpon()
+            .addAll(Player.COMMAND_SEEK_TO_NEXT, Player.COMMAND_SEEK_TO_NEXT_MEDIA_ITEM, Player.COMMAND_SEEK_TO_PREVIOUS, Player.COMMAND_SEEK_TO_PREVIOUS_MEDIA_ITEM)
+            .build()
+    }
+
+    override fun isCommandAvailable(command: Int): Boolean = getAvailableCommands().contains(command)
+
+    // The session calls these on the main thread, where AudioQueue lives.
+    override fun seekToNext() = if (listening) AudioQueue.next() else super.seekToNext()
+    override fun seekToNextMediaItem() = if (listening) AudioQueue.next() else super.seekToNextMediaItem()
+    override fun seekToPrevious() = if (listening) AudioQueue.previous() else super.seekToPrevious()
+    override fun seekToPreviousMediaItem() = if (listening) AudioQueue.previous() else super.seekToPreviousMediaItem()
 }

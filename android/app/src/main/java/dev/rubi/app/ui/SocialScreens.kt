@@ -1,5 +1,10 @@
 package dev.rubi.app.ui
 
+import kotlinx.coroutines.ensureActive
+import kotlinx.coroutines.CancellationException
+import androidx.compose.ui.platform.LocalFocusManager
+import androidx.compose.ui.platform.LocalSoftwareKeyboardController
+import androidx.compose.foundation.lazy.LazyListState
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
@@ -71,34 +76,56 @@ private fun MetroField(value: String, onChange: (String) -> Unit, hint: String, 
     }
 }
 
+/**
+ * One search page's state, kept by its [Screen.Search] entry: opening a result disposes the
+ * page, and coming back must show the same results at the same place.
+ */
+class SearchState {
+    var query by mutableStateOf("")
+    var results by mutableStateOf<List<FfiVideoCard>?>(null)
+    var hot by mutableStateOf(emptyList<String>())
+    var note by mutableStateOf("")
+    // Paging of the current search: the next page loads as the end of the list comes near.
+    var searched by mutableStateOf("")
+    var page by mutableStateOf(1u)
+    var hasMore by mutableStateOf(false)
+    var loading by mutableStateOf(false)
+    var failed by mutableStateOf(false)
+    var hiddenTotal by mutableStateOf(0u)
+    val list = LazyListState()
+}
+
 @Composable
-fun SearchScreen(app: RubiApp, nav: Nav) {
+fun SearchScreen(app: RubiApp, nav: Nav, state: SearchState) {
     val c = LocalMetro.current
     val scope = rememberCoroutineScope()
-    var query by remember { mutableStateOf("") }
-    var results by remember { mutableStateOf<List<FfiVideoCard>?>(null) }
-    var hot by remember { mutableStateOf(emptyList<String>()) }
-    var note by remember { mutableStateOf("") }
-    // Paging of the current search: the next page loads as the end of the list comes near.
-    var searched by remember { mutableStateOf("") }
-    var page by remember { mutableStateOf(1u) }
-    var hasMore by remember { mutableStateOf(false) }
-    var loading by remember { mutableStateOf(false) }
-    var failed by remember { mutableStateOf(false) }
-    var hiddenTotal by remember { mutableStateOf(0u) }
-    val list = rememberLazyListState()
+    val keyboard = LocalSoftwareKeyboardController.current
+    val focus = LocalFocusManager.current
+    var query by state::query
+    var results by state::results
+    var hot by state::hot
+    var note by state::note
+    var searched by state::searched
+    var page by state::page
+    var hasMore by state::hasMore
+    var loading by state::loading
+    var failed by state::failed
+    var hiddenTotal by state::hiddenTotal
+    val list = state.list
 
     LaunchedEffect(Unit) {
-        runCatching { app.core.hotWords() }.onSuccess { hot = it.words; note = "已过滤推广热搜词 ${it.hidden} 条" }
+        if (hot.isEmpty()) runCatching { app.core.hotWords() }.onSuccess { hot = it.words; if (results == null) note = "已过滤推广热搜词 ${it.hidden} 条" }
     }
     fun loadPage() {
         if (loading || (!hasMore && page > 1u)) return
         loading = true
         val q = searched
         scope.launch {
-            runCatching { app.core.search(q, page) }
-                .onSuccess { r ->
-                    if (q != searched) return@onSuccess
+            // A load cut off by leaving the page is not a failure; it runs again on return.
+            try {
+                runCatching { app.core.search(q, page).also { ensureActive() } }
+                    .onSuccess { r ->
+                        if (q != searched) return@onSuccess
                     val have = results.orEmpty()
                     results = have + r.cards.filter { n -> have.none { it.bvid == n.bvid } }
                     hiddenTotal += r.hidden
@@ -109,11 +136,16 @@ fun SearchScreen(app: RubiApp, nav: Nav) {
                     failed = false
                     note = "结果 ${results.orEmpty().size} · 已过滤 $hiddenTotal"
                 }
-                .onFailure { failed = true; note = "搜索失败：${it.message}" }
-            loading = false
+                    .onFailure { if (it !is CancellationException) { failed = true; note = "搜索失败：${it.message}" } }
+            } finally {
+                loading = false
+            }
         }
     }
     fun search(q: String) {
+        // The search is under way: put the keyboard away and leave the field.
+        keyboard?.hide()
+        focus.clearFocus()
         query = q
         searched = q
         results = emptyList()

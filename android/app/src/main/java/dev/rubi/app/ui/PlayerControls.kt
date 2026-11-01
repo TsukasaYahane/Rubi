@@ -1,6 +1,12 @@
 package dev.rubi.app.ui
 
 import android.media.AudioManager
+import androidx.compose.foundation.verticalScroll
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.layout.fillMaxHeight
+import androidx.compose.foundation.gestures.detectTapGestures
+import androidx.activity.compose.BackHandler
 import android.provider.Settings
 import android.view.WindowManager
 import androidx.compose.foundation.background
@@ -40,12 +46,37 @@ import dev.rubi.app.ui.theme.LocalMetro
 import dev.rubi.app.ui.theme.MetroType
 import dev.rubi.core.FfiQuality
 
-/** Picks a quality from what the server granted for this video; the current one is heavier. */
+/**
+ * A panel for player settings. Normally a bottom sheet; in fullscreen (`side`) a panel on the
+ * right drawn inside the player, because a sheet is its own window and would bring the system
+ * bars back.
+ */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-fun QualitySheet(options: List<FfiQuality>, current: UInt, onDismiss: () -> Unit, onPick: (FfiQuality) -> Unit) {
+fun PlayerSheet(side: Boolean, onDismiss: () -> Unit, content: @Composable () -> Unit) {
     val c = LocalMetro.current
-    ModalBottomSheet(onDismissRequest = onDismiss, containerColor = c.bg2, shape = RectangleShape, dragHandle = null) {
+    if (!side) {
+        ModalBottomSheet(onDismissRequest = onDismiss, containerColor = c.bg2, shape = RectangleShape, dragHandle = null) { content() }
+        return
+    }
+    BackHandler(onBack = onDismiss)
+    Box(
+        Modifier.fillMaxSize().background(Color(0x66000000)).pointerInput(Unit) { detectTapGestures { onDismiss() } },
+        contentAlignment = Alignment.CenterEnd,
+    ) {
+        Box(
+            Modifier.fillMaxHeight().width(360.dp).background(c.bg2)
+                .pointerInput(Unit) { detectTapGestures { } }
+                .verticalScroll(rememberScrollState()),
+        ) { content() }
+    }
+}
+
+/** Picks a quality from what the server granted for this video; the current one is heavier. */
+@Composable
+fun QualitySheet(options: List<FfiQuality>, current: UInt, onDismiss: () -> Unit, side: Boolean = false, onPick: (FfiQuality) -> Unit) {
+    val c = LocalMetro.current
+    PlayerSheet(side, onDismiss) {
         Column(Modifier.padding(16.dp)) {
             Text("清晰度", style = MetroType.section, color = c.fg)
             options.forEach { q ->

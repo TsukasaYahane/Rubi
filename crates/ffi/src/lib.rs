@@ -518,6 +518,11 @@ impl RubiCore {
         Ok(self.app.playlist.next_after(&current)?.map(|c| FfiVideoCard::of(&c, None)))
     }
 
+    /// What 上一首 goes to: the item before `current`, wrapping round.
+    pub fn playlist_previous(&self, current: String) -> Res<Option<FfiVideoCard>> {
+        Ok(self.app.playlist.previous_before(&current)?.map(|c| FfiVideoCard::of(&c, None)))
+    }
+
     // ----- 关注动态 -----
 
     /// One page of followed UPs' videos; pass `next` back for the following page.

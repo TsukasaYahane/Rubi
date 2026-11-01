@@ -4,6 +4,8 @@ import android.app.Activity
 import android.content.Context
 import android.content.ContextWrapper
 import android.content.pm.ActivityInfo
+import android.os.Build
+import android.view.WindowManager
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
@@ -53,24 +55,45 @@ internal fun Context.activity(): Activity? = when (this) {
     else -> null
 }
 
-/** While `on`: landscape, system bars hidden (swipe to peek), screen kept on. Undone on exit. */
+/**
+ * True while the player is fullscreen: the root then paints black edge to edge instead of
+ * keeping clear of the camera cutout and system bars (which left a light strip on some phones).
+ */
+val fullscreenActive = mutableStateOf(false)
+
+/**
+ * While `on`: landscape, system bars hidden (swipe to peek), drawing into the cutout area, screen
+ * kept on. Undone on exit.
+ */
 @Composable
 fun FullscreenMode(on: Boolean) {
     val activity = LocalContext.current.activity() ?: return
     val view = LocalView.current
     DisposableEffect(on) {
-        val bars = WindowCompat.getInsetsController(activity.window, view)
+        val window = activity.window
+        val bars = WindowCompat.getInsetsController(window, view)
+        val cutoutBefore = if (Build.VERSION.SDK_INT >= 28) window.attributes.layoutInDisplayCutoutMode else 0
         if (on) {
             activity.requestedOrientation = ActivityInfo.SCREEN_ORIENTATION_SENSOR_LANDSCAPE
             bars.systemBarsBehavior = WindowInsetsControllerCompat.BEHAVIOR_SHOW_TRANSIENT_BARS_BY_SWIPE
             bars.hide(WindowInsetsCompat.Type.systemBars())
+            if (Build.VERSION.SDK_INT >= 28) {
+                window.attributes = window.attributes.apply {
+                    layoutInDisplayCutoutMode = WindowManager.LayoutParams.LAYOUT_IN_DISPLAY_CUTOUT_MODE_SHORT_EDGES
+                }
+            }
             view.keepScreenOn = true
+            fullscreenActive.value = true
         }
         onDispose {
             if (on) {
                 activity.requestedOrientation = ActivityInfo.SCREEN_ORIENTATION_PORTRAIT
                 bars.show(WindowInsetsCompat.Type.systemBars())
+                if (Build.VERSION.SDK_INT >= 28) {
+                    window.attributes = window.attributes.apply { layoutInDisplayCutoutMode = cutoutBefore }
+                }
                 view.keepScreenOn = false
+                fullscreenActive.value = false
             }
         }
     }

@@ -1,5 +1,8 @@
 package dev.rubi.app.ui
 
+import androidx.compose.runtime.snapshotFlow
+import androidx.compose.foundation.pager.rememberPagerState
+import androidx.compose.foundation.pager.HorizontalPager
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.rememberScrollState
 import kotlinx.coroutines.flow.MutableSharedFlow
@@ -35,6 +38,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import dev.rubi.app.RubiApp
+import dev.rubi.app.playback.AudioQueue
 import dev.rubi.app.data.UiPrefs
 import dev.rubi.core.FfiCommentRef
 import dev.rubi.core.FfiVideoRef
@@ -51,8 +55,12 @@ sealed interface Screen {
         val focus: FfiCommentRef? = null,
         /** Opened from the play list: when it ends, the list's next item follows. */
         val fromPlaylist: Boolean = false,
+        /** Where to start, from 听视频's 看视频. */
+        val startMs: Long = 0L,
     ) : Screen
-    data object Search : Screen
+    data object Listen : Screen
+    /** Each entry carries its own state, so results survive opening a video from them. */
+    class Search(val state: SearchState = SearchState()) : Screen
     data object Inbox : Screen
     data class Chat(val mid: ULong, val name: String) : Screen
     data class Up(val mid: ULong, val name: String) : Screen
@@ -121,18 +129,29 @@ fun RubiRoot(app: RubiApp) {
         unread = runCatching { app.core.unread().let { it.reply + it.at + it.like + it.chat } }.getOrDefault(0u)
     }
     BackHandler(enabled = nav.stack.isNotEmpty()) { nav.pop() }
+    val listenRequested by AudioQueue.pageRequested
+    LaunchedEffect(listenRequested) {
+        if (!listenRequested) return@LaunchedEffect
+        AudioQueue.pageRequested.value = false
+        if (AudioQueue.current.value != null && nav.stack.lastOrNull() != Screen.Listen) nav.push(Screen.Listen)
+    }
 
     val rootScope = rememberCoroutineScope()
     CompositionLocalProvider(
         LocalEmotes provides emotes,
         LocalAddToPlaylist provides { card -> addToPlaylist(app, rootScope, card) },
     ) {
-    Box(Modifier.fillMaxSize().background(c.bg).safeDrawingPadding()) {
+    val edgeToEdge by fullscreenActive
+    Box(if (edgeToEdge) Modifier.fillMaxSize().background(Color.Black) else Modifier.fillMaxSize().background(c.bg).safeDrawingPadding()) {
         when (val top = nav.stack.lastOrNull()) {
             null -> Column(Modifier.fillMaxSize()) {
                 TopBar(nav, unread)
-                Box(Modifier.weight(1f)) {
-                    when (nav.tab) {
+                // The three tabs side by side: swipe between them, or tap the bottom bar.
+                val pager = rememberPagerState(initialPage = nav.tab.ordinal) { Tab.entries.size }
+                LaunchedEffect(nav.tab) { if (pager.targetPage != nav.tab.ordinal) pager.animateScrollToPage(nav.tab.ordinal) }
+                LaunchedEffect(pager) { snapshotFlow { pager.settledPage }.collect { nav.tab = Tab.entries[it] } }
+                HorizontalPager(pager, Modifier.weight(1f), key = { Tab.entries[it].name }) { page ->
+                    when (Tab.entries[page]) {
                         Tab.Home -> HomeScreen(app, nav, home)
                         Tab.Follow -> FollowScreen(app, nav, follow, home.dual)
                         Tab.Me -> MeScreen(app, nav)
@@ -141,8 +160,9 @@ fun RubiRoot(app: RubiApp) {
                 BottomNav(nav)
             }
             // A fresh composition per video: no danmaku, comments or tab state carried over.
-            is Screen.Player -> key(top) { PlayerScreen(app, nav, top.bvid, top.title, top.focus, top.fromPlaylist) }
-            Screen.Search -> SearchScreen(app, nav)
+            is Screen.Player -> key(top) { PlayerScreen(app, nav, top.bvid, top.title, top.focus, top.fromPlaylist, top.startMs) }
+            Screen.Listen -> ListenScreen(app, nav)
+            is Screen.Search -> SearchScreen(app, nav, top.state)
             Screen.Inbox -> InboxScreen(app, nav)
             is Screen.Chat -> ChatScreen(app, nav, top.mid, top.name)
             is Screen.Up -> key(top) { UpScreen(app, nav, top.mid, top.name) }
@@ -169,7 +189,7 @@ private fun TopBar(nav: Nav, unread: UInt) {
     ) {
         Text("RUBI", style = MetroType.brand, color = c.fg)
         Row(
-            Modifier.weight(1f).height(44.dp).clickable { nav.push(Screen.Search) }
+            Modifier.weight(1f).height(44.dp).clickable { nav.push(Screen.Search()) }
                 .border(width = 0.dp, color = Color.Transparent),
             verticalAlignment = Alignment.CenterVertically,
             horizontalArrangement = Arrangement.spacedBy(8.dp),

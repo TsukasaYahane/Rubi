@@ -101,6 +101,18 @@ impl<S: PlaylistRepo + KvRepo> Playlist<S> {
         let items = self.items()?;
         Ok(next_in(&items, current, self.mode()?, random_below).cloned())
     }
+
+    /// What 上一首 goes to: the item before `current` in list order, wrapping round. Shuffle
+    /// history is kept by the caller, which knows what was actually heard.
+    pub fn previous_before(&self, current: &str) -> Result<Option<VideoCard>> {
+        let items = self.items()?;
+        Ok(previous_in(&items, current).cloned())
+    }
+}
+
+fn previous_in<'a>(items: &'a [VideoCard], current: &str) -> Option<&'a VideoCard> {
+    let Some(at) = items.iter().position(|c| c.bvid == current) else { return items.first() };
+    items.get((at + items.len() - 1) % items.len())
 }
 
 /// The pick, with the randomness passed in so it can be tested.
@@ -157,6 +169,16 @@ mod tests {
         assert_eq!(pick("b", PlaylistMode::Shuffle, 0), Some("a"));
         assert_eq!(pick("b", PlaylistMode::Shuffle, 1), Some("c"), "the current one is stepped over");
         assert_eq!(pick("zzz", PlaylistMode::Sequential, 0), Some("a"));
+    }
+
+    #[test]
+    fn previous_wraps_round() {
+        let items = vec![card("a"), card("b"), card("c")];
+        let prev = |cur| previous_in(&items, cur).map(|c| c.bvid.as_str());
+        assert_eq!(prev("b"), Some("a"));
+        assert_eq!(prev("a"), Some("c"));
+        assert_eq!(prev("zzz"), Some("a"));
+        assert_eq!(previous_in(&[], "a"), None);
     }
 
     #[test]

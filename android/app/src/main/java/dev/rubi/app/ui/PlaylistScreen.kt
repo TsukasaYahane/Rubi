@@ -90,13 +90,17 @@ fun PlaylistScreen(app: RubiApp, nav: Nav) {
         Row(Modifier.padding(horizontal = 16.dp, vertical = 8.dp), horizontalArrangement = Arrangement.spacedBy(20.dp), verticalAlignment = Alignment.CenterVertically) {
             AccentButton("播放全部") { runCatching { app.core.playlistFirst() }.getOrNull()?.let(::play) }
             TextAction("听全部", onClick = {
-                runCatching { app.core.playlistFirst() }.getOrNull()?.let { AudioQueue.start(ctx, app.core, it) }
+                runCatching { app.core.playlistFirst() }.getOrNull()?.let {
+                    AudioQueue.start(ctx, app.core, it)
+                    nav.push(Screen.Listen)
+                }
             })
             if (items.isNotEmpty()) TextAction("清空", onClick = { change { app.core.playlistClear() } }, dim = true)
         }
         hearing?.let { now ->
-            Column(Modifier.padding(horizontal = 16.dp, vertical = 4.dp)) {
-                Meta("正在听")
+            // Tapping the 正在听 block opens the 听视频 page.
+            Column(Modifier.clickable { nav.push(Screen.Listen) }.padding(horizontal = 16.dp, vertical = 4.dp)) {
+                Meta("正在听 · 点按打开播放页")
                 Text(now.title, fontSize = 15.sp, color = c.fg, maxLines = 1, overflow = TextOverflow.Ellipsis)
                 Row(horizontalArrangement = Arrangement.spacedBy(20.dp)) {
                     TextAction(if (audioPlaying) "暂停" else "继续", onClick = { AudioQueue.toggle() })

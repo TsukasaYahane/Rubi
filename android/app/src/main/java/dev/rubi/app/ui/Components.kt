@@ -3,6 +3,7 @@ package dev.rubi.app.ui
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.gestures.detectHorizontalDragGestures
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Row
@@ -21,6 +22,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.StrokeCap
+import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.Dp
@@ -151,5 +153,28 @@ fun formatAge(unixSecs: Long): String {
         d < 86_400 -> "${d / 3600}小时前"
         d < 7 * 86_400 -> "${d / 86_400}天前"
         else -> java.text.SimpleDateFormat("yyyy-MM-dd", java.util.Locale.CHINA).format(java.util.Date(unixSecs * 1000))
+    }
+}
+
+/**
+ * Sideways swipe between `count` tabs: a drag that goes mostly sideways for at least 72 dp
+ * moves one tab (left swipe → next). Vertical scrolling inside is left alone.
+ */
+fun Modifier.swipeTabs(current: Int, count: Int, onChange: (Int) -> Unit): Modifier = pointerInput(current, count) {
+    val threshold = 72.dp.toPx()
+    var total = 0f
+    detectHorizontalDragGestures(
+        onDragStart = { total = 0f },
+        onDragEnd = {
+            val to = when {
+                total <= -threshold -> current + 1
+                total >= threshold -> current - 1
+                else -> current
+            }
+            if (to != current && to in 0 until count) onChange(to)
+        },
+    ) { change, dx ->
+        total += dx
+        change.consume()
     }
 }

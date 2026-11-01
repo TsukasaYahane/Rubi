@@ -99,6 +99,7 @@ fun PlayerScreen(
     title: String,
     focus: FfiCommentRef? = null,
     fromPlaylist: Boolean = false,
+    startMs: Long = 0L,
 ) {
     val c = LocalMetro.current
     val ctx = LocalContext.current
@@ -228,7 +229,7 @@ fun PlayerScreen(
             val pb = if (part == null) app.core.playback(bvid, qn) else app.core.playbackPart(bvid, part, qn)
             playback = pb
             Log.i(TAG, "playurl ready in ${SystemClock.elapsedRealtime() - t0} ms")
-            PlayerHolder.play(ctx, pb, title)
+            PlayerHolder.play(ctx, pb, title, if (part == null) startMs else 0L)
             cid = pb.cid
             val durationMs = if (part == null) {
                 val v = app.core.video(bvid).also { video = it }
@@ -399,7 +400,14 @@ fun PlayerScreen(
                 }
             }
         }
-        LazyColumn(Modifier.weight(1f), state = listState) {
+        fun switchTab(picked: Int) {
+            scope.launch {
+                tab = picked
+                if (listState.firstVisibleItemIndex >= TABS_INDEX) listState.scrollToItem(TABS_INDEX)
+            }
+        }
+        // A sideways swipe anywhere on the page moves between 推荐 and 评论.
+        LazyColumn(Modifier.weight(1f).swipeTabs(tab, 2, ::switchTab), state = listState) {
             item(key = "head") {
                 Column(Modifier.padding(start = 16.dp, end = 16.dp, top = 16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
                     Text(video?.title ?: title, style = MetroType.title, color = c.fg)
@@ -430,14 +438,7 @@ fun PlayerScreen(
             stickyHeader(key = "tabs") {
                 Box(Modifier.fillMaxWidth().background(c.bg)) {
                     Pivot(listOf("推荐", "评论"), tab, { picked ->
-                        scope.launch {
-                            if (picked == tab) {
-                                listState.animateScrollToItem(0)
-                            } else {
-                                tab = picked
-                                if (listState.firstVisibleItemIndex >= TABS_INDEX) listState.scrollToItem(TABS_INDEX)
-                            }
-                        }
+                        if (picked == tab) scope.launch { listState.animateScrollToItem(0) } else switchTab(picked)
                     }, MetroType.section)
                 }
             }
@@ -461,7 +462,7 @@ fun PlayerScreen(
 
     val current = playback
     if (qualitySheet && current != null) {
-        QualitySheet(current.accept, current.quality, onDismiss = { qualitySheet = false }) { q ->
+        QualitySheet(current.accept, current.quality, onDismiss = { qualitySheet = false }, side = fullscreen) { q ->
             qualitySheet = false
             PlaybackPrefs.setPreferredQuality(app.core, q.qn)
             scope.launch {
@@ -482,6 +483,7 @@ fun PlayerScreen(
                 runCatching { DanmakuDisplay.save(app.core, it) }
             },
             onDismiss = { dmSheet = false },
+            side = fullscreen,
         )
     }
 }
@@ -540,9 +542,28 @@ private fun CommentSection(
     var hasMore by remember { mutableStateOf(true) }
     var loadingMore by remember { mutableStateOf(false) }
     var round by remember { mutableStateOf(0) }
+    // When the last page request went out: pages are spaced so scrolling fast does not fire a
+    // burst of requests (which B站 answers with HTTP 412).
+    var lastLoad by remember { mutableStateOf(0L) }
+    var waiting by remember { mutableStateOf(false) }
 
     fun loadMore() {
-        if (loadingMore || !hasMore) return
+        // Only after the first page is in: before that there is no cursor to follow.
+        if (loadingMore || !hasMore || next == null) return
+        val now = SystemClock.elapsedRealtime()
+        if (now - lastLoad < COMMENT_PAGE_GAP_MS) {
+            // Too soon: try once more when the gap has passed, in case the list stops moving.
+            if (!waiting) {
+                waiting = true
+                scope.launch {
+                    delay(COMMENT_PAGE_GAP_MS - (now - lastLoad))
+                    waiting = false
+                    loadMore()
+                }
+            }
+            return
+        }
+        lastLoad = now
         loadingMore = true
         scope.launch {
             runCatching { app.core.comments(aid, byTime, next) }
@@ -552,7 +573,7 @@ private fun CommentSection(
                     hasMore = page.nextOffset != null && page.threads.isNotEmpty()
                     error = null
                 }
-                .onFailure { error = "评论加载失败：${it.message}" }
+                .onFailure { error = commentError(it) }
             loadingMore = false
         }
     }
@@ -569,7 +590,8 @@ private fun CommentSection(
                 hasMore = page.nextOffset != null && page.threads.isNotEmpty()
                 error = null
             }
-            .onFailure { error = it.message }
+            .onFailure { error = commentError(it) }
+        lastLoad = SystemClock.elapsedRealtime()
         loadingMore = false
     }
 
@@ -588,7 +610,10 @@ private fun CommentSection(
                 )
             }
         }
-        error?.let { Text(it, color = c.fg2, fontSize = 13.sp) }
+        error?.let {
+            Text(it, color = c.fg2, fontSize = 13.sp)
+            if (threads.isEmpty()) TextAction("重试", onClick = { error = null; round++ })
+        }
         focusNote?.let { Meta(it) }
         pinned.forEach { CommentRow(it, open = BooleanArray(0), pinnedLabel = true, onLink = onOpenVideo) }
         val focused = focusThread
@@ -638,13 +663,19 @@ private fun CommentSection(
         ) {
             when {
                 loadingMore -> Meta("评论加载中…")
-                error != null -> TextAction("加载更多评论", onClick = { error = null; loadMore() })
+                error != null && threads.isNotEmpty() -> TextAction("加载更多评论", onClick = { error = null; lastLoad = 0L; loadMore() })
                 !hasMore && threads.isNotEmpty() -> Meta("没有更多评论了")
                 else -> {}
             }
         }
     }
 }
+
+/** Least time between two comment page requests. */
+private const val COMMENT_PAGE_GAP_MS = 1_500L
+
+private fun commentError(e: Throwable): String =
+    if (e is dev.rubi.core.RubiException.RiskControl) "评论被 B 站风控拦截（请求过于频繁），稍等片刻再重试" else "评论加载失败：${e.message}"
 
 /**
  * One fishbone row. `open[l]` tells whether the ancestor branch at depth `l` continues
