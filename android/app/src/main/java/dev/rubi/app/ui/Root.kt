@@ -281,7 +281,8 @@ fun RubiRoot(app: RubiApp) {
                 alpha = if (run != null && run.second) flights.progress else 1f
             }
             .pageTurnIn(turns)
-            .turnstileIn(nav.stack.lastOrNull(), depth, covered = { flights.flight != null })
+            // 默认 has no card flight: a video page opens and closes like any other page.
+            .turnstileIn(nav.stack.lastOrNull(), depth, covered = { flights.flight != null && motion.style != Motion.DEFAULT })
             // Opaque, so a page turning down covers the copy of the old one beneath it.
             .background(if (edgeToEdge) Color.Black else c.bg),
     ) {

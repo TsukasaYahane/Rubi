@@ -42,6 +42,7 @@ fun PlayerPageLifecycle(app: RubiApp) {
         activity?.let(media.pip::sync)
         onDispose {
             media.pip.onPlayer = false
+            media.pip.clearVideo()
             activity?.let(media.pip::sync)
             media.player.clear()
         }

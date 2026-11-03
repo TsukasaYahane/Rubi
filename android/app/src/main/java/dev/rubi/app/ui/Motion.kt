@@ -44,8 +44,9 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 
 /**
- * UI 动效: speed `level` (0 off, then 慢 / 标准 / 快) and `style`:
- * - 0 默认: pages turn in about an edge (Metro turnstile), pivots slide, cards tilt;
+ * UI 动效: speed `level` (0 off, then 慢 / 标准 / 快) and `style`, each the same for every page
+ * opened or gone back to and every pivot switched:
+ * - 0 默认: pages and pivots slide in from the side moved to while fading in; cards tilt;
  * - 1 卡牌: a tapped card spins about its own centre while growing to the screen; pages and pivots
  *   flip about the screen's centre line;
  * - 2 书页: a tapped card grows to the screen, then turns like a book page onto the video page;
@@ -98,6 +99,11 @@ val FlightEasing = CubicBezierEasing(0.45f, 0f, 0.15f, 1f)
 /** Slow, fast, slow: for a page turning over. */
 val TurnEasing = CubicBezierEasing(0.6f, 0f, 0.2f, 1f)
 
+/** How long a page or pivot takes to arrive at 标准, in 默认 and 卡牌. */
+private const val ARRIVE_MS = 340
+/** How far 默认 slides a page or pivot in from. */
+private const val SLIDE_DP = 60f
+
 /**
  * A page arriving each time `key` changes: opened (`depth` grew) or gone back to. Only the
  * arriving page moves; the one left is gone at once (never two pages at a time, so a video page
@@ -115,7 +121,7 @@ fun Modifier.turnstileIn(key: Any?, depth: Int, covered: () -> Boolean = { false
         if (!motion.on || covered() || motion.style == Motion.BOOK) return@LaunchedEffect
         withContext(FixedSpeed) {
             turn.snapTo(1f)
-            turn.animateTo(0f, tween(motion.ms(if (motion.style == Motion.DEFAULT) 320 else 380), easing = EnterEasing))
+            turn.animateTo(0f, tween(motion.ms(ARRIVE_MS), easing = EnterEasing))
         }
     }
     return graphicsLayer {
@@ -127,22 +133,24 @@ fun Modifier.turnstileIn(key: Any?, depth: Int, covered: () -> Boolean = { false
             }
             // 书页 turns are drawn by PageTurns.
             Motion.BOOK -> {}
-            else -> {
-                rotationY = 70f * sign * turn.value
-                transformOrigin = TransformOrigin(if (forward[0]) 0f else 1f, 0.5f)
-            }
+            // The same slide as a pivot: from the right going on, from the left going back.
+            else -> translationX = sign * turn.value * SLIDE_DP * density
         }
         alpha = 1f - turn.value
         cameraDistance = 12f * density
     }
 }
 
+/** The arrival of pivot content, kept outside it so content composed anew still moves in. */
+class PivotSlide internal constructor(internal val shift: Animatable<Float, *>, internal val motion: Motion)
+
 /**
  * Pivot content arriving when `index` changes: 默认 slides in from the side picked; 卡牌 flips
- * in about the centre line; 书页 turns in about the edge on the side being moved to.
+ * in about the centre line; 书页 turns in about the edge on the side being moved to (drawn by
+ * [PageTurns]; the switch goes through it).
  */
 @Composable
-fun Modifier.pivotSlide(index: Int): Modifier {
+fun rememberPivotSlide(index: Int): PivotSlide {
     val motion = LocalMotion.current
     val shift = remember { Animatable(0f) }
     val last = remember { intArrayOf(index) }
@@ -152,9 +160,18 @@ fun Modifier.pivotSlide(index: Int): Modifier {
         if (!motion.on || from == index || motion.style == Motion.BOOK) return@LaunchedEffect
         withContext(FixedSpeed) {
             shift.snapTo(if (index > from) 1f else -1f)
-            shift.animateTo(0f, tween(motion.ms(380), easing = EnterEasing))
+            shift.animateTo(0f, tween(motion.ms(ARRIVE_MS), easing = EnterEasing))
         }
     }
+    return remember(motion) { PivotSlide(shift, motion) }
+}
+
+@Composable
+fun Modifier.pivotSlide(index: Int): Modifier = pivotSlide(rememberPivotSlide(index))
+
+fun Modifier.pivotSlide(slide: PivotSlide): Modifier {
+    val motion = slide.motion
+    val shift = slide.shift
     return graphicsLayer {
         val v = shift.value
         when (motion.style) {
@@ -164,7 +181,7 @@ fun Modifier.pivotSlide(index: Int): Modifier {
             }
             // 书页 turns are drawn by PageTurns.
             Motion.BOOK -> {}
-            else -> translationX = v * 60f * density
+            else -> translationX = v * SLIDE_DP * density
         }
         alpha = 1f - kotlin.math.abs(v)
         cameraDistance = 12f * density

@@ -116,6 +116,9 @@ fun PlayerScreen(
     var danmaku by remember { mutableStateOf<FfiDanmakuSet?>(null) }
     var error by remember { mutableStateOf<String?>(null) }
     var tab by remember { mutableStateOf(if (focus != null) 1 else 0) }
+    // 推荐 / 评论 switch like any pivot.
+    val tabSlide = rememberPivotSlide(tab)
+    val tabTurns = LocalPageTurns.current
     var display by remember { mutableStateOf(DanmakuDisplay.load(app.settings)) }
     var dmProblem by remember { mutableStateOf<String?>(null) }
     var dmSheet by remember { mutableStateOf(false) }
@@ -286,6 +289,14 @@ fun PlayerScreen(
         // The same slot in both modes, so the PlayerView (and its frame) survives the switch.
         Box(
             (if (compact) Modifier.fillMaxSize() else Modifier.fillMaxWidth().aspectRatio(16f / 9f).flightSource { flights.videoFrame = it })
+                // Where the video is, so 小窗 shrinks from it instead of showing the app icon.
+                .onGloballyPositioned { coords ->
+                    val a = activity
+                    if (a != null && !inPip) {
+                        val r = coords.boundsInWindow()
+                        media.pip.videoAt(a, r.left.toInt(), r.top.toInt(), r.right.toInt(), r.bottom.toInt())
+                    }
+                }
                 .background(Color.Black),
         ) {
             AndroidView(
@@ -470,23 +481,23 @@ fun PlayerScreen(
             stickyHeader(key = "tabs") {
                 Box(Modifier.fillMaxWidth().background(c.bg)) {
                     Pivot(listOf("推荐", "评论"), tab, { picked ->
-                        if (picked == tab) scope.launch { listState.animateScrollToItem(0) } else switchTab(picked)
+                        if (picked == tab) scope.launch { listState.animateScrollToItem(0) } else tabTurns.switch(picked > tab) { switchTab(picked) }
                     }, MetroType.section)
                 }
             }
             if (tab == 0) {
-                item(key = "related") { RelatedList(app, nav, bvid) }
+                item(key = "related") { Box(Modifier.pivotSlide(tabSlide)) { RelatedList(app, nav, bvid) } }
             } else {
                 video?.let { v ->
                     item(key = "comments") {
                         // Opened from a notice: bring the comment list up under the player.
-                        CommentSection(
+                        Box(Modifier.pivotSlide(tabSlide)) { CommentSection(
                             app,
                             remember(v.aid) { FfiCommentArea(1u, v.aid) },
                             focus,
                             onOpenVideo = { link -> nav.openVideo(scope, app, link.video, link.title) },
                             onOpenArticle = { link -> nav.push(Screen.Article(link)) },
-                        ) { scope.launch { listState.scrollToItem(TABS_INDEX) } }
+                        ) { scope.launch { listState.scrollToItem(TABS_INDEX) } } }
                     }
                 }
             }

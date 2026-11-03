@@ -137,7 +137,9 @@ fun LiveScreen(state: LiveState, nav: Nav, core: RubiCore) {
     Column(Modifier.fillMaxSize()) {
         val turns = LocalPageTurns.current
         Pivot(listOf("直播", "赛事"), state.pivot, { i -> turns.switch(i > state.pivot) { state.pivot = i } })
-        if (state.pivot == 0) LiveRooms(state, nav) else Schedule(state, nav, core)
+        Column(Modifier.weight(1f).pivotSlide(state.pivot)) {
+            if (state.pivot == 0) LiveRooms(state, nav) else Schedule(state, nav, core)
+        }
     }
 }
 

@@ -103,11 +103,14 @@ fun LoginScreen(app: RubiApp, nav: Nav) {
     }
     Column(Modifier.fillMaxSize()) {
         PageHeader(nav, "登录")
-        Pivot(listOf("扫码", "短信", "密码"), tab, { tab = it }, MetroType.section)
-        when (tab) {
-            0 -> QrLogin(app, done)
-            1 -> SmsLogin(app, done)
-            else -> PasswordLogin(app, done)
+        val turns = LocalPageTurns.current
+        Pivot(listOf("扫码", "短信", "密码"), tab, { i -> if (i != tab) turns.switch(i > tab) { tab = i } }, MetroType.section)
+        Column(Modifier.weight(1f).pivotSlide(tab)) {
+            when (tab) {
+                0 -> QrLogin(app, done)
+                1 -> SmsLogin(app, done)
+                else -> PasswordLogin(app, done)
+            }
         }
     }
 }

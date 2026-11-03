@@ -304,9 +304,10 @@ fun InboxScreen(app: RubiApp, nav: Nav) {
 
     Column(Modifier.fillMaxSize()) {
         PageHeader(nav, "消息")
-        Pivot(listOf("回复", "@我", "赞", "私信"), tab, { tab = it }, MetroType.section)
+        val turns = LocalPageTurns.current
+        Pivot(listOf("回复", "@我", "赞", "私信"), tab, { i -> if (i != tab) turns.switch(i > tab) { tab = i } }, MetroType.section)
         Meta(note, Modifier.padding(horizontal = 16.dp, vertical = 4.dp))
-        LazyColumn(Modifier.weight(1f)) {
+        LazyColumn(Modifier.weight(1f).pivotSlide(tab)) {
             if (tab < 3) {
                 items(notices, key = { it.id.toString() }) { n ->
                     val video = n.video
