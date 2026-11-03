@@ -1,4 +1,5 @@
 use std::sync::RwLock;
+use std::time::Duration;
 
 use reqwest::header::{COOKIE, REFERER, SET_COOKIE, USER_AGENT};
 use serde_json::Value;
@@ -15,6 +16,15 @@ pub const REFERER_URL: &str = "https://www.bilibili.com/";
 const NAV: &str = "https://api.bilibili.com/x/web-interface/nav";
 /// WBI keys rotate daily.
 const WBI_TTL_SECS: i64 = 6 * 3600;
+/// A server that does not answer within this is given up on.
+const CONNECT_TIMEOUT: Duration = Duration::from_secs(10);
+/// Whole API calls (small JSON bodies).
+const REQUEST_TIMEOUT: Duration = Duration::from_secs(20);
+/// Media bodies run for minutes, so only a stalled read fails them.
+const MEDIA_READ_TIMEOUT: Duration = Duration::from_secs(30);
+/// Idempotent GETs are tried this many times in all when the network fails or the server errs.
+const GET_ATTEMPTS: u32 = 3;
+const RETRY_BACKOFF: Duration = Duration::from_millis(400);
 
 pub type Params = Vec<(String, String)>;
 
@@ -28,6 +38,8 @@ macro_rules! params {
 /// The transport shared by every API implementation: cookies, WBI, rate limit.
 pub struct HttpClient {
     client: reqwest::Client,
+    /// Media streams: no overall deadline, only a read timeout.
+    media_client: reqwest::Client,
     /// Same client without redirect following, to read where a short link points.
     no_redirect: reqwest::Client,
     session: RwLock<Session>,
@@ -40,13 +52,46 @@ pub struct Response {
     pub set_cookies: Vec<String>,
 }
 
+/// Who the requests are made as: the cookies and device ids, read and replaced as a whole.
+pub trait SessionHolder: Send + Sync {
+    fn session(&self) -> Session;
+    fn update_session(&self, f: &mut dyn FnMut(&mut Session));
+}
+
+impl SessionHolder for HttpClient {
+    fn session(&self) -> Session {
+        HttpClient::session(self)
+    }
+
+    fn update_session(&self, f: &mut dyn FnMut(&mut Session)) {
+        HttpClient::update_session(self, f)
+    }
+}
+
 impl HttpClient {
     pub fn new(session: Session) -> Result<Self> {
-        let client = reqwest::Client::builder().user_agent(UA).gzip(true).brotli(true).deflate(true).build()?;
-        let no_redirect =
-            reqwest::Client::builder().user_agent(UA).redirect(reqwest::redirect::Policy::none()).build()?;
+        let client = reqwest::Client::builder()
+            .user_agent(UA)
+            .gzip(true)
+            .brotli(true)
+            .deflate(true)
+            .connect_timeout(CONNECT_TIMEOUT)
+            .timeout(REQUEST_TIMEOUT)
+            .build()?;
+        let media_client = reqwest::Client::builder()
+            .user_agent(UA)
+            .connect_timeout(CONNECT_TIMEOUT)
+            .read_timeout(MEDIA_READ_TIMEOUT)
+            .build()?;
+        let no_redirect = reqwest::Client::builder()
+            .user_agent(UA)
+            .redirect(reqwest::redirect::Policy::none())
+            .connect_timeout(CONNECT_TIMEOUT)
+            .timeout(REQUEST_TIMEOUT)
+            .build()?;
         Ok(Self {
             client,
+            media_client,
             no_redirect,
             session: RwLock::new(session),
             wbi: Mutex::new(None),
@@ -93,7 +138,7 @@ impl HttpClient {
         extra: Option<(reqwest::header::HeaderName, &str)>,
     ) -> Result<reqwest::Response> {
         self.limiter.acquire().await;
-        let mut req = self.client.get(url).header(REFERER, REFERER_URL);
+        let mut req = self.media_client.get(url).header(REFERER, REFERER_URL);
         if let Some((name, value)) = extra {
             req = req.header(name, value);
         }
@@ -147,8 +192,20 @@ impl HttpClient {
         } else {
             params
         };
-        self.limiter.acquire().await;
-        Ok(self.decorate(self.client.get(url)).query(&params).send().await?)
+        let mut attempt = 1;
+        loop {
+            self.limiter.acquire().await;
+            let outcome = self.decorate(self.client.get(url)).query(&params).send().await;
+            let transient = match &outcome {
+                Ok(resp) => resp.status().is_server_error(),
+                Err(e) => e.is_connect() || e.is_timeout(),
+            };
+            if !transient || attempt >= GET_ATTEMPTS {
+                return Ok(outcome?);
+            }
+            tokio::time::sleep(RETRY_BACKOFF * attempt).await;
+            attempt += 1;
+        }
     }
 
     fn decorate(&self, rb: reqwest::RequestBuilder) -> reqwest::RequestBuilder {

@@ -4,22 +4,65 @@ import android.os.SystemClock
 import android.util.Log
 import androidx.compose.runtime.mutableStateOf
 import androidx.media3.common.Player
+import dev.rubi.core.FfiPlayback
 import dev.rubi.core.FfiVideoCard
 import dev.rubi.core.RubiCore
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
-import kotlinx.coroutines.delay
 import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.currentCoroutineContext
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.ensureActive
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
+
+/**
+ * What 听视频 needs from the core: the listening queue's moves and a video's audio. The core
+ * decides what comes next; nothing else of it is reachable from here.
+ */
+interface ListenSource {
+    suspend fun start(list: Long, bvid: String): FfiVideoCard
+    suspend fun startRelated(bvid: String): FfiVideoCard
+    suspend fun jump(bvid: String): FfiVideoCard
+    /** Reads the stored list: call off the main thread. */
+    fun next(byUser: Boolean): FfiVideoCard?
+    /** Reads the stored list: call off the main thread. */
+    fun previous(): FfiVideoCard?
+    fun stop()
+    fun relatedLeft(): UInt?
+    suspend fun relatedOf(bvid: String): List<String>
+    suspend fun append(bvids: List<String>)
+    suspend fun audio(bvid: String): FfiPlayback
+}
+
+/** [ListenSource] over the core, resolved on first use (the core may still be opening). */
+class CoreListenSource(private val core: () -> RubiCore) : ListenSource {
+    override suspend fun start(list: Long, bvid: String) = core().listenFrom(list, bvid)
+    override suspend fun startRelated(bvid: String) = core().listenRelated(bvid)
+    override suspend fun jump(bvid: String) = core().listenJump(bvid)
+    override fun next(byUser: Boolean) = core().listenNext(byUser)
+    override fun previous() = core().listenPrevious()
+    override fun stop() = core().listenStop()
+    override fun relatedLeft() = core().relatedLeft()
+    override suspend fun relatedOf(bvid: String) = core().related(bvid).map { it.bvid }
+    override suspend fun append(bvids: List<String>) = core().listenAppend(bvids)
+    // Audio streams are the same at any quality; ask for the lowest.
+    override suspend fun audio(bvid: String) = core().playback(bvid, 16u)
+}
 
 /**
  * 听视频 on this device: plays what the core's listening queue picks, audio only, on the shared
  * player (so the media session, notification and background play all apply). Which item comes
  * next or before is the core's call; this object only plays it. Opening a video page stops it:
  * the two would fight over the one player.
+ *
+ * Every move (start, jump, next, previous, an item ending) replaces the one before it: a slow
+ * answer for an earlier pick is dropped, never played over the later one, and nothing plays
+ * after [stop].
  */
-class Listening(private val player: MainPlayer, private val core: RubiCore) {
+class Listening(private val player: MainPlayer, private val source: ListenSource) {
     /** The item being heard; null when the queue is idle. */
     val current = mutableStateOf<FfiVideoCard?>(null)
     val playing = mutableStateOf(false)
@@ -35,9 +78,12 @@ class Listening(private val player: MainPlayer, private val core: RubiCore) {
 
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Main)
 
+    /** The move under way; a new one cancels it. */
+    private var moving: Job? = null
+
     private val listener = object : Player.Listener {
         override fun onPlaybackStateChanged(state: Int) {
-            if (state == Player.STATE_ENDED) move { core.listenNext(false) }
+            if (state == Player.STATE_ENDED) move { source.next(false) }
         }
 
         override fun onIsPlayingChanged(isPlaying: Boolean) {
@@ -51,7 +97,7 @@ class Listening(private val player: MainPlayer, private val core: RubiCore) {
         related.value = false
         // Shown at once, so the 听视频 page opened next has something to show.
         current.value = card
-        scope.launch { runCatching { core.listenFrom(list, card.bvid) }.onSuccess { play(it) }.onFailure { stop() } }
+        replaceMove { picked({ source.start(list, card.bvid) }, onError = ::stop)?.let { play(it) } }
     }
 
     /**
@@ -62,7 +108,7 @@ class Listening(private val player: MainPlayer, private val core: RubiCore) {
         attach()
         related.value = true
         current.value = card
-        scope.launch { runCatching { core.listenRelated(card.bvid) }.onSuccess { play(it, fromMs) }.onFailure { stop() } }
+        replaceMove { picked({ source.startRelated(card.bvid) }, onError = ::stop)?.let { play(it, fromMs) } }
     }
 
     private fun attach() {
@@ -73,7 +119,7 @@ class Listening(private val player: MainPlayer, private val core: RubiCore) {
 
     /** Switches to `card` from the list on the page. */
     fun jump(card: FfiVideoCard) {
-        scope.launch { runCatching { core.listenJump(card.bvid) }.onSuccess(::play) }
+        replaceMove { picked({ source.jump(card.bvid) })?.let { play(it) } }
     }
 
     fun toggle() {
@@ -82,12 +128,12 @@ class Listening(private val player: MainPlayer, private val core: RubiCore) {
     }
 
     /** 下一首: always moves on (the core decides where to). */
-    fun next() = move { core.listenNext(true) }
+    fun next() = move { source.next(true) }
 
     /** 上一首: back to the start when a few seconds in, else the previous item. */
     fun previous() {
         val exo = player.get()
-        if (exo.currentPosition > RESTART_WITHIN_MS) exo.seekTo(0) else move { core.listenPrevious() }
+        if (exo.currentPosition > RESTART_WITHIN_MS) exo.seekTo(0) else move { source.previous() }
     }
 
     fun seekTo(ms: Long) {
@@ -119,12 +165,14 @@ class Listening(private val player: MainPlayer, private val core: RubiCore) {
     }
 
     fun stop() {
+        moving?.cancel()
+        moving = null
         cancelSleep()
         if (current.value == null) return
         current.value = null
         playing.value = false
         related.value = false
-        core.listenStop()
+        source.stop()
         player.get().removeListener(listener)
         player.clear()
     }
@@ -134,36 +182,61 @@ class Listening(private val player: MainPlayer, private val core: RubiCore) {
      * through the rule table) so hearing goes on.
      */
     private fun topUp(bvid: String) {
-        val left = core.relatedLeft() ?: return
+        val left = source.relatedLeft() ?: return
         if (left >= RELATED_AHEAD) return
         scope.launch {
-            val more = runCatching { core.related(bvid) }.getOrDefault(emptyList())
-            core.listenAppend(more.take(RELATED_BATCH).map { it.bvid })
+            val more = runCatching { source.relatedOf(bvid) }.getOrDefault(emptyList())
+            source.append(more.take(RELATED_BATCH))
         }
     }
 
-    /** Asks the core for the item to hear next; none means listening is over. */
+    /** Runs `block` as the move under way, cancelling the one before. */
+    private fun replaceMove(block: suspend () -> Unit) {
+        moving?.cancel()
+        moving = scope.launch { block() }
+    }
+
+    /** Asks the core (off the main thread) for the item to hear next; none means listening is over. */
     private fun move(pick: () -> FfiVideoCard?) {
-        scope.launch {
-            val card = runCatching { pick() }.getOrNull()
+        replaceMove {
+            val card = picked({ withContext(Dispatchers.IO) { pick() } })
             if (card == null) stop() else play(card)
         }
     }
 
-    private fun play(card: FfiVideoCard, fromMs: Long = 0L) {
-        current.value = card
-        topUp(card.bvid)
-        scope.launch {
-            runCatching {
-                // Audio streams are the same at any quality; ask for the lowest.
-                val playback = core.playback(card.bvid, 16u)
-                player.playAudioOnly(playback, card.title, card.upName, card.cover)
-                if (fromMs > 0) player.get().seekTo(fromMs)
-            }.onFailure {
-                Log.w("RubiAudio", "cannot play ${card.bvid}", it)
-                move { core.listenNext(false) }
+    /** The result of `pick`, or null after `onError`; a cancelled move stays cancelled. */
+    private suspend fun picked(pick: suspend () -> FfiVideoCard?, onError: () -> Unit = {}): FfiVideoCard? =
+        try {
+            pick()
+        } catch (e: CancellationException) {
+            throw e
+        } catch (e: Exception) {
+            onError()
+            null
+        }
+
+    /** Plays `card`; one that cannot be played is skipped for the next. Runs inside a move. */
+    private suspend fun play(card: FfiVideoCard, fromMs: Long = 0L) {
+        var item: FfiVideoCard? = card
+        var at = fromMs
+        while (item != null) {
+            current.value = item
+            topUp(item.bvid)
+            try {
+                val playback = source.audio(item.bvid)
+                currentCoroutineContext().ensureActive()
+                player.playAudioOnly(playback, item.title, item.upName, item.cover)
+                if (at > 0) player.get().seekTo(at)
+                return
+            } catch (e: CancellationException) {
+                throw e
+            } catch (e: Exception) {
+                Log.w("RubiAudio", "cannot play ${item.bvid}", e)
+                item = picked({ withContext(Dispatchers.IO) { source.next(false) } })
+                at = 0L
             }
         }
+        stop()
     }
 }
 

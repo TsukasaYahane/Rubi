@@ -47,6 +47,8 @@ import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.ensureActive
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 
@@ -57,6 +59,7 @@ import kotlinx.coroutines.withContext
  */
 object TempPlay {
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Main)
+    /** The start under way (looking up the first video, then reading later pages); a new start cancels it. */
     private var loading: Job? = null
 
     /** Most pages of a 收藏夹 read in after the first ones. */
@@ -68,18 +71,23 @@ object TempPlay {
      */
     fun start(app: RubiApp, nav: Nav, name: String, bvids: List<String>, page: (suspend (Int) -> Pair<List<String>, Boolean>)? = null) {
         loading?.cancel()
-        scope.launch {
-            val first = runCatching { app.core.playTemp(name, bvids) }.getOrNull() ?: return@launch
+        loading = scope.launch {
+            val first = try {
+                app.core.playTemp(name, bvids)
+            } catch (e: CancellationException) {
+                throw e
+            } catch (e: Exception) {
+                null
+            } ?: return@launch
+            ensureActive()
             nav.push(Screen.Player(first.bvid, first.title, fromPlaylist = true))
             if (page == null) return@launch
-            loading = scope.launch {
-                var pn = 2
-                while (pn <= MAX_PAGES) {
-                    val (more, hasMore) = runCatching { withContext(Dispatchers.IO) { page(pn) } }.getOrNull() ?: break
-                    app.core.extendTemp(more)
-                    if (!hasMore || more.isEmpty()) break
-                    pn++
-                }
+            var pn = 2
+            while (pn <= MAX_PAGES) {
+                val (more, hasMore) = runCatching { withContext(Dispatchers.IO) { page(pn) } }.getOrNull() ?: break
+                app.core.extendTemp(more)
+                if (!hasMore || more.isEmpty()) break
+                pn++
             }
         }
     }

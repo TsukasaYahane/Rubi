@@ -38,13 +38,14 @@ impl RubiCore {
         Ok(self.downloads.start(&bvid, qn).await?)
     }
 
-    pub fn download_pause(&self, bvid: String) -> Res<()> {
-        Ok(self.downloads.pause(&bvid)?)
+    /// Stops a download; returns once it has stopped writing.
+    pub async fn download_pause(&self, bvid: String) -> Res<()> {
+        Ok(self.downloads.pause(&bvid).await?)
     }
 
-    /// Deletes a download and its files.
-    pub fn download_remove(&self, bvid: String) -> Res<()> {
-        Ok(self.downloads.remove(&bvid)?)
+    /// Deletes a download and its files (stopping it first).
+    pub async fn download_remove(&self, bvid: String) -> Res<()> {
+        Ok(self.downloads.remove(&bvid).await?)
     }
 
     /// The files of a finished download, for playing offline.

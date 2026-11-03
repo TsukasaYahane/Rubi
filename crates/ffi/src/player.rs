@@ -2,9 +2,8 @@
 
 use std::sync::Arc;
 
-use rubi_api::SendDanmaku;
+use rubi_core::SendDanmaku;
 use rubi_core::{DanmakuSession, SteinSession};
-use rubi_filter::danmaku::layout::{Lane, LayoutConfig, MeasuredWidths, layout};
 use rubi_model::{Danmaku, VideoRef};
 
 use crate::{
@@ -127,22 +126,15 @@ impl RubiCore {
                 ..Default::default()
             })
             .collect();
-        let cfg = LayoutConfig {
-            viewport_w,
-            font_size,
-            tracks: tracks.max(1) as usize,
-            scroll_ms: scroll_ms.max(1000),
-            ..LayoutConfig::default()
-        };
-        let measured = MeasuredWidths(dms.iter().map(|d| d.content.as_str()).zip(widths).collect());
-        layout(&dms, &cfg, &measured)
+        self.danmaku
+            .layout(&dms, widths, viewport_w, font_size, tracks, scroll_ms)
             .into_iter()
             .map(|p| FfiPlacement {
                 id: p.id,
                 lane: match p.lane {
-                    Lane::Scroll => FfiLane::Scroll,
-                    Lane::Top => FfiLane::Top,
-                    Lane::Bottom => FfiLane::Bottom,
+                    rubi_core::Lane::Scroll => FfiLane::Scroll,
+                    rubi_core::Lane::Top => FfiLane::Top,
+                    rubi_core::Lane::Bottom => FfiLane::Bottom,
                 },
                 track: p.track as u32,
                 start_ms: p.start_ms,
@@ -190,8 +182,8 @@ impl FfiDanmakuSession {
     }
 }
 
-impl From<rubi_filter::danmaku::DanmakuOutput> for FfiDanmakuSet {
-    fn from(out: rubi_filter::danmaku::DanmakuOutput) -> Self {
+impl From<rubi_core::DanmakuOutput> for FfiDanmakuSet {
+    fn from(out: rubi_core::DanmakuOutput) -> Self {
         let mut removed: Vec<String> = out.removed.iter().map(|(c, n)| format!("{} {n}", c.label())).collect();
         removed.sort();
         Self {

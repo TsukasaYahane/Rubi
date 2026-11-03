@@ -10,7 +10,7 @@ use serde::{Deserialize, Serialize};
 use zip::write::SimpleFileOptions;
 
 use crate::error::{CoreError, Result};
-use crate::feed::Settings;
+use crate::settings::{FeedSettings, PlaybackSettings, Settings};
 use rubi_model::VideoCard;
 
 const FORMAT_VERSION: u32 = 1;
@@ -31,30 +31,10 @@ struct Manifest {
 /// The settings without the rule table, which is written as TOML on its own.
 #[derive(Serialize, Deserialize)]
 struct SettingsFile {
-    weights: rubi_recommend::Weights,
-    source_weights: rubi_recommend::SourceWeights,
-    candidate_ttl_s: i64,
-    min_source_interval_s: u64,
-    #[serde(default)]
-    danmaku_display: crate::feed::DanmakuDisplay,
-    #[serde(default)]
-    background_play: bool,
-    #[serde(default)]
-    preview: crate::feed::PreviewSettings,
-    #[serde(default = "default_speed")]
-    long_press_speed: f32,
-    #[serde(default = "default_quality")]
-    preferred_quality: u32,
-    #[serde(default)]
-    auto_pip: bool,
-}
-
-fn default_speed() -> f32 {
-    Settings::default().long_press_speed
-}
-
-fn default_quality() -> u32 {
-    Settings::default().preferred_quality
+    #[serde(flatten)]
+    feed: FeedSettings,
+    #[serde(flatten)]
+    playback: PlaybackSettings,
 }
 
 pub fn export_bundle<W: Write + Seek>(
@@ -77,18 +57,7 @@ pub fn export_bundle<W: Write + Seek>(
     zip.write_all(&serde_json::to_vec_pretty(&manifest)?)?;
     zip.start_file("rules.toml", o)?;
     zip.write_all(settings.rules.to_toml()?.as_bytes())?;
-    let sf = SettingsFile {
-        weights: settings.weights.clone(),
-        source_weights: settings.source_weights.clone(),
-        candidate_ttl_s: settings.candidate_ttl_s,
-        min_source_interval_s: settings.min_source_interval_s,
-        danmaku_display: settings.danmaku_display.clone(),
-        background_play: settings.background_play,
-        preview: settings.preview.clone(),
-        long_press_speed: settings.long_press_speed,
-        preferred_quality: settings.preferred_quality,
-        auto_pip: settings.auto_pip,
-    };
+    let sf = SettingsFile { feed: settings.feed.clone(), playback: settings.playback.clone() };
     zip.start_file("settings.json", o)?;
     zip.write_all(&serde_json::to_vec_pretty(&sf)?)?;
     if playlists.iter().any(|(_, items)| !items.is_empty()) {
@@ -154,16 +123,8 @@ pub fn import_bundle<R: Read + Seek>(input: R) -> Result<Imported> {
     let mut settings = Settings { rules, ..Settings::default() };
     if let Some(s) = read("settings.json")? {
         let sf: SettingsFile = serde_json::from_str(&s)?;
-        settings.weights = sf.weights;
-        settings.source_weights = sf.source_weights;
-        settings.candidate_ttl_s = sf.candidate_ttl_s;
-        settings.min_source_interval_s = sf.min_source_interval_s;
-        settings.danmaku_display = sf.danmaku_display;
-        settings.background_play = sf.background_play;
-        settings.preview = sf.preview;
-        settings.long_press_speed = sf.long_press_speed;
-        settings.preferred_quality = sf.preferred_quality;
-        settings.auto_pip = sf.auto_pip;
+        settings.feed = sf.feed;
+        settings.playback = sf.playback;
     }
     let profile = read("profile.json")?.map(|p| serde_json::from_str(&p)).transpose()?.unwrap_or_default();
     let history = read("history.jsonl")?

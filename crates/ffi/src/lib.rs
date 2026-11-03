@@ -25,7 +25,7 @@ mod types;
 use std::path::PathBuf;
 use std::sync::Arc;
 
-use rubi_api::Session;
+use rubi_core::Session;
 use rubi_core::{
     Account, Actions, Comments, Danmakus, Discover, Downloads, Emotes, Esports, Following, Home, Library, Live,
     Messages, Pgc, Playlists, Preferences, Reading, Seasons, Services, Space, Stein, Videos,

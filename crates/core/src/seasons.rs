@@ -23,16 +23,16 @@ pub struct Subscription {
     pub new: u32,
 }
 
-pub struct Seasons {
+pub struct Seasons<S = SqliteStore> {
     api: Arc<dyn SeasonApi>,
-    store: Arc<SqliteStore>,
+    store: Arc<S>,
     cards: Arc<CardCache>,
     /// Ids subscribed to, once read; kept in step with (un)subscribing here.
     subscribed: Mutex<Option<HashSet<u64>>>,
 }
 
-impl Seasons {
-    pub(crate) fn new(api: Arc<dyn SeasonApi>, store: Arc<SqliteStore>, cards: Arc<CardCache>) -> Self {
+impl<S: KvRepo + Send + Sync> Seasons<S> {
+    pub(crate) fn new(api: Arc<dyn SeasonApi>, store: Arc<S>, cards: Arc<CardCache>) -> Self {
         Self { api, store, cards, subscribed: Mutex::default() }
     }
 
@@ -40,15 +40,17 @@ impl Seasons {
     /// season seen for the first time starts at none new.
     pub async fn subscriptions(&self) -> Result<Vec<Subscription>> {
         let list = self.all().await?;
-        let mut seen = self.seen()?;
-        let out = list
-            .into_iter()
-            .map(|season| {
-                let before = *seen.entry(season.id).or_insert(season.count);
-                Subscription { new: season.count.saturating_sub(before), season }
-            })
-            .collect();
-        self.store.put_json(SEEN_KEY, &seen)?;
+        let mut out = Vec::with_capacity(list.len());
+        // Read and written in one go, so opening a season meanwhile is not undone.
+        self.store.update_json(SEEN_KEY, |seen: &mut HashMap<u64, u32>| {
+            out = list
+                .into_iter()
+                .map(|season| {
+                    let before = *seen.entry(season.id).or_insert(season.count);
+                    Subscription { new: season.count.saturating_sub(before), season }
+                })
+                .collect();
+        })?;
         Ok(out)
     }
 
@@ -62,12 +64,16 @@ impl Seasons {
     pub async fn subscribe(&self, season_id: u64, on: bool) -> Result<()> {
         self.api.subscribe(season_id, on).await?;
         if let Some(ids) = self.lock().as_mut() {
-            if on { ids.insert(season_id) } else { ids.remove(&season_id) };
+            if on {
+                ids.insert(season_id)
+            } else {
+                ids.remove(&season_id)
+            };
         }
         if !on {
-            let mut seen = self.seen()?;
-            seen.remove(&season_id);
-            self.store.put_json(SEEN_KEY, &seen)?;
+            self.store.update_json(SEEN_KEY, |seen: &mut HashMap<u64, u32>| {
+                seen.remove(&season_id);
+            })?;
         }
         Ok(())
     }
@@ -79,9 +85,9 @@ impl Seasons {
         let (cards, total) = self.api.videos(up_mid, season_id, pn).await?;
         self.cards.remember(&cards);
         if pn == 1 && total > 0 {
-            let mut seen = self.seen()?;
-            seen.insert(season_id, total);
-            self.store.put_json(SEEN_KEY, &seen)?;
+            self.store.update_json(SEEN_KEY, |seen: &mut HashMap<u64, u32>| {
+                seen.insert(season_id, total);
+            })?;
         }
         let more = !cards.is_empty() && pn * SEASON_PAGE < total;
         Ok((cards, more))
@@ -98,10 +104,6 @@ impl Seasons {
         }
         *self.lock() = Some(out.iter().map(|s| s.id).collect());
         Ok(out)
-    }
-
-    fn seen(&self) -> Result<HashMap<u64, u32>> {
-        Ok(self.store.get_json(SEEN_KEY)?.unwrap_or_default())
     }
 
     fn lock(&self) -> std::sync::MutexGuard<'_, Option<HashSet<u64>>> {

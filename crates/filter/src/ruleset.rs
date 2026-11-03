@@ -226,6 +226,11 @@ impl RuleSet {
         Ok(p)
     }
 
+    /// The watched check of the card pipeline on its own, when the table has it on.
+    pub fn watched_rule(&self, watched: Arc<dyn WatchedLookup>) -> Option<WatchedRule> {
+        self.toggles.watched.then(|| WatchedRule(watched))
+    }
+
     /// A pipeline over raw JSON for banners, goods cards, pinned comments or notices.
     pub fn raw_pipeline(&self, target: Target) -> Pipeline<Value> {
         let mut p = Pipeline::new();

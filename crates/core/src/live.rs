@@ -98,19 +98,23 @@ impl Live {
         let (uid, buvid) = self.api.identity();
         let join = ChannelJoin { room_id, uid, buvid: &buvid, token: &server.token };
         let socket = LiveSocket::open(&server.urls, &join).await?;
-        let keywords = self.rules.rules().danmaku_options()?.keywords;
+        let keywords = self.rules.danmaku_options().keywords.clone();
         Ok(LiveChannel {
             socket: tokio::sync::Mutex::new(Some(socket)),
             sorter: Mutex::new(Sorter { filter, keywords, blocked: HashMap::new() }),
+            closed: tokio::sync::watch::Sender::new(false),
         })
     }
 }
 
 /// An open room channel. Read it in a loop with [`next`](Self::next); switches can change while
-/// it runs.
+/// it runs, and [`close`](Self::close) ends a read that is waiting.
 pub struct LiveChannel {
     socket: tokio::sync::Mutex<Option<LiveSocket>>,
     sorter: Mutex<Sorter>,
+    /// Set by `close`: a waiting `next` gives up the socket at once instead of holding it until
+    /// the room says something.
+    closed: tokio::sync::watch::Sender<bool>,
 }
 
 impl LiveChannel {
@@ -120,22 +124,31 @@ impl LiveChannel {
 
     /// The next messages worth showing; `None` once the channel has closed.
     pub async fn next(&self) -> Result<Option<LiveBatch>> {
-        let mut socket = self.socket.lock().await;
+        let mut closed = self.closed.subscribe();
+        let mut socket = tokio::select! {
+            s = self.socket.lock() => s,
+            _ = closed.wait_for(|c| *c) => return Ok(None),
+        };
         loop {
             let Some(s) = socket.as_mut() else { return Ok(None) };
-            let Some(raw) = s.next().await? else {
+            let raw = tokio::select! {
+                r = s.next() => r?,
+                _ = closed.wait_for(|c| *c) => return Ok(None),
+            };
+            let Some(raw) = raw else {
                 *socket = None;
                 return Ok(None);
             };
-            let mut sorter = self.sorter.lock().unwrap_or_else(|e| e.into_inner());
-            let batch = sorter.sort(raw.iter().filter_map(event_of));
+            let batch = self.sorter.lock().unwrap_or_else(|e| e.into_inner()).sort(raw.iter().filter_map(event_of));
             if !batch.events.is_empty() {
                 return Ok(Some(batch));
             }
         }
     }
 
+    /// Leaves the channel; a read under way returns `None`.
     pub async fn close(&self) {
+        self.closed.send_replace(true);
         if let Some(s) = self.socket.lock().await.take() {
             s.close().await;
         }

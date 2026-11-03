@@ -178,7 +178,7 @@ fun HomeScreen(app: RubiApp, nav: Nav, home: HomeState) {
     val dual = home.dual
     val ctx = LocalContext.current
     // Re-read when coming back from 设置.
-    val preview = remember(nav.stack.size) { PreviewPrefs.load(app.core) }
+    val preview = remember(nav.stack.size) { PreviewPrefs.load(app.settings) }
     val previewing = rememberPreviewTarget(grid, enabled = !dual && home.pivot == 0 && preview.allowed(ctx))
     val pivot = home.pivot
     val zones = remember { app.core.homeZones() }
@@ -323,7 +323,7 @@ fun HomeScreen(app: RubiApp, nav: Nav, home: HomeState) {
 @Composable
 private fun HotRankList(app: RubiApp, nav: Nav, list: FeedList, ranking: Boolean, dual: Boolean, load: suspend (page: UInt) -> List<FfiVideoCard>) {
     val ctx = LocalContext.current
-    val preview = remember(nav.stack.size) { PreviewPrefs.load(app.core) }
+    val preview = remember(nav.stack.size) { PreviewPrefs.load(app.settings) }
     val previewing = rememberPreviewTarget(list.grid, enabled = !dual && !ranking && preview.allowed(ctx))
     val c = LocalMetro.current
     val cards = list.cards

@@ -85,7 +85,7 @@ impl Following {
 
     /// Drops posts whose video the rule table blocks, and remembers the videos left.
     fn kept(&self, items: Vec<Dynamic>) -> Result<Vec<Dynamic>> {
-        let pipeline = self.rules.rules().card_pipeline(None, now_secs)?;
+        let pipeline = self.rules.card_filter();
         let kept: Vec<Dynamic> =
             items.into_iter().filter(|d| d.video.as_ref().is_none_or(|v| !pipeline.judge(v).is_blocked())).collect();
         let videos: Vec<VideoCard> = kept

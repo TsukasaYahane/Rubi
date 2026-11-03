@@ -42,8 +42,10 @@ import dev.rubi.app.playback.DownloadService
 import dev.rubi.app.ui.theme.LocalMetro
 import dev.rubi.core.FfiDownload
 import dev.rubi.core.FfiDownloadState
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 
 /** Qualities offered for offline copies: 1080P and below. */
 val DOWNLOAD_QUALITIES = listOf(80u to "1080P 高清", 64u to "720P 高清", 32u to "480P 清晰", 16u to "360P 流畅")
@@ -103,15 +105,18 @@ fun DownloadsScreen(app: RubiApp, nav: Nav) {
     var version by remember { mutableStateOf(0) }
     LaunchedEffect(version) {
         while (true) {
-            items = runCatching { app.core.downloads() }.getOrDefault(items)
+            items = withContext(Dispatchers.IO) { runCatching { app.core.downloads() }.getOrDefault(items) }
             if (items.none { it.state == FfiDownloadState.RUNNING || it.state == FfiDownloadState.QUEUED }) break
             delay(500)
         }
     }
     fun say(msg: String) = Toast.makeText(ctx, msg, Toast.LENGTH_SHORT).show()
-    fun change(block: () -> Unit) {
-        runCatching(block).onFailure { say("操作失败：${it.message}") }
-        version++
+    /** Runs a pause or delete (which waits for the copy to stop, and removes files) off the main thread. */
+    fun change(block: suspend () -> Unit) {
+        scope.launch {
+            runCatching { withContext(Dispatchers.IO) { block() } }.onFailure { say("操作失败：${it.message}") }
+            version++
+        }
     }
     val used = items.sumOf { it.doneBytes }
     val free = remember { runCatching { StatFs(ctx.filesDir.path).availableBytes.toULong() }.getOrDefault(0uL) }

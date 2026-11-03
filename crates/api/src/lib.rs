@@ -40,7 +40,7 @@ pub use emote::{DEFAULT_PACKAGES, Emote, EmoteApi, WebEmote};
 pub use error::{ApiError, Result};
 pub use esports::{EsportsApi, MatchPage, WebEsports};
 pub use feed::{FeedApi, WebFeed};
-pub use http::HttpClient;
+pub use http::{HttpClient, SessionHolder};
 pub use limiter::RateLimiter;
 pub use live::{BEST_LIVE_QN, DanmuServer, LiveApi, WebLive, event_of};
 pub use live_socket::{ChannelJoin, LiveSocket};
@@ -50,8 +50,8 @@ pub use parse::{https_image, plain_letters};
 pub use pgc::{
     PgcApi, PgcConditions, PgcDay, PgcEpisode, PgcFilter, PgcPlay, PgcRelease, PgcSeason, PgcSeasonDetail, WebPgc,
 };
-pub use season::{SEASON_PAGE, SeasonApi, WebSeasons};
 pub use search::{HotWord, SearchApi, SearchOrder, UserHit, UserHits, WebSearch};
+pub use season::{SEASON_PAGE, SeasonApi, WebSeasons};
 pub use session::Session;
 pub use space::{SpaceApi, UpArticle, UpArticles, UpOrder, UpVideo, UpVideos, WebSpace};
 pub use stein::{SteinApi, SteinChoice, SteinNode, SteinQuestion, SteinVar, WebStein};

@@ -1336,11 +1336,8 @@ dependencies = [
 name = "rubi-ffi"
 version = "0.1.0"
 dependencies = [
- "rubi-api",
  "rubi-core",
- "rubi-filter",
  "rubi-model",
- "rubi-recommend",
  "serde_json",
  "thiserror",
  "uniffi",

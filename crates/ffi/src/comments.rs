@@ -1,6 +1,6 @@
 //! Comments under a video.
 
-use rubi_api::CommentArea;
+use rubi_core::CommentArea;
 use rubi_model::ThreadRow;
 
 use crate::{FfiCommentArea, FfiCommentPage, FfiCommentRef, FfiCommentRow, FfiCommentThread, Res, RubiCore};

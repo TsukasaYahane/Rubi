@@ -19,7 +19,12 @@ import androidx.compose.runtime.CompositionLocalProvider
 import dev.rubi.app.playback.ACTION_LISTEN
 import dev.rubi.app.playback.LocalMedia
 import dev.rubi.app.ui.RubiRoot
+import dev.rubi.app.ui.theme.LocalMetro
 import dev.rubi.app.ui.theme.MetroTheme
+import androidx.compose.foundation.background
+import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.ui.Modifier
 
 class MainActivity : ComponentActivity() {
     private val media get() = (application as RubiApp).media
@@ -41,7 +46,11 @@ class MainActivity : ComponentActivity() {
                     LocalMedia provides app.media,
                     LocalFrozen provides app.power.frozen.value,
                     LocalMotion provides Motion(app.motion.value, app.motionStyle.value),
-                ) { RubiRoot(app) }
+                ) {
+                    // The core opens on its own thread at start; until then, the page background.
+                    if (app.coreReady.value) RubiRoot(app)
+                    else Box(Modifier.fillMaxSize().background(LocalMetro.current.bg))
+                }
             }
         }
         handle(intent)

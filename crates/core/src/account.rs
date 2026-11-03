@@ -2,17 +2,24 @@
 
 use std::sync::Arc;
 
-use rubi_api::{AuthApi, HttpClient, LoginCaptcha, LoginKey, NavInfo, QrState, QrTicket, Session, SolvedCaptcha};
+use rubi_api::{AuthApi, LoginCaptcha, LoginKey, NavInfo, QrState, QrTicket, Session, SessionHolder, SolvedCaptcha};
 
 use crate::error::Result;
+use crate::ports::LoginState;
 
 pub struct Account {
-    http: Arc<HttpClient>,
+    http: Arc<dyn SessionHolder>,
     auth: Arc<dyn AuthApi>,
 }
 
+impl LoginState for Account {
+    fn is_logged_in(&self) -> bool {
+        Account::is_logged_in(self)
+    }
+}
+
 impl Account {
-    pub(crate) fn new(http: Arc<HttpClient>, auth: Arc<dyn AuthApi>) -> Self {
+    pub(crate) fn new(http: Arc<dyn SessionHolder>, auth: Arc<dyn AuthApi>) -> Self {
         Self { http, auth }
     }
 
@@ -27,7 +34,7 @@ impl Account {
 
     /// Forgets the credentials; the device ids stay, so the device is not new to B站.
     pub fn logout(&self) {
-        self.http.update_session(|s| {
+        self.http.update_session(&mut |s| {
             *s = Session { buvid3: s.buvid3.take(), buvid4: s.buvid4.take(), ..Session::default() };
         });
     }

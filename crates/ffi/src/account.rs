@@ -1,6 +1,6 @@
 //! Signing in and out.
 
-use rubi_api::QrState;
+use rubi_core::QrState;
 
 use crate::{FfiAccount, FfiLoginCaptcha, FfiLoginKey, FfiQrState, FfiQrTicket, FfiSolvedCaptcha, Res, RubiCore};
 

@@ -1,6 +1,6 @@
 //! The one error type the app sees.
 
-use rubi_api::ApiError;
+use rubi_core::ApiError;
 use rubi_core::CoreError;
 
 #[derive(Debug, thiserror::Error, uniffi::Error)]

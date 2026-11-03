@@ -1,6 +1,6 @@
 //! An UP's page.
 
-use rubi_api::UpOrder;
+use rubi_core::UpOrder;
 
 use crate::{FfiUpOrder, FfiUpProfile, FfiUpUploads, FfiVideoCard, Res, RubiCore};
 

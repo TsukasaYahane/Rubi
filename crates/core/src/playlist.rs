@@ -1,16 +1,18 @@
 //! The custom play list: videos added from anywhere, played in order, looped or shuffled, as
 //! video or as audio only (听视频). Kept in the local database and part of the export.
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::sync::{Arc, Mutex};
 
+use futures_util::future::join_all;
 use rubi_model::{VideoCard, now_secs};
 use rubi_store::{DEFAULT_PLAYLIST, KvRepo, PlaylistInfo, PlaylistRepo, SqliteStore};
 use serde::{Deserialize, Serialize};
 
 use crate::error::{CoreError, Result};
+use crate::ports::{PlaylistBackup, VideoLookup};
 use crate::queue::ListenQueue;
-use crate::videos::{CardCache, Videos};
+use crate::videos::CardCache;
 
 const MODE_KEY: &str = "playlist_mode";
 /// The name of the list that always exists.
@@ -95,30 +97,16 @@ impl<S: PlaylistRepo + KvRepo> Playlist<S> {
 
     /// Appends `card` to `list` unless it is already there; returns whether it was added.
     pub fn add(&self, list: i64, card: VideoCard) -> Result<bool> {
-        let mut items = self.items(list)?;
-        if items.iter().any(|c| c.bvid == card.bvid) {
-            return Ok(false);
-        }
-        items.push(card);
-        self.store.set_playlist(list, &items)?;
-        Ok(true)
+        Ok(self.store.add_to_playlist(list, &card)?)
     }
 
     pub fn remove(&self, list: i64, bvid: &str) -> Result<()> {
-        let mut items = self.items(list)?;
-        items.retain(|c| c.bvid != bvid);
-        Ok(self.store.set_playlist(list, &items)?)
+        Ok(self.store.remove_from_playlist(list, bvid)?)
     }
 
     /// Moves the item at `from` to position `to` (both clamped to the list).
     pub fn move_item(&self, list: i64, from: usize, to: usize) -> Result<()> {
-        let mut items = self.items(list)?;
-        if from >= items.len() {
-            return Ok(());
-        }
-        let card = items.remove(from);
-        items.insert(to.min(items.len()), card);
-        Ok(self.store.set_playlist(list, &items)?)
+        Ok(self.store.move_in_playlist(list, from, to)?)
     }
 
     pub fn clear(&self, list: i64) -> Result<()> {
@@ -128,17 +116,8 @@ impl<S: PlaylistRepo + KvRepo> Playlist<S> {
     /// Replaces every list with `lists` (an imported backup): 默认 takes the one named so (or
     /// the first), the others are made anew.
     pub fn replace_all(&self, lists: &[(String, Vec<VideoCard>)]) -> Result<()> {
-        for l in self.lists()? {
-            if l.id != DEFAULT_PLAYLIST {
-                self.store.delete_playlist(l.id)?;
-            }
-        }
         let default_at = lists.iter().position(|(n, _)| n == DEFAULT_NAME).unwrap_or(0);
-        for (i, (name, items)) in lists.iter().enumerate() {
-            let id = if i == default_at { DEFAULT_PLAYLIST } else { self.store.create_playlist(name)? };
-            self.store.set_playlist(id, items)?;
-        }
-        Ok(())
+        Ok(self.store.replace_playlists(lists, default_at)?)
     }
 
     pub fn mode(&self) -> Result<PlaylistMode> {
@@ -147,6 +126,16 @@ impl<S: PlaylistRepo + KvRepo> Playlist<S> {
 
     pub fn set_mode(&self, mode: PlaylistMode) -> Result<()> {
         Ok(self.store.put_json(MODE_KEY, &mode)?)
+    }
+}
+
+impl<S: PlaylistRepo + KvRepo + Send + Sync> PlaylistBackup for Playlist<S> {
+    fn export_lists(&self) -> Result<Vec<(String, Vec<VideoCard>)>> {
+        self.lists()?.into_iter().map(|l| Ok((l.name, self.items(l.id)?))).collect()
+    }
+
+    fn replace_all(&self, lists: &[(String, Vec<VideoCard>)]) -> Result<()> {
+        Playlist::replace_all(self, lists)
     }
 }
 
@@ -185,17 +174,17 @@ struct Adhoc {
 
 /// The play lists as the app uses them: editing them, playing one as video, and hearing one
 /// (听视频). The list last started is the one whose next item follows.
-pub struct Playlists {
-    list: Arc<Playlist<SqliteStore>>,
-    videos: Arc<Videos>,
+pub struct Playlists<S = SqliteStore> {
+    list: Arc<Playlist<S>>,
+    videos: Arc<dyn VideoLookup>,
     cards: Arc<CardCache>,
     listening: Mutex<ListenQueue>,
     active: Mutex<i64>,
     adhoc: Mutex<HashMap<i64, Adhoc>>,
 }
 
-impl Playlists {
-    pub(crate) fn new(list: Arc<Playlist<SqliteStore>>, videos: Arc<Videos>, cards: Arc<CardCache>) -> Self {
+impl<S: PlaylistRepo + KvRepo + Send + Sync> Playlists<S> {
+    pub(crate) fn new(list: Arc<Playlist<S>>, videos: Arc<dyn VideoLookup>, cards: Arc<CardCache>) -> Self {
         Self {
             list,
             videos,
@@ -318,15 +307,10 @@ impl Playlists {
         self.extend(TEMP_PLAYLIST, cards);
     }
 
-    /// The cards of `bvids` (already shown, so cached); ones that cannot be found are left out.
+    /// The cards of `bvids` (already shown, so mostly cached; the rest are looked up together);
+    /// ones that cannot be found are left out.
     async fn cards_of(&self, bvids: &[String]) -> Vec<VideoCard> {
-        let mut out = Vec::with_capacity(bvids.len());
-        for b in bvids {
-            if let Ok(c) = self.videos.card(b).await {
-                out.push(c);
-            }
-        }
-        out
+        join_all(bvids.iter().map(|b| self.videos.card(b))).await.into_iter().filter_map(|c| c.ok()).collect()
     }
 
     /// The video page playing the temporary list closed: the list goes.
@@ -336,11 +320,8 @@ impl Playlists {
 
     fn extend(&self, list: i64, cards: Vec<VideoCard>) {
         if let Some(a) = self.adhoc_lock().get_mut(&list) {
-            for c in cards {
-                if !a.items.iter().any(|i| i.bvid == c.bvid) {
-                    a.items.push(c);
-                }
-            }
+            let mut have: HashSet<String> = a.items.iter().map(|i| i.bvid.clone()).collect();
+            a.items.extend(cards.into_iter().filter(|c| have.insert(c.bvid.clone())));
         }
     }
 
@@ -443,13 +424,8 @@ impl Playlists {
 
 /// `cards` without repeats, first one kept.
 fn dedup(cards: Vec<VideoCard>) -> Vec<VideoCard> {
-    let mut out: Vec<VideoCard> = Vec::with_capacity(cards.len());
-    for c in cards {
-        if !out.iter().any(|o| o.bvid == c.bvid) {
-            out.push(c);
-        }
-    }
-    out
+    let mut seen = HashSet::with_capacity(cards.len());
+    cards.into_iter().filter(|c| seen.insert(c.bvid.clone())).collect()
 }
 
 /// A number in `0..n` (n > 0). Shuffling needs no more than the clock's nanoseconds.

@@ -58,20 +58,26 @@ private val FACTORS = listOf(
 )
 
 /**
- * Edits the settings JSON owned by the Rust core. Every change is written back
- * immediately; the core validates it (bad regexes are rejected).
+ * Edits the settings JSON owned by the Rust core. Every change is written back at once as a
+ * patch of just what changed, so settings saved elsewhere meanwhile (danmaku, quality) are
+ * kept; the core validates it (bad regexes are rejected).
  */
 @Composable
 fun SettingsScreen(app: RubiApp, nav: Nav) {
     val c = LocalMetro.current
-    val settings = remember { runCatching { JSONObject(app.core.settingsJson()) }.getOrElse { JSONObject() } }
+    val settings = remember { app.settings.read() }
     var version by remember { mutableIntStateOf(0) }
     var note by remember { mutableStateOf("") }
 
-    fun save() {
-        note = runCatching { app.core.setSettingsJson(settings.toString()); "" }.getOrElse { "未保存：${it.message}" }
+    /** `patch` holds the keys just changed in `settings` (already edited in place). */
+    fun save(patch: JSONObject) {
         version++
+        app.settings.patch(patch) { e -> note = e?.let { "未保存：${it.message}" }.orEmpty() }
     }
+
+    fun top(key: String, value: Any) = JSONObject().put(key, value)
+    fun nested(vararg path: String, value: Any): JSONObject =
+        path.dropLast(1).foldRight(JSONObject().put(path.last(), value)) { k, inner -> JSONObject().put(k, inner) }
 
     val rules = settings.optJSONObject("rules") ?: JSONObject().also { settings.put("rules", it) }
     val toggles = rules.optJSONObject("toggles") ?: JSONObject().also { rules.put("toggles", it) }
@@ -87,11 +93,11 @@ fun SettingsScreen(app: RubiApp, nav: Nav) {
                 SectionTitle("播放")
                 ToggleRow("后台播放", "切到后台后继续播放；关闭时自动暂停", settings.optBoolean("background_play", false)) {
                     settings.put("background_play", it)
-                    save()
+                    save(top("background_play", it))
                 }
                 ToggleRow("切到后台自动小窗", "在播放页回到桌面时以小窗继续播放；关闭小窗后按「后台播放」决定继续或暂停", settings.optBoolean("auto_pip", false)) {
                     settings.put("auto_pip", it)
-                    save()
+                    save(top("auto_pip", it))
                 }
                 val speed = settings.optDouble("long_press_speed", 1.5).toFloat()
                 Column(Modifier.padding(horizontal = 16.dp, vertical = 8.dp)) {
@@ -105,7 +111,7 @@ fun SettingsScreen(app: RubiApp, nav: Nav) {
                                 fontSize = 16.sp,
                                 color = if (on) c.fg else c.fg2,
                                 fontWeight = if (on) FontWeight.SemiBold else FontWeight.Normal,
-                                modifier = Modifier.heightIn(min = 44.dp).clickable { settings.put("long_press_speed", v.toDouble()); save() }.padding(top = 12.dp),
+                                modifier = Modifier.heightIn(min = 44.dp).clickable { settings.put("long_press_speed", v.toDouble()); save(top("long_press_speed", v.toDouble())) }.padding(top = 12.dp),
                             )
                         }
                     }
@@ -116,16 +122,16 @@ fun SettingsScreen(app: RubiApp, nav: Nav) {
                 val preview = settings.optJSONObject("preview") ?: JSONObject().also { settings.put("preview", it) }
                 SectionTitle("大图预览")
                 Meta("首页单列模式下，停在屏幕中间的视频自动播放预览（360P，循环）", Modifier.padding(horizontal = 16.dp))
-                ToggleRow("启用预览", "关闭后只显示封面", preview.optBoolean("enabled", true)) { preview.put("enabled", it); save() }
-                ToggleRow("仅 Wi-Fi", "使用移动数据时不预览", preview.optBoolean("wifi_only", true)) { preview.put("wifi_only", it); save() }
-                ToggleRow("预览弹幕", "在预览画面上显示弹幕", preview.optBoolean("danmaku", false)) { preview.put("danmaku", it); save() }
+                ToggleRow("启用预览", "关闭后只显示封面", preview.optBoolean("enabled", true)) { preview.put("enabled", it); save(nested("preview", "enabled", value = it)) }
+                ToggleRow("仅 Wi-Fi", "使用移动数据时不预览", preview.optBoolean("wifi_only", true)) { preview.put("wifi_only", it); save(nested("preview", "wifi_only", value = it)) }
+                ToggleRow("预览弹幕", "在预览画面上显示弹幕", preview.optBoolean("danmaku", false)) { preview.put("danmaku", it); save(nested("preview", "danmaku", value = it)) }
                 var volume by remember(version) { mutableStateOf(preview.optDouble("volume", 0.0).toFloat()) }
                 Row(Modifier.fillMaxWidth().padding(horizontal = 16.dp), verticalAlignment = Alignment.CenterVertically) {
                     Text("预览音量", fontSize = 14.sp, color = c.fg, modifier = Modifier.width(72.dp))
                     Slider(
                         value = volume,
                         onValueChange = { volume = it },
-                        onValueChangeFinished = { preview.put("volume", volume.toDouble()); save() },
+                        onValueChangeFinished = { preview.put("volume", volume.toDouble()); save(nested("preview", "volume", value = volume.toDouble())) },
                         valueRange = 0f..1f,
                         colors = SliderDefaults.colors(thumbColor = c.accent, activeTrackColor = c.accent, inactiveTrackColor = c.line),
                         modifier = Modifier.weight(1f),
@@ -136,11 +142,11 @@ fun SettingsScreen(app: RubiApp, nav: Nav) {
             item(key = "filters-$version") {
                 SectionTitle("内容过滤")
                 FILTER_TOGGLES.forEach { (key, title, desc) ->
-                    ToggleRow(title, desc, toggles.optBoolean(key)) { toggles.put(key, it); save() }
+                    ToggleRow(title, desc, toggles.optBoolean(key)) { toggles.put(key, it); save(nested("rules", "toggles", key, value = it)) }
                 }
                 SectionTitle("弹幕")
                 DANMAKU_TOGGLES.forEach { (key, title, desc) ->
-                    ToggleRow(title, desc, toggles.optBoolean(key)) { toggles.put(key, it); save() }
+                    ToggleRow(title, desc, toggles.optBoolean(key)) { toggles.put(key, it); save(nested("rules", "toggles", key, value = it)) }
                 }
             }
             item(key = "keywords-$version") {
@@ -150,7 +156,7 @@ fun SettingsScreen(app: RubiApp, nav: Nav) {
                     val pattern = keywords.optJSONObject(i)?.optString("pattern").orEmpty()
                     Row(Modifier.fillMaxWidth().heightIn(min = 48.dp).padding(horizontal = 16.dp), verticalAlignment = Alignment.CenterVertically) {
                         Text(pattern, fontSize = 16.sp, color = c.fg, modifier = Modifier.weight(1f))
-                        TextAction("移除", dim = true, onClick = { keywords.remove(i); save() })
+                        TextAction("移除", dim = true, onClick = { keywords.remove(i); save(nested("rules", "keywords", value = keywords)) })
                     }
                 }
                 var draft by remember { mutableStateOf("") }
@@ -161,7 +167,7 @@ fun SettingsScreen(app: RubiApp, nav: Nav) {
                         if (p.isNotEmpty()) {
                             keywords.put(JSONObject().put("pattern", p).put("regex", false).put("fields", JSONArray(listOf("title", "tags", "desc"))))
                             draft = ""
-                            save()
+                            save(nested("rules", "keywords", value = keywords))
                         }
                     })
                 }
@@ -176,7 +182,7 @@ fun SettingsScreen(app: RubiApp, nav: Nav) {
                         Slider(
                             value = v,
                             onValueChange = { v = it },
-                            onValueChangeFinished = { weights.put(key, v.toDouble()); save() },
+                            onValueChangeFinished = { weights.put(key, v.toDouble()); save(nested("weights", key, value = v.toDouble())) },
                             valueRange = 0f..0.6f,
                             colors = SliderDefaults.colors(thumbColor = c.accent, activeTrackColor = c.accent, inactiveTrackColor = c.line),
                             modifier = Modifier.weight(1f),

@@ -133,7 +133,7 @@ fun FeedPreview(app: RubiApp, card: FfiVideoCard, prefs: PreviewPrefs) {
     )
     val set = danmaku
     if (ready && set != null) {
-        val display = remember { DanmakuDisplay.load(app.core) }
+        val display = remember { DanmakuDisplay.load(app.settings) }
         DanmakuLayer(app.core, set, display, Modifier.fillMaxSize(), source = player)
     }
 }

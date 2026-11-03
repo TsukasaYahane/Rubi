@@ -7,17 +7,16 @@ use rubi_api::{ActionApi, Triple};
 use rubi_model::{FavFolder, FeedbackEvent, ItemRef, Signal, VideoCard, VideoRelation, now_secs};
 
 use crate::error::Result;
-use crate::ports::FeedbackSink;
-use crate::videos::Videos;
+use crate::ports::{FeedbackSink, VideoLookup};
 
 pub struct Actions {
     api: Arc<dyn ActionApi>,
-    videos: Arc<Videos>,
+    videos: Arc<dyn VideoLookup>,
     feedback: Arc<dyn FeedbackSink>,
 }
 
 impl Actions {
-    pub(crate) fn new(api: Arc<dyn ActionApi>, videos: Arc<Videos>, feedback: Arc<dyn FeedbackSink>) -> Self {
+    pub(crate) fn new(api: Arc<dyn ActionApi>, videos: Arc<dyn VideoLookup>, feedback: Arc<dyn FeedbackSink>) -> Self {
         Self { api, videos, feedback }
     }
 

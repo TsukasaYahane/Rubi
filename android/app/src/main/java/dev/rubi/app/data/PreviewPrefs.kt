@@ -3,7 +3,6 @@ package dev.rubi.app.data
 import android.content.Context
 import android.net.ConnectivityManager
 import android.net.NetworkCapabilities
-import dev.rubi.core.RubiCore
 import org.json.JSONObject
 
 /** 大图预览 options, stored in the core's settings JSON under `preview`. */
@@ -20,8 +19,8 @@ data class PreviewPrefs(
     companion object {
         private const val KEY = "preview"
 
-        fun load(core: RubiCore): PreviewPrefs = runCatching {
-            val o = JSONObject(core.settingsJson()).optJSONObject(KEY) ?: return PreviewPrefs()
+        fun load(settings: CoreSettings): PreviewPrefs = runCatching {
+            val o = settings.read().optJSONObject(KEY) ?: return PreviewPrefs()
             PreviewPrefs(
                 enabled = o.optBoolean("enabled", true),
                 wifiOnly = o.optBoolean("wifi_only", true),
@@ -30,9 +29,10 @@ data class PreviewPrefs(
             )
         }.getOrDefault(PreviewPrefs())
 
-        fun save(core: RubiCore, p: PreviewPrefs) {
-            val settings = JSONObject(core.settingsJson())
-            settings.put(
+        /** Writes only this section; other settings stay as they are. */
+        fun save(settings: CoreSettings, p: PreviewPrefs) {
+            val patch = JSONObject()
+            patch.put(
                 KEY,
                 JSONObject()
                     .put("enabled", p.enabled)
@@ -40,7 +40,7 @@ data class PreviewPrefs(
                     .put("volume", p.volume.toDouble())
                     .put("danmaku", p.danmaku),
             )
-            core.setSettingsJson(settings.toString())
+            settings.patch(patch)
         }
     }
 }

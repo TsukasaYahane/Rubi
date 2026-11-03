@@ -3,6 +3,7 @@ use std::sync::{Arc, Mutex};
 
 use futures_util::future::join_all;
 use rubi_api::{DanmakuApi, SEGMENT_MS, SendDanmaku};
+use rubi_filter::danmaku::layout::{LayoutConfig, MeasuredWidths, Placement, layout};
 use rubi_filter::danmaku::{DanmakuOptions, DanmakuOutput, process};
 use rubi_model::{CommandDanmaku, Danmaku};
 
@@ -48,8 +49,31 @@ impl Danmakus {
         })
     }
 
+    /// Track layout for a batch of danmaku. `widths[i]` is the rendered width of `dms[i]` (same
+    /// unit as `viewport_w`; missing ones are estimated). At least one track, and a scroll of at
+    /// least a second.
+    pub fn layout(
+        &self,
+        dms: &[Danmaku],
+        widths: Vec<f32>,
+        viewport_w: f32,
+        font_size: f32,
+        tracks: u32,
+        scroll_ms: u32,
+    ) -> Vec<Placement> {
+        let cfg = LayoutConfig {
+            viewport_w,
+            font_size,
+            tracks: tracks.max(1) as usize,
+            scroll_ms: scroll_ms.max(1000),
+            ..LayoutConfig::default()
+        };
+        let measured = MeasuredWidths(dms.iter().map(|d| d.content.as_str()).zip(widths).collect());
+        layout(dms, &cfg, &measured)
+    }
+
     fn options(&self) -> Result<DanmakuOptions> {
-        Ok(self.rules.rules().danmaku_options()?)
+        Ok((*self.rules.danmaku_options()).clone())
     }
 }
 
