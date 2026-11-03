@@ -52,6 +52,12 @@ class PreviewPlayer(context: Context) {
         p.playWhenReady = true
     }
 
+    /** Lets the player go entirely (节电); the next preview builds a new one. */
+    fun release() = synchronized(this) {
+        player?.release()
+        player = null
+    }
+
     fun stop() {
         player?.run {
             stop()

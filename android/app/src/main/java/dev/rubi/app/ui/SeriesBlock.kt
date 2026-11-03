@@ -87,7 +87,7 @@ fun PartsRow(parts: List<FfiPart>, current: Int, progressOf: (FfiPart) -> Float,
  * section with the playing one marked.
  */
 @Composable
-fun SeasonBlock(season: FfiSeason, currentBvid: String, onPick: (FfiEpisode) -> Unit) {
+fun SeasonBlock(season: FfiSeason, currentBvid: String, subscribe: (@Composable () -> Unit)? = null, onPick: (FfiEpisode) -> Unit) {
     val c = LocalMetro.current
     var open by remember { mutableStateOf(false) }
     val all = season.sections.flatMap { it.episodes }
@@ -101,6 +101,7 @@ fun SeasonBlock(season: FfiSeason, currentBvid: String, onPick: (FfiEpisode) -> 
         ) {
             Text("合集 · ${season.title}", fontSize = 17.sp, fontWeight = FontWeight.Light, color = c.fg, maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.weight(1f, fill = false))
             Text(" (第 ${at + 1} / ${all.size} 个)", fontSize = 12.sp, color = c.fg2, modifier = Modifier.weight(1f))
+            subscribe?.let { Box(Modifier.padding(end = 10.dp)) { it() } }
             Text(if (open) "收起 ▴" else "展开 ▾", fontSize = 14.sp, color = c.fg)
         }
         if (!open) {

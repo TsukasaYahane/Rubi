@@ -1,5 +1,6 @@
 package dev.rubi.app.ui
 
+import dev.rubi.app.LocalFrozen
 import dev.rubi.app.playback.LocalMedia
 import android.view.LayoutInflater
 import androidx.compose.foundation.layout.fillMaxSize
@@ -75,6 +76,8 @@ fun rememberPreviewTarget(grid: LazyGridState, enabled: Boolean): String? {
  */
 @Composable
 fun FeedPreview(app: RubiApp, card: FfiVideoCard, prefs: PreviewPrefs) {
+    // Frozen (节电): the preview player is released; it is built afresh on waking.
+    if (LocalFrozen.current) return
     val ctx = LocalContext.current
     val media = LocalMedia.current
     val player = remember { media.preview.get() }
@@ -112,7 +115,7 @@ fun FeedPreview(app: RubiApp, card: FfiVideoCard, prefs: PreviewPrefs) {
             media.preview.play(playback, prefs.volume)
             if (prefs.danmaku) {
                 val durationMs = maxOf(card.durationS.toULong() * 1000u, playback.durationMs).toUInt()
-                danmaku = app.core.danmakuSession(playback.cid, durationMs).load(listOf(1u))
+                danmaku = app.core.danmakuSession(playback.cid, durationMs).use { it.load(listOf(1u)) }
             }
         }
     }

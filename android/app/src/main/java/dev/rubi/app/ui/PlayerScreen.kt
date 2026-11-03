@@ -1,5 +1,7 @@
 package dev.rubi.app.ui
 
+import kotlinx.coroutines.flow.first
+import androidx.compose.runtime.snapshotFlow
 import dev.rubi.core.FfiResumePoint
 import dev.rubi.core.FfiCommentArea
 import dev.rubi.app.playback.LocalMedia
@@ -97,7 +99,16 @@ fun PlayerScreen(
     focus: FfiCommentRef? = null,
     fromPlaylist: Boolean = false,
     startMs: Long = 0L,
+    episode: ULong? = null,
+    episodeCid: ULong = 0uL,
 ) {
+    val flights = LocalCardFlights.current
+    /** Streams at `qn`: a 专区 episode's (if the account may watch it), else the video's. */
+    suspend fun streamsAt(qn: UInt, part: ULong?) = when {
+        episode != null -> app.core.pgcPlay(episode, episodeCid, qn)
+        part != null -> app.core.playbackPart(bvid, part, qn)
+        else -> app.core.playback(bvid, qn)
+    }
     val c = LocalMetro.current
     val ctx = LocalContext.current
     val media = LocalMedia.current
@@ -116,10 +127,17 @@ fun PlayerScreen(
     var playback by remember { mutableStateOf<FfiPlayback?>(null) }
     var qualitySheet by remember { mutableStateOf(false) }
     var playerView by remember { mutableStateOf<PlayerView?>(null) }
+    // Brightness and volume set by fullscreen drags stay until this page closes.
+    val gestures = rememberGestureRestore()
     // 互动视频: the part being played (null: the video's own first part) and the story state.
     var partCid by remember { mutableStateOf<ULong?>(null) }
     var stein by remember { mutableStateOf<FfiStein?>(null) }
     var steinNode by remember { mutableStateOf<FfiSteinNode?>(null) }
+    // The story's native state is freed with the page, not left to the garbage collector.
+    DisposableEffect(stein) {
+        val held = stein
+        onDispose { held?.close() }
+    }
     /** The part the current story node plays; its question waits until that part is loaded. */
     var nodeCid by remember { mutableStateOf<ULong?>(null) }
     val holdSpeed = remember { PlaybackPrefs.longPressSpeed(app.core) }
@@ -181,12 +199,14 @@ fun PlayerScreen(
             val qn = PlaybackPrefs.preferredQuality(app.core)
             val part = partCid
             // 离线缓存: a finished copy plays from its files, network or not.
-            val local = if (part == null) runCatching { app.core.downloadLocal(bvid) }.getOrNull() else null
+            val local = if (part == null && episode == null) runCatching { app.core.downloadLocal(bvid) }.getOrNull() else null
+            // 卡牌 / 书页: the video starts once the card has finished turning into this page.
+            snapshotFlow { flights.flight }.first { it == null }
             if (local != null) {
                 media.player.playLocal(local.videoPath, local.audioPath, title, startMs)
                 offline = true
             }
-            val pb = if (part == null) app.core.playback(bvid, qn) else app.core.playbackPart(bvid, part, qn)
+            val pb = streamsAt(qn, part)
             playback = pb
             Log.i(TAG, "playurl ready in ${SystemClock.elapsedRealtime() - t0} ms")
             if (local == null) media.player.play(pb, title, if (part == null) startMs else partPositions[part] ?: 0L)
@@ -265,7 +285,8 @@ fun PlayerScreen(
         }
         // The same slot in both modes, so the PlayerView (and its frame) survives the switch.
         Box(
-            (if (compact) Modifier.fillMaxSize() else Modifier.fillMaxWidth().aspectRatio(16f / 9f)).background(Color.Black),
+            (if (compact) Modifier.fillMaxSize() else Modifier.fillMaxWidth().aspectRatio(16f / 9f).flightSource { flights.videoFrame = it })
+                .background(Color.Black),
         ) {
             AndroidView(
                 factory = {
@@ -276,6 +297,9 @@ fun PlayerScreen(
                         playerView = this
                     }
                 },
+                // Detached when the page goes: a view left attached keeps listening to the shared
+                // player and holds its surface, and each video entered again piled up another.
+                onRelease = { it.player = null },
                 update = {
                     it.setFullscreenButtonState(fullscreen)
                     // The small window has no room for controls; the system draws its own.
@@ -287,7 +311,7 @@ fun PlayerScreen(
             // No danmaku in the small window: too little room to read them.
             if (display.enabled && set != null && !inPip) DanmakuLayer(app.core, set, display, Modifier.fillMaxSize())
             // Only while the controls are hidden: their buttons must get their own taps.
-            if (fullscreen && !inPip && !controlsVisible) FullscreenGestures(media.player.get(), playerView, holdSpeed)
+            if (fullscreen && !inPip && !controlsVisible) FullscreenGestures(media.player.get(), playerView, holdSpeed, gestures)
             val session = stein
             val node = steinNode
             if (session != null && node != null && !inPip) {
@@ -389,7 +413,7 @@ fun PlayerScreen(
                     val d = detail
                     if (d != null) Meta("${formatCount(d.views)} 播放 · ${formatAge(d.pubdate)} · ${d.zone ?: ""}")
                     else video?.let { Meta("${formatCount(it.views)} 播放 · ${formatAge(it.pubdate)} · ${it.zone ?: ""}") }
-                    video?.let { v ->
+                    if (d == null) video?.let { v ->
                         Text(
                             "${v.upName}  ›",
                             fontSize = 15.sp,
@@ -403,12 +427,13 @@ fun PlayerScreen(
             item(key = "detail") {
                 Column(Modifier.padding(horizontal = 16.dp, vertical = 8.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
                     detail?.let {
-                        key(it.bvid) { VideoActions(app, nav, it) }
+                        // 专区 episodes are never cached offline here: only official clients may.
+                        key(it.bvid) { VideoActions(app, nav, it, offline = episode == null) }
                         VideoDetailBlock(it, detailOpen) { detailOpen = !detailOpen }
                     }
                     // 分P and 合集 (interactive videos use parts as their story, so not there).
                     val d = detail
-                    if (d != null && stein == null && (d.parts.size > 1 || d.season != null)) {
+                    if (d != null && stein == null && (d.parts.size > 1 || d.season != null || fromPlaylist)) {
                         Column(Modifier.bleed(16.dp)) {
                             if (d.parts.size > 1) {
                                 PartsRow(
@@ -421,8 +446,16 @@ fun PlayerScreen(
                                     onPick = ::pickPart,
                                 )
                             }
-                            d.season?.let { s -> SeasonBlock(s, bvid) { ep -> nav.replaceTop(Screen.Player(ep.bvid, ep.title)) } }
-                            AutoNextRow(autoNext) {
+                            // Played from a list: its 播放队列 stands in for the 合集.
+                            if (fromPlaylist) {
+                                QueueBlock(app, bvid) { v -> nav.replaceTop(Screen.Player(v.bvid, v.title, fromPlaylist = true)) }
+                            } else {
+                                d.season?.let { s ->
+                                    SeasonBlock(s, bvid, subscribe = { SeasonSubscribeButton(app, nav, s.id) }) { ep -> nav.replaceTop(Screen.Player(ep.bvid, ep.title)) }
+                                }
+                            }
+                            // A list plays on by its own order.
+                            if (!fromPlaylist) AutoNextRow(autoNext) {
                                 autoNext = !autoNext
                                 app.ui.autoNext = autoNext
                             }
@@ -468,7 +501,7 @@ fun PlayerScreen(
             scope.launch {
                 // Same video, other streams: carry on from where it was.
                 val at = media.player.get().currentPosition
-                runCatching { cid?.let { app.core.playbackPart(bvid, it, q.qn) } ?: app.core.playback(bvid, q.qn) }
+                runCatching { if (episode != null) streamsAt(q.qn, null) else streamsAt(q.qn, cid) }
                     .onSuccess { p -> playback = p; media.player.play(p, video?.title ?: title, at) }
                     .onFailure { error = "切换清晰度失败：${it.message}" }
             }

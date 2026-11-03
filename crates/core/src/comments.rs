@@ -53,12 +53,22 @@ impl Comments {
 
     /// Replies in a thread (`root` 0: a new comment under the video). The text is trimmed and an
     /// empty one refused. Returns the reply as a row to show at once.
-    pub async fn reply(&self, area: CommentArea, root: u64, parent: u64, text: &str) -> Result<(ThreadRow, Comment)> {
+    /// Posts `text`. `mentions` are the people picked from the @ list as (name, mid); only those
+    /// whose `@name` is still in the text are sent.
+    pub async fn reply(
+        &self,
+        area: CommentArea,
+        root: u64,
+        parent: u64,
+        text: &str,
+        mentions: &[(String, u64)],
+    ) -> Result<(ThreadRow, Comment)> {
         let text = text.trim();
         if text.is_empty() {
             return Err(CoreError::Invalid("评论不能为空".into()));
         }
-        let c = self.api.reply(area, root, parent, text).await?;
+        let at = mentioned(text, mentions);
+        let c = self.api.reply(area, root, parent, text, &at).await?;
         let row = ThreadRow { rpid: c.rpid, depth: u32::from(root > 0), has_later_sibling: false, reply_to: None };
         Ok((row, c))
     }
@@ -125,9 +135,27 @@ fn thread_view(root: &Comment, replies: &[Comment], limit: usize, total: u32) ->
     ThreadView { root_rpid: root.rpid, rows, hidden, total_replies: total }
 }
 
+/// The picked people whose `@name` is still in `text`, each once.
+fn mentioned(text: &str, picked: &[(String, u64)]) -> Vec<(String, u64)> {
+    let mut out: Vec<(String, u64)> = Vec::new();
+    for (name, mid) in picked {
+        if !name.is_empty() && text.contains(&format!("@{name}")) && !out.iter().any(|(n, _)| n == name) {
+            out.push((name.clone(), *mid));
+        }
+    }
+    out
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn sends_only_mentions_left_in_the_text() {
+        let picked = vec![("小明".to_owned(), 1), ("阿杰".to_owned(), 2), ("小明".to_owned(), 1)];
+        assert_eq!(mentioned("@小明 你看这个", &picked), vec![("小明".to_owned(), 1)]);
+        assert!(mentioned("没有提到人", &picked).is_empty());
+    }
 
     #[test]
     fn thread_counts_unloaded_replies_as_hidden() {

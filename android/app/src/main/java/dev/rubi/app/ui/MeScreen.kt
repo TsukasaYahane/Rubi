@@ -71,13 +71,15 @@ fun MeScreen(app: RubiApp, nav: Nav) {
             }
         }
         val rows = listOf<Pair<String, () -> Unit>>(
-            "历史记录" to { nav.push(Screen.History) },
+            "历史记录" to { nav.push(Screen.History(HistoryState(app.core))) },
             "收藏夹" to { nav.push(Screen.FavFolders) },
-            "稍后再看" to { nav.push(Screen.WatchLater) },
+            "稍后再看" to { nav.push(Screen.WatchLater(WatchLaterState(app.core))) },
+            "订阅的合集" to { nav.push(Screen.SeasonSubs(SeasonSubsState())) },
             "播放列表" to { nav.push(Screen.Playlist) },
             "离线缓存" to { nav.push(Screen.Downloads) },
             "被过滤内容" to { nav.push(Screen.Filtered) },
             "设置" to { nav.push(Screen.Settings) },
+            "关于 Rubi" to { nav.push(Screen.About) },
             "备份与迁移" to { backup = true },
         )
         items(rows) { (label, action) ->
@@ -164,7 +166,7 @@ fun FilteredScreen(app: RubiApp, nav: Nav) {
         LazyColumn(Modifier.weight(1f)) {
             items(entries) { e ->
                 Column(Modifier.padding(horizontal = 16.dp, vertical = 12.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
-                    Text("${e.category} · ${e.ruleId}", style = MetroType.meta, fontWeight = FontWeight.SemiBold, color = c.fg)
+                    Text("${if (e.category == "dislike") "不感兴趣" else e.category} · ${e.ruleId}", style = MetroType.meta, fontWeight = FontWeight.SemiBold, color = c.fg)
                     Text(e.title, fontSize = 15.sp, color = c.fg)
                     Meta("${e.source} · ${e.reason} · ${formatAge(e.at)}")
                 }

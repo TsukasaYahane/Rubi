@@ -1,8 +1,8 @@
 package dev.rubi.app.ui
 
+import dev.rubi.core.FfiMention
 import dev.rubi.core.RubiException
-import androidx.compose.ui.text.AnnotatedString
-import androidx.compose.ui.platform.LocalClipboardManager
+import androidx.compose.ui.platform.LocalClipboard
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.foundation.gestures.detectTapGestures
 import android.widget.Toast
@@ -105,7 +105,7 @@ internal fun CommentSection(
     val c = LocalMetro.current
     val scope = rememberCoroutineScope()
     val ctx = LocalContext.current
-    val clipboard = LocalClipboardManager.current
+    val clipboard = LocalClipboard.current
     var byTime by remember { mutableStateOf(false) }
     var pinned by remember { mutableStateOf(emptyList<FfiCommentRow>()) }
     var hiddenPinned by remember { mutableStateOf(0u) }
@@ -145,6 +145,9 @@ internal fun CommentSection(
     var replyFor by remember { mutableStateOf<Pair<FfiCommentRow, ULong>?>(null) }
     var sending by remember { mutableStateOf(false) }
     var replyError by remember { mutableStateOf<String?>(null) }
+    // 发表评论: a new floor under the content itself.
+    var posting by remember { mutableStateOf(false) }
+    var postError by remember { mutableStateOf<String?>(null) }
     fun say(msg: String) = Toast.makeText(ctx, msg, Toast.LENGTH_SHORT).show()
 
     fun replaceThread(t: FfiCommentThread) {
@@ -181,24 +184,25 @@ internal fun CommentSection(
                 replyFor = row to root
             }
             CommentAction.Copy -> {
-                clipboard.setText(AnnotatedString(row.text))
+                scope.launch { clipboard.copyText(row.text) }
                 say("已复制评论文字")
             }
             CommentAction.Share -> {
-                clipboard.setText(AnnotatedString(commentLink(area, row.rpid)))
+                scope.launch { clipboard.copyText(commentLink(area, row.rpid)) }
                 say("已复制评论链接")
             }
         }
     }
 
-    fun send(text: String) {
+    fun send(text: String, mentioned: List<FfiMention>) {
         val (row, root) = replyFor ?: return
         sending = true
         scope.launch {
-            runCatching { app.core.replyComment(area, root, row.rpid, text) }
+            runCatching { app.core.replyComment(area, root, row.rpid, text, mentioned) }
                 .onSuccess { r ->
-                    // Replies to a reply say whom they answer, as the list shows them.
-                    addReply(root, if (row.depth > 0u) r.copy(replyTo = row.name) else r)
+                    // Replies to a reply say whom they answer, as the list shows them; B站's own
+                    // "回复 @name :" lead-in is dropped so it is not shown twice.
+                    addReply(root, if (row.depth > 0u) r.copy(replyTo = row.name, text = r.text.replaceFirst(REPLY_LEAD, "")) else r)
                     replyFor = null
                     say("已发送")
                 }
@@ -207,12 +211,30 @@ internal fun CommentSection(
         }
     }
 
+    /** A new comment goes on top of the list at once, as a thread of its own. */
+    fun post(text: String, mentioned: List<FfiMention>) {
+        sending = true
+        scope.launch {
+            runCatching { app.core.replyComment(area, 0u, 0u, text, mentioned) }
+                .onSuccess { r ->
+                    paged.items.add(0, FfiCommentThread(r.rpid, listOf(r), 0u, 0u))
+                    posting = false
+                    say("已发表")
+                }
+                .onFailure { postError = if (it is RubiException.NotLoggedIn) "登录后才能评论" else "发表失败：${it.message}" }
+            sending = false
+        }
+    }
+
+    if (posting) {
+        PostComposer(areaNoun(area), sending, postError, remember { mentionsOf(app) }, onDismiss = { posting = false }, onSend = ::post)
+    }
     menuFor?.let { (row, root) ->
         val (liked, likes) = likeOf(row)
         CommentMenu(row, liked, likes, onDismiss = { menuFor = null }) { act(row, root, it) }
     }
     replyFor?.let { (row, _) ->
-        ReplyComposer(row.name, sending, replyError, onDismiss = { replyFor = null }, onSend = ::send)
+        ReplyComposer(row.name, sending, replyError, remember(row.rpid) { mentionsOf(app) }, onDismiss = { replyFor = null }, onSend = ::send)
     }
 
     Column(Modifier.padding(horizontal = 16.dp)) {
@@ -229,6 +251,10 @@ internal fun CommentSection(
                     },
                 )
             }
+        }
+        PostCommentEntry {
+            postError = null
+            posting = true
         }
         error?.let {
             Text(it, color = c.fg2, fontSize = 13.sp)
@@ -393,3 +419,8 @@ private fun CommentRow(
         Meta(if (liked) "已赞 $likes" else "赞 $likes", color = if (liked) c.accent else c.fg2)
     }
 }
+
+/** Who a comment can @: the people the account follows (friends included), by name. */
+private fun mentionsOf(app: RubiApp) = Mentions { app.core.allFollowings().ups.map { FfiMention(it.name, it.mid) } }
+
+private val REPLY_LEAD = Regex("""^回复 @[^:：]+[:：]\s*""")

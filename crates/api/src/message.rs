@@ -41,6 +41,8 @@ pub trait ChatApi: Send + Sync {
     /// Messages with `talker`, oldest first.
     async fn messages(&self, talker_mid: u64, size: u32) -> Result<Vec<ChatMessage>>;
     async fn send_text(&self, talker_mid: u64, text: &str) -> Result<()>;
+    /// Sends a video as B站's own share card (msg_type 7), as the web share panel does.
+    async fn send_video(&self, talker_mid: u64, video: &VideoShare) -> Result<()>;
     async fn mark_read(&self, talker_mid: u64, ack_seqno: u64) -> Result<()>;
 }
 
@@ -58,6 +60,31 @@ impl WebMessages {
         self.http.session().dede_user_id.and_then(|m| m.parse().ok()).ok_or(ApiError::NotLoggedIn)
     }
 
+    /// Sends one private message of `msg_type` with `content` (sent as a JSON string), shaped
+    /// as the web message center sends it: the WBI-signed `w_*` query and the client fields.
+    async fn send(&self, talker_mid: u64, msg_type: u32, content: Value) -> Result<()> {
+        let me = self.my_mid()?;
+        let csrf = self.http.session().csrf().map(str::to_owned).ok_or(ApiError::NotLoggedIn)?;
+        let dev_id = self.dev_id();
+        let query = params!["w_sender_uid" => me, "w_receiver_id" => talker_mid, "w_dev_id" => dev_id];
+        let form = params![
+            "msg[sender_uid]" => me,
+            "msg[receiver_id]" => talker_mid,
+            "msg[receiver_type]" => 1,
+            "msg[msg_type]" => msg_type,
+            "msg[msg_status]" => 0,
+            "msg[content]" => content,
+            "msg[timestamp]" => rubi_model::now_secs(),
+            "msg[new_face_version]" => 0,
+            "msg[dev_id]" => dev_id,
+            "from_firework" => 0,
+            "build" => 0,
+            "mobi_app" => "web",
+            "csrf_token" => csrf,
+        ];
+        self.http.post_form_signed(SEND, query, form).await.map(|_| ())
+    }
+
     /// A UUID-shaped device id, as the web client sends.
     fn dev_id(&self) -> String {
         let n = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map(|d| d.as_nanos()).unwrap_or(0)
@@ -65,6 +92,25 @@ impl WebMessages {
         let h = format!("{n:032X}");
         format!("{}-{}-{}-{}-{}", &h[0..8], &h[8..12], &h[12..16], &h[16..20], &h[20..32])
     }
+}
+
+/// A video to send as a share card.
+#[derive(Debug, Clone, Default, PartialEq)]
+pub struct VideoShare {
+    pub aid: u64,
+    pub bvid: String,
+    pub title: String,
+    pub cover: String,
+    pub author: String,
+}
+
+/// The share card's content, field for field as a received video share carries it (checked
+/// 2026-11-03 against one: `id` a number, `source` 5 for videos, `headline` empty).
+pub(crate) fn share_content(v: &VideoShare) -> Value {
+    serde_json::json!({
+        "id": v.aid, "bvid": v.bvid, "title": v.title, "headline": "", "source": 5,
+        "thumb": v.cover, "author": v.author,
+    })
 }
 
 /// Text of a private message `content` (a JSON string) by `msg_type`.
@@ -284,21 +330,11 @@ impl ChatApi for WebMessages {
     }
 
     async fn send_text(&self, talker_mid: u64, text: &str) -> Result<()> {
-        let me = self.my_mid()?;
-        let csrf = self.http.session().csrf().map(str::to_owned).ok_or(ApiError::NotLoggedIn)?;
-        let form = params![
-            "msg[sender_uid]" => me,
-            "msg[receiver_id]" => talker_mid,
-            "msg[receiver_type]" => 1,
-            "msg[msg_type]" => 1,
-            "msg[msg_status]" => 0,
-            "msg[content]" => serde_json::json!({ "content": text }),
-            "msg[timestamp]" => rubi_model::now_secs(),
-            "msg[new_face_version]" => 0,
-            "msg[dev_id]" => self.dev_id(),
-            "csrf_token" => csrf,
-        ];
-        self.http.post_form(SEND, form).await.map(|_| ())
+        self.send(talker_mid, 1, serde_json::json!({ "content": text })).await
+    }
+
+    async fn send_video(&self, talker_mid: u64, video: &VideoShare) -> Result<()> {
+        self.send(talker_mid, 7, share_content(video)).await
     }
 
     async fn mark_read(&self, talker_mid: u64, ack_seqno: u64) -> Result<()> {
@@ -312,6 +348,23 @@ impl ChatApi for WebMessages {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn share_card_content() {
+        let v = VideoShare {
+            aid: 1,
+            bvid: "BV1".into(),
+            title: "标题".into(),
+            cover: "https://c".into(),
+            author: "UP".into(),
+        };
+        let c = share_content(&v);
+        assert_eq!((c["id"].as_u64(), c["source"].as_u64(), c["headline"].as_str()), (Some(1), Some(5), Some("")));
+        assert_eq!(
+            (c["bvid"].as_str(), c["thumb"].as_str(), c["author"].as_str()),
+            (Some("BV1"), Some("https://c"), Some("UP"))
+        );
+    }
     use serde_json::json;
 
     #[test]

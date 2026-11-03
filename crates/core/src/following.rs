@@ -71,8 +71,20 @@ impl Following {
 
     /// One UP's posts of every kind. A post whose video the rules block is dropped; other
     /// kinds are kept. Also returns the next offset.
+    /// An UP's posts matching `keyword` (空间内搜索), page from 1, the rule table applied as in
+    /// [`up_posts`](Self::up_posts); also whether more follow.
+    pub async fn search_up_posts(&self, mid: u64, keyword: &str, page: u32) -> Result<(Vec<Dynamic>, bool)> {
+        let (items, more) = self.dynamics.search_up(mid, keyword.trim(), page.max(1)).await?;
+        Ok((self.kept(items)?, more))
+    }
+
     pub async fn up_posts(&self, mid: u64, offset: Option<&str>) -> Result<(Vec<Dynamic>, Option<String>)> {
         let (items, next) = self.dynamics.up_dynamics(mid, offset).await?;
+        Ok((self.kept(items)?, next))
+    }
+
+    /// Drops posts whose video the rule table blocks, and remembers the videos left.
+    fn kept(&self, items: Vec<Dynamic>) -> Result<Vec<Dynamic>> {
         let pipeline = self.rules.rules().card_pipeline(None, now_secs)?;
         let kept: Vec<Dynamic> =
             items.into_iter().filter(|d| d.video.as_ref().is_none_or(|v| !pipeline.judge(v).is_blocked())).collect();
@@ -82,7 +94,7 @@ impl Following {
             .cloned()
             .collect();
         self.cards.remember(&videos);
-        Ok((kept, next))
+        Ok(kept)
     }
 
     /// Copies the account's following list into the follow factor. Returns how many.

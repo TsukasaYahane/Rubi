@@ -18,8 +18,16 @@ const COIN: &str = "https://api.bilibili.com/x/web-interface/coin/add";
 const FAV_DEAL: &str = "https://api.bilibili.com/x/v3/fav/resource/deal";
 const FAV_FOLDERS: &str = "https://api.bilibili.com/x/v3/fav/folder/created/list-all";
 const FAV_LIST: &str = "https://api.bilibili.com/x/v3/fav/resource/list";
+const FOLDER_ADD: &str = "https://api.bilibili.com/x/v3/fav/folder/add";
+const FOLDER_EDIT: &str = "https://api.bilibili.com/x/v3/fav/folder/edit";
+const FOLDER_DEL: &str = "https://api.bilibili.com/x/v3/fav/folder/del";
+const FOLDER_INFO: &str = "https://api.bilibili.com/x/v3/fav/folder/info";
+const FAV_BATCH_DEL: &str = "https://api.bilibili.com/x/v3/fav/resource/batch-del";
+const FAV_MOVE: &str = "https://api.bilibili.com/x/v3/fav/resource/move";
+const FAV_COPY: &str = "https://api.bilibili.com/x/v3/fav/resource/copy";
 const TOVIEW_ADD: &str = "https://api.bilibili.com/x/v2/history/toview/add";
 const TOVIEW_LIST: &str = "https://api.bilibili.com/x/v2/history/toview";
+const TOVIEW_DEL: &str = "https://api.bilibili.com/x/v2/history/toview/del";
 const RELATION_MODIFY: &str = "https://api.bilibili.com/x/relation/modify";
 const ARCHIVE_RELATION: &str = "https://api.bilibili.com/x/web-interface/archive/relation";
 const HISTORY: &str = "https://api.bilibili.com/x/web-interface/history/cursor";
@@ -38,7 +46,21 @@ pub trait ActionApi: Send + Sync {
     /// The user's own folders; with `aid > 0` each is marked if it holds that video.
     async fn fav_folders(&self, aid: u64) -> Result<Vec<FavFolder>>;
     async fn set_fav(&self, aid: u64, add: &[u64], remove: &[u64]) -> Result<()>;
+    /// A new folder; returns its id.
+    async fn create_folder(&self, title: &str, intro: &str, private: bool) -> Result<u64>;
+    async fn edit_folder(&self, id: u64, title: &str, intro: &str, private: bool) -> Result<()>;
+    async fn delete_folder(&self, id: u64) -> Result<()>;
+    /// A folder's 简介 (the folder list does not carry it).
+    async fn folder_intro(&self, id: u64) -> Result<String>;
+    /// Takes videos (by aid) out of a folder.
+    async fn remove_from_folder(&self, folder: u64, aids: &[u64]) -> Result<()>;
+    /// Moves (or with `keep`, copies) videos from one folder to another.
+    async fn transfer(&self, from: u64, to: u64, aids: &[u64], keep: bool) -> Result<()>;
     async fn watch_later(&self, bvid: &str) -> Result<()>;
+    /// Takes one video (by aid) out of 稍后再看.
+    async fn remove_watch_later(&self, aid: u64) -> Result<()>;
+    /// Takes every video already watched to the end out of 稍后再看.
+    async fn clear_watched_later(&self) -> Result<()>;
     async fn follow(&self, mid: u64, on: bool) -> Result<()>;
 }
 
@@ -46,7 +68,8 @@ pub trait ActionApi: Send + Sync {
 pub trait LibraryApi: Send + Sync {
     /// Video history; pass the returned cursor back for the next page.
     async fn history(&self, cursor: Option<&str>) -> Result<(Vec<HistoryEntry>, Option<String>)>;
-    async fn watch_later_list(&self) -> Result<Vec<VideoCard>>;
+    /// 稍后再看, with how far each was watched (`progress_s` -1: to the end) and when added.
+    async fn watch_later_list(&self) -> Result<Vec<HistoryEntry>>;
     async fn fav_items(&self, folder_id: u64, pn: u32) -> Result<(Vec<VideoCard>, bool)>;
     /// Mids the user follows, one page of 50; returns the total too.
     /// One page (50) of the user's followings, newest follow first; also the total.
@@ -80,6 +103,11 @@ impl WebAccount {
     }
 }
 
+/// `aid:2,aid:2`: videos as the folder endpoints name them (type 2 is a video).
+fn video_resources(aids: &[u64]) -> String {
+    aids.iter().map(|a| format!("{a}:2")).collect::<Vec<_>>().join(",")
+}
+
 fn ids(list: &[u64]) -> String {
     list.iter().map(u64::to_string).collect::<Vec<_>>().join(",")
 }
@@ -104,6 +132,18 @@ pub(crate) fn history_of(v: &Value) -> Option<HistoryEntry> {
         progress_s: v["progress"].as_i64().unwrap_or(0),
         viewed_at: u64_of(&v["view_at"]) as i64,
     })
+}
+
+/// A 稍后再看 item: the video, how far it was watched and when it was added.
+pub(crate) fn watch_later_of(v: &Value) -> HistoryEntry {
+    let duration = u64_of(&v["duration"]) as i64;
+    let progress = v["progress"].as_i64().unwrap_or(0);
+    HistoryEntry {
+        card: card_of(v, SourceKind::Related),
+        // Watched to (nearly) the end counts as finished, as B站 marks it.
+        progress_s: if progress < 0 || (duration > 0 && progress >= duration - 1) { -1 } else { progress },
+        viewed_at: u64_of(&v["add_at"]) as i64,
+    }
 }
 
 pub(crate) fn triple_of(d: &Value) -> Triple {
@@ -179,6 +219,8 @@ impl ActionApi for WebAccount {
                         title: str_of(&f["title"]),
                         count: u64_of(&f["media_count"]) as u32,
                         contains: u64_of(&f["fav_state"]) == 1,
+                        private: folder_private(&f["attr"]),
+                        default: folder_default(&f["attr"]),
                     })
                     .collect()
             })
@@ -190,8 +232,48 @@ impl ActionApi for WebAccount {
         self.http.post_form(FAV_DEAL, form).await.map(|_| ())
     }
 
+    async fn create_folder(&self, title: &str, intro: &str, private: bool) -> Result<u64> {
+        let form = params!["title" => title, "intro" => intro, "privacy" => u8::from(private), "cover" => ""];
+        self.http.post_form(FOLDER_ADD, form).await.map(|d| u64_of(&d["id"]))
+    }
+
+    async fn edit_folder(&self, id: u64, title: &str, intro: &str, private: bool) -> Result<()> {
+        let form = params!["media_id" => id, "title" => title, "intro" => intro, "privacy" => u8::from(private), "cover" => ""];
+        self.http.post_form(FOLDER_EDIT, form).await.map(|_| ())
+    }
+
+    async fn delete_folder(&self, id: u64) -> Result<()> {
+        self.http.post_form(FOLDER_DEL, params!["media_ids" => id]).await.map(|_| ())
+    }
+
+    async fn remove_from_folder(&self, folder: u64, aids: &[u64]) -> Result<()> {
+        let form = params!["media_id" => folder, "resources" => video_resources(aids), "platform" => "web"];
+        self.http.post_form(FAV_BATCH_DEL, form).await.map(|_| ())
+    }
+
+    async fn transfer(&self, from: u64, to: u64, aids: &[u64], keep: bool) -> Result<()> {
+        let form = params![
+            "src_media_id" => from, "tar_media_id" => to, "mid" => self.my_mid()?,
+            "resources" => video_resources(aids), "platform" => "web",
+        ];
+        self.http.post_form(if keep { FAV_COPY } else { FAV_MOVE }, form).await.map(|_| ())
+    }
+
+    async fn folder_intro(&self, id: u64) -> Result<String> {
+        let d = self.http.get_json(FOLDER_INFO, params!["media_id" => id], false).await?;
+        Ok(str_of(&d["intro"]))
+    }
+
     async fn watch_later(&self, bvid: &str) -> Result<()> {
         self.http.post_form(TOVIEW_ADD, params!["bvid" => bvid]).await.map(|_| ())
+    }
+
+    async fn remove_watch_later(&self, aid: u64) -> Result<()> {
+        self.http.post_form(TOVIEW_DEL, params!["aid" => aid]).await.map(|_| ())
+    }
+
+    async fn clear_watched_later(&self) -> Result<()> {
+        self.http.post_form(TOVIEW_DEL, params!["viewed" => "true"]).await.map(|_| ())
     }
 
     async fn follow(&self, mid: u64, on: bool) -> Result<()> {
@@ -218,12 +300,9 @@ impl LibraryApi for WebAccount {
         Ok((list, next))
     }
 
-    async fn watch_later_list(&self) -> Result<Vec<VideoCard>> {
+    async fn watch_later_list(&self) -> Result<Vec<HistoryEntry>> {
         let d = self.http.get_json(TOVIEW_LIST, params![], false).await?;
-        Ok(d["list"]
-            .as_array()
-            .map(|a| a.iter().map(|v| card_of(v, SourceKind::Related)).collect())
-            .unwrap_or_default())
+        Ok(d["list"].as_array().map(|a| a.iter().map(watch_later_of).collect()).unwrap_or_default())
     }
 
     async fn fav_items(&self, folder_id: u64, pn: u32) -> Result<(Vec<VideoCard>, bool)> {
@@ -264,9 +343,33 @@ impl LibraryApi for WebAccount {
     }
 }
 
+/// Folder `attr` bit 0: private.
+fn folder_private(attr: &Value) -> bool {
+    u64_of(attr) & 1 == 1
+}
+
+/// Folder `attr` bit 1 clear: the default folder.
+fn folder_default(attr: &Value) -> bool {
+    u64_of(attr) & 2 == 0
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn names_videos_for_folders() {
+        assert_eq!(video_resources(&[1, 23]), "1:2,23:2");
+    }
+
+    #[test]
+    fn reads_folder_attr() {
+        use serde_json::json;
+        assert!(folder_default(&json!(0)) && !folder_private(&json!(0)));
+        assert!(folder_default(&json!(1)) && folder_private(&json!(1)));
+        assert!(!folder_default(&json!(2)) && !folder_private(&json!(2)));
+        assert!(!folder_default(&json!(3)) && folder_private(&json!(3)));
+    }
     use serde_json::json;
 
     #[test]

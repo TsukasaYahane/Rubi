@@ -1,5 +1,15 @@
 package dev.rubi.app.ui
 
+import dev.rubi.core.FfiDynamicKind
+import androidx.compose.ui.graphics.Color
+import androidx.compose.foundation.border
+import dev.rubi.core.FfiUpArticle
+import dev.rubi.core.FfiDynamic
+import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.foundation.layout.height
+import androidx.compose.ui.platform.LocalContext
+import android.net.Uri
+import android.content.Intent
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
@@ -45,18 +55,32 @@ import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.launch
 
-private val ORDERS = listOf("最新" to FfiUpOrder.NEWEST, "最多播放" to FfiUpOrder.MOST_VIEWED, "最多收藏" to FfiUpOrder.MOST_FAVORITED)
+private val ORDERS = listOf("最新" to FfiUpOrder.NEWEST, "最多播放" to FfiUpOrder.MOST_VIEWED)
+
+private val TABS = listOf("投稿", "动态", "专栏")
+
+/** What a search inside the space shows. */
+private val FOUND = listOf("全部", "视频", "专栏", "动态")
 
 /** Least time between two upload pages. */
 private const val UP_PAGE_GAP_MS = 1_000L
 
-/** An UP's page: profile, follow, and uploads in two columns (充电专属 videos left out). */
+/**
+ * An UP's page: profile, follow, then 投稿 (two columns, 充电专属 videos left out), 动态 and 专栏.
+ * Each tab loads when first opened.
+ */
 @Composable
 fun UpScreen(app: RubiApp, nav: Nav, mid: ULong, name: String) {
     val c = LocalMetro.current
     val scope = rememberCoroutineScope()
     var profile by remember { mutableStateOf<FfiUpProfile?>(null) }
     var order by remember { mutableStateOf(FfiUpOrder.NEWEST) }
+    var tab by remember { mutableStateOf(0) }
+    // 空间内搜索: the box, the term searched, and which kind of result shows.
+    var query by remember { mutableStateOf("") }
+    var searched by remember { mutableStateOf("") }
+    var found by remember { mutableStateOf(0) }
+    val ctx = LocalContext.current
     var note by remember { mutableStateOf("") }
     var confirmUnfollow by remember { mutableStateOf(false) }
     val grid = rememberLazyGridState()
@@ -70,9 +94,54 @@ fun UpScreen(app: RubiApp, nav: Nav, mid: ULong, name: String) {
         }
     }
 
+    val posts = remember(mid) {
+        Paged<FfiDynamic, String>(scope, key = { it.id }, minGapMs = UP_PAGE_GAP_MS) { at ->
+            app.core.upDynamics(mid, at).let { Page(it.items, it.next) }
+        }
+    }
+    val articles = remember(mid) {
+        Paged<FfiUpArticle, UInt>(scope, key = { it.cvid }, minGapMs = UP_PAGE_GAP_MS) { pn ->
+            val at = pn ?: 1u
+            val got = app.core.upArticles(mid, at)
+            Page(got.items, if (got.hasMore) at + 1u else null)
+        }
+    }
+    val foundPosts = remember(mid) {
+        Paged<FfiDynamic, String>(scope, key = { it.id }, minGapMs = UP_PAGE_GAP_MS) { at ->
+            val page = at?.toUIntOrNull() ?: 1u
+            app.core.upSearchPosts(mid, searched, page).let { Page(it.items, it.next) }
+        }
+    }
+    val foundVideos = remember(mid) {
+        Paged<FfiVideoCard, UInt>(scope, key = { it.bvid }, minGapMs = UP_PAGE_GAP_MS) { pn ->
+            val at = pn ?: 1u
+            val got = app.core.upSearchVideos(mid, searched, at)
+            Page(got.items, if (got.hasMore) at + 1u else null, got.hiddenCharging)
+        }
+    }
+    fun search(term: String) {
+        searched = term.trim()
+        found = 0
+        if (searched.isEmpty()) return
+        foundPosts.reset()
+        foundVideos.reset()
+    }
+
+    LaunchedEffect(tab) {
+        when (tab) {
+            1 -> if (posts.items.isEmpty() && !posts.loading) posts.more()
+            2 -> if (articles.items.isEmpty() && !articles.loading) articles.more()
+        }
+    }
+
     LaunchedEffect(mid, nav.stack.size) { profile = runCatching { app.core.upProfile(mid) }.getOrNull() ?: profile }
     LaunchedEffect(uploads, order) { uploads.reset() }
-    LoadMoreNearEnd(grid, uploads)
+    when {
+        searched.isNotEmpty() -> if (found == 1) LoadMoreNearEnd(grid, foundVideos) else LoadMoreNearEnd(grid, foundPosts)
+        tab == 0 -> LoadMoreNearEnd(grid, uploads)
+        tab == 1 -> LoadMoreNearEnd(grid, posts)
+        else -> LoadMoreNearEnd(grid, articles)
+    }
 
     fun toggleFollow(p: FfiUpProfile) {
         if (p.followed && !confirmUnfollow) {
@@ -96,7 +165,10 @@ fun UpScreen(app: RubiApp, nav: Nav, mid: ULong, name: String) {
     Column(Modifier.fillMaxSize()) {
         Row(Modifier.fillMaxWidth().padding(start = 4.dp, end = 16.dp), verticalAlignment = Alignment.CenterVertically) {
             Box(Modifier.size(44.dp).clickable { nav.pop() }, contentAlignment = Alignment.Center) { GlyphIcon(Glyph.Back) }
-            Meta("UP 主 · mid $mid")
+            MetroField(query, { query = it }, "搜索该 UP 的投稿、专栏、动态", Modifier.weight(1f)) { search(query) }
+            if (searched.isNotEmpty()) {
+                Text("清除", fontSize = 13.sp, color = c.fg2, modifier = Modifier.clickable { query = ""; search("") }.padding(8.dp))
+            }
         }
         LazyVerticalGrid(
             columns = GridCells.Fixed(2),
@@ -134,7 +206,33 @@ fun UpScreen(app: RubiApp, nav: Nav, mid: ULong, name: String) {
                             if (note.isNotEmpty()) Meta(note)
                         }
                     }
-                    Row(Modifier.padding(top = 12.dp), horizontalArrangement = Arrangement.spacedBy(20.dp)) {
+                    if (searched.isNotEmpty()) {
+                        Meta("在 ${p?.name ?: name} 的空间里搜索「$searched」", Modifier.padding(top = 10.dp))
+                        Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                            FOUND.forEachIndexed { i, label ->
+                                val on = i == found
+                                Text(
+                                    label,
+                                    fontSize = 13.sp,
+                                    color = if (on) Color.White else c.fg,
+                                    modifier = Modifier.then(if (on) Modifier.background(c.accent) else Modifier.border(1.dp, c.line))
+                                        .clickable { found = i }
+                                        .padding(horizontal = 10.dp, vertical = 5.dp),
+                                )
+                            }
+                        }
+                    } else Row(Modifier.padding(top = 12.dp), horizontalArrangement = Arrangement.spacedBy(22.dp)) {
+                        TABS.forEachIndexed { i, label ->
+                            Text(
+                                label,
+                                style = MetroType.pivot.copy(fontSize = 26.sp, lineHeight = 34.sp),
+                                fontWeight = if (i == tab) FontWeight.Normal else FontWeight.Light,
+                                color = if (i == tab) c.fg else c.fg2,
+                                modifier = Modifier.clickable { tab = i },
+                            )
+                        }
+                    }
+                    if (tab == 0 && searched.isEmpty()) Row(horizontalArrangement = Arrangement.spacedBy(20.dp)) {
                         ORDERS.forEach { (label, o) ->
                             val on = o == order
                             Text(
@@ -146,18 +244,83 @@ fun UpScreen(app: RubiApp, nav: Nav, mid: ULong, name: String) {
                             )
                         }
                     }
-                    if (uploads.hidden > 0u) Meta("已隐藏充电专属视频 ${uploads.hidden} 个")
-                    uploads.error?.let { e ->
+                    if (tab == 0 && uploads.hidden > 0u) Meta("已隐藏充电专属视频 ${uploads.hidden} 个")
+                    val failed = when (tab) {
+                        0 -> uploads.error
+                        1 -> posts.error
+                        else -> articles.error
+                    }
+                    failed?.let { e ->
                         Text(errorText(e), color = c.fg2, fontSize = 13.sp)
-                        TextAction("重试", onClick = uploads::retry)
+                        TextAction("重试", onClick = { if (tab == 0) uploads.retry() else if (tab == 1) posts.retry() else articles.retry() })
                     }
                 }
             }
-            items(uploads.items, key = { it.bvid }) { card ->
-                VideoCardView(card, big = false, onOpen = { nav.push(Screen.Player(card.bvid, card.title)) })
+            if (searched.isNotEmpty()) {
+                if (found == 1) {
+                    items(foundVideos.items, key = { "s" + it.bvid }) { card ->
+                        VideoCardView(card, big = false, onOpen = { nav.push(Screen.Player(card.bvid, card.title)) })
+                    }
+                } else {
+                    // 专栏 are article posts; 动态 the rest that are neither videos nor articles.
+                    val shown = foundPosts.items.filter {
+                        when (found) {
+                            2 -> it.body.kind == FfiDynamicKind.ARTICLE
+                            3 -> it.body.kind != FfiDynamicKind.VIDEO && it.body.kind != FfiDynamicKind.ARTICLE
+                            else -> true
+                        }
+                    }
+                    items(shown, key = { "f" + it.id }, span = { GridItemSpan(maxLineSpan) }) { post ->
+                        Column {
+                            DynamicCard(
+                                post,
+                                onOpenVideo = { nav.push(Screen.Player(it.bvid, it.title)) },
+                                onOpenArticle = { nav.push(Screen.Article(it)) },
+                                onComments = { nav.push(Screen.DynamicComments(post)) },
+                                onOpenLink = { url -> runCatching { ctx.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(url))) } },
+                            )
+                        }
+                    }
+                }
+                val list = if (found == 1) foundVideos.ended to foundVideos.items.isEmpty() else foundPosts.ended to foundPosts.items.isEmpty()
+                item(span = { GridItemSpan(maxLineSpan) }) {
+                    Meta(
+                        when {
+                            (if (found == 1) foundVideos.loading else foundPosts.loading) -> "搜索中…"
+                            list.first && list.second -> "这个 UP 没有相关内容"
+                            list.first -> "没有更多了"
+                            else -> ""
+                        },
+                    )
+                }
+            } else when (tab) {
+                0 -> items(uploads.items, key = { it.bvid }) { card ->
+                    VideoCardView(card, big = false, onOpen = { nav.push(Screen.Player(card.bvid, card.title)) })
+                }
+                1 -> items(posts.items, key = { "d" + it.id }, span = { GridItemSpan(maxLineSpan) }) { post ->
+                    Column {
+                        DynamicCard(
+                            post,
+                            onOpenVideo = { nav.push(Screen.Player(it.bvid, it.title)) },
+                            onOpenArticle = { nav.push(Screen.Article(it)) },
+                            onComments = { nav.push(Screen.DynamicComments(post)) },
+                            onOpenLink = { url -> runCatching { ctx.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(url))) } },
+                        )
+                    }
+                }
+                else -> items(articles.items, key = { "a" + it.cvid }, span = { GridItemSpan(maxLineSpan) }) { a ->
+                    ArticleRow(a) { nav.push(Screen.Article("cv${a.cvid}")) }
+                }
             }
-            if (uploads.ended && uploads.items.isNotEmpty()) {
-                item(span = { GridItemSpan(maxLineSpan) }) { Meta("没有更多了") }
+            val shown = when (tab) {
+                0 -> uploads.ended to uploads.items.isEmpty()
+                1 -> posts.ended to posts.items.isEmpty()
+                else -> articles.ended to articles.items.isEmpty()
+            }
+            if (searched.isEmpty() && shown.first) {
+                item(span = { GridItemSpan(maxLineSpan) }) {
+                    Meta(if (shown.second) listOf("还没有投稿", "还没有动态", "还没有专栏")[tab] else "没有更多了")
+                }
             }
         }
     }
@@ -169,5 +332,24 @@ private fun Stat(label: String, value: String) {
     Column {
         Text(value, fontSize = 20.sp, fontWeight = FontWeight.SemiBold, color = c.fg)
         Meta(label)
+    }
+}
+
+/** A 专栏 in the UP's list: title, summary, when and how many read it, cover on the right. */
+@Composable
+private fun ArticleRow(a: FfiUpArticle, onClick: () -> Unit) {
+    val c = LocalMetro.current
+    Column(Modifier.fillMaxWidth().clickable(onClick = onClick)) {
+        Box(Modifier.fillMaxWidth().height(1.dp).background(c.line))
+        Row(Modifier.padding(vertical = 10.dp), horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+            Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                Text(a.title, fontSize = 15.sp, color = c.fg, maxLines = 2, overflow = TextOverflow.Ellipsis)
+                if (a.summary.isNotBlank()) Text(a.summary, fontSize = 13.sp, color = c.fg2, maxLines = 2, overflow = TextOverflow.Ellipsis)
+                Meta("${formatAge(a.publishedAt)} · ${formatCount(a.views)} 阅读")
+            }
+            if (a.cover.isNotEmpty()) {
+                AsyncImage(model = a.cover, contentDescription = null, contentScale = ContentScale.Crop, modifier = Modifier.size(width = 96.dp, height = 64.dp).background(c.bg2))
+            }
+        }
     }
 }

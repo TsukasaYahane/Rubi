@@ -1,5 +1,21 @@
 package dev.rubi.app.ui
 
+import dev.rubi.app.ui.theme.MetroType
+import androidx.compose.ui.text.font.FontFamily
+import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.graphics.RectangleShape
+import androidx.compose.runtime.derivedStateOf
+import androidx.compose.material3.ModalBottomSheet
+import androidx.compose.material3.ExperimentalMaterial3Api
+import androidx.compose.foundation.lazy.rememberLazyListState
+import androidx.compose.foundation.layout.PaddingValues
+import androidx.compose.foundation.layout.wrapContentWidth
+import androidx.compose.foundation.layout.wrapContentSize
+import androidx.compose.foundation.layout.offset
+import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.gestures.snapping.rememberSnapFlingBehavior
+import android.os.SystemClock
+import androidx.activity.compose.BackHandler
 import dev.rubi.app.playback.LocalMedia
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
@@ -69,6 +85,7 @@ fun ListenScreen(app: RubiApp, nav: Nav) {
     val listening = LocalMedia.current.listening
     val now by listening.current
     val playing by listening.playing
+    val related by listening.related
     var items by remember { mutableStateOf(emptyList<FfiVideoCard>()) }
     var mode by remember { mutableStateOf(FfiPlaylistMode.SEQUENTIAL) }
     var open by remember { mutableStateOf(false) }
@@ -77,9 +94,14 @@ fun ListenScreen(app: RubiApp, nav: Nav) {
     // While the bar is held: the fraction under the finger, applied on release.
     var dragging by remember { mutableStateOf<Float?>(null) }
 
-    LaunchedEffect(Unit) {
-        items = runCatching { app.core.playlistItems() }.getOrDefault(emptyList())
-        mode = runCatching { app.core.playlistMode() }.getOrDefault(FfiPlaylistMode.SEQUENTIAL)
+    LaunchedEffect(Unit) { mode = runCatching { app.core.playlistMode() }.getOrDefault(FfiPlaylistMode.SEQUENTIAL) }
+    // Read again with each item: following 相关推荐, more are added as it goes.
+    LaunchedEffect(now?.bvid) {
+        items = runCatching { app.core.listeningItems() }.getOrDefault(emptyList())
+        if (related) {
+            delay(2_000)
+            items = runCatching { app.core.listeningItems() }.getOrDefault(items)
+        }
     }
     LaunchedEffect(Unit) {
         while (true) {
@@ -91,19 +113,49 @@ fun ListenScreen(app: RubiApp, nav: Nav) {
     }
     // Nothing left to hear (stopped or the list ran out): leave the page.
     LaunchedEffect(now) { if (now == null) nav.pop() }
+    // Leaving the page ends listening; stopping empties `now`, and the effect above goes back.
+    BackHandler { listening.stop() }
     val card = now ?: return
 
     val at = items.indexOfFirst { it.bvid == card.bvid }
     val shown = dragging?.let { (it * length).toLong() } ?: position
     val fraction = if (length > 0) (shown.toFloat() / length).coerceIn(0f, 1f) else 0f
 
+    var timerOpen by remember { mutableStateOf(false) }
+    val sleepAt by listening.sleepAt
+    var sleepLeft by remember { mutableStateOf<Long?>(null) }
+    LaunchedEffect(sleepAt) {
+        while (true) {
+            sleepLeft = sleepAt?.let { (it - SystemClock.elapsedRealtime()).coerceAtLeast(0L) }
+            if (sleepAt == null) break
+            delay(1_000)
+        }
+    }
+    if (timerOpen) {
+        SleepTimerSheet(
+            running = sleepLeft,
+            onPick = { listening.sleepIn(it); timerOpen = false },
+            onCancel = { listening.cancelSleep(); timerOpen = false },
+            onDismiss = { timerOpen = false },
+        )
+    }
+
     LazyColumn(Modifier.fillMaxSize()) {
         item {
             Box(Modifier.fillMaxWidth().height(52.dp), contentAlignment = Alignment.Center) {
-                Box(Modifier.align(Alignment.CenterStart).padding(start = 8.dp).size(44.dp).clickable { nav.pop() }, contentAlignment = Alignment.Center) {
+                Box(Modifier.align(Alignment.CenterStart).padding(start = 8.dp).size(44.dp).clickable { listening.stop() }, contentAlignment = Alignment.Center) {
                     Icon(20.dp, c.fg) { back(it) }
                 }
-                Text("正在听 · 播放列表", fontSize = 13.sp, letterSpacing = 1.sp, color = c.fg2)
+                Text(if (related) "正在听 · 相关推荐" else "正在听 · 播放列表", fontSize = 13.sp, letterSpacing = 1.sp, color = c.fg2)
+                // 定时暂停: the alarm clock, with what is left beside it while a timer runs.
+                Row(
+                    Modifier.align(Alignment.CenterEnd).padding(end = 8.dp).height(44.dp).clickable { timerOpen = true }.padding(horizontal = 8.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(6.dp),
+                ) {
+                    sleepLeft?.let { Text(clockOf(it), fontSize = 12.sp, color = c.accent) }
+                    Icon(22.dp, if (sleepLeft != null) c.accent else c.fg) { alarm(it) }
+                }
             }
         }
         item {
@@ -163,7 +215,9 @@ fun ListenScreen(app: RubiApp, nav: Nav) {
                 horizontalArrangement = Arrangement.SpaceBetween,
                 verticalAlignment = Alignment.CenterVertically,
             ) {
-                IconButton(48.dp, onClick = {
+                // 相关推荐 always goes on in order: no mode to pick.
+                if (related) Box(Modifier.size(48.dp))
+                else IconButton(48.dp, onClick = {
                     val m = MODE_ORDER[(MODE_ORDER.indexOf(mode) + 1) % MODE_ORDER.size]
                     if (runCatching { app.core.setPlaylistMode(m) }.isSuccess) mode = m
                 }) { Icon(24.dp, c.fg) { modeIcon(it, mode) } }
@@ -175,10 +229,10 @@ fun ListenScreen(app: RubiApp, nav: Nav) {
                 IconButton(48.dp, onClick = {
                     // Leaves listening for the video page, picking up where the audio is.
                     val from = listening.progress().first
-                    nav.replaceTop(Screen.Player(card.bvid, card.title, fromPlaylist = true, startMs = from))
+                    nav.replaceTop(Screen.Player(card.bvid, card.title, fromPlaylist = !related, startMs = from))
                 }) { Icon(24.dp, c.fg) { tv(it) } }
             }
-            Text(modeLabel(mode), fontSize = 12.sp, color = c.fg2, textAlign = TextAlign.Center, modifier = Modifier.fillMaxWidth())
+            Text(if (related) "听完后自动接着听相关推荐（已过滤广告和推广）" else modeLabel(mode), fontSize = 12.sp, color = c.fg2, textAlign = TextAlign.Center, modifier = Modifier.fillMaxWidth())
         }
         item {
             Column(Modifier.padding(top = 18.dp)) {
@@ -187,7 +241,7 @@ fun ListenScreen(app: RubiApp, nav: Nav) {
                     Modifier.fillMaxWidth().clickable { open = !open }.padding(horizontal = 16.dp, vertical = 12.dp),
                     verticalAlignment = Alignment.CenterVertically,
                 ) {
-                    Text("播放列表", fontSize = 18.sp, fontWeight = FontWeight.Light, color = c.fg)
+                    Text(if (related) "接下来" else "播放列表", fontSize = 18.sp, fontWeight = FontWeight.Light, color = c.fg)
                     val following = if (items.isEmpty()) null else items[(at + 1) % items.size]
                     val hint = if (open) "共 ${items.size} 首" else following?.let { "下一首：${it.title}" }.orEmpty()
                     Text(hint, fontSize = 12.sp, color = c.fg2, maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.weight(1f).padding(horizontal = 8.dp))
@@ -228,6 +282,14 @@ private fun Icon(size: Dp, color: Color, draw: DrawScope.(Color) -> Unit) {
 }
 
 private fun DrawScope.u(v: Float) = v / 24f * size.width
+
+/** An alarm clock with square corners: the case, the hands and two bells. */
+private fun DrawScope.alarm(color: Color) {
+    lines(color, 4f to 6f, 20f to 6f, 20f to 21f, 4f to 21f, 4f to 6f)
+    lines(color, 12f to 9f, 12f to 14f, 16f to 14f)
+    bar(color, 2f, 2f, 6f, 2f)
+    bar(color, 16f, 2f, 6f, 2f)
+}
 
 private fun DrawScope.lines(color: Color, vararg points: Pair<Float, Float>) {
     val p = Path()
@@ -304,3 +366,88 @@ private fun clockOf(ms: Long): String {
     val s = ms.coerceAtLeast(0L) / 1000
     return if (s >= 3600) "%d:%02d:%02d".format(s / 3600, s / 60 % 60, s % 60) else "%02d:%02d".format(s / 60, s % 60)
 }
+
+private val SLEEP_PRESETS = listOf(5 to "5 分钟", 10 to "10 分钟", 30 to "30 分钟", 60 to "1 小时")
+
+/** 定时暂停: the presets, or 自定义 on two wheels (hours : minutes) like a digital clock. */
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+private fun SleepTimerSheet(running: Long?, onPick: (Int) -> Unit, onCancel: () -> Unit, onDismiss: () -> Unit) {
+    val c = LocalMetro.current
+    var custom by remember { mutableStateOf(false) }
+    var hours by remember { mutableStateOf(0) }
+    var minutes by remember { mutableStateOf(45) }
+    ModalBottomSheet(onDismissRequest = onDismiss, containerColor = c.bg2, shape = RectangleShape, dragHandle = null) {
+        Column(Modifier.padding(16.dp)) {
+            Text("定时暂停", style = MetroType.section, color = c.fg)
+            if (!custom) {
+                SLEEP_PRESETS.forEach { (m, label) ->
+                    Row(Modifier.fillMaxWidth().clickable { onPick(m) }.padding(vertical = 12.dp)) { Text(label, fontSize = 15.sp, color = c.fg) }
+                }
+                Row(Modifier.fillMaxWidth().clickable { custom = true }.padding(vertical = 12.dp), verticalAlignment = Alignment.CenterVertically) {
+                    Text("自定义", fontSize = 15.sp, color = c.fg, modifier = Modifier.weight(1f))
+                    Text("滚动选择 ›", fontSize = 13.sp, color = c.fg2)
+                }
+                if (running != null) {
+                    Row(Modifier.fillMaxWidth().clickable(onClick = onCancel).padding(vertical = 12.dp)) {
+                        Text("取消定时（剩 ${clockOf(running)}）", fontSize = 15.sp, color = LiveRed)
+                    }
+                }
+            } else {
+                Row(Modifier.fillMaxWidth().padding(vertical = 10.dp), horizontalArrangement = Arrangement.Center, verticalAlignment = Alignment.CenterVertically) {
+                    Wheel(24, hours) { hours = it }
+                    Text(":", fontSize = 34.sp, fontFamily = FontFamily.Monospace, color = c.fg, modifier = Modifier.padding(horizontal = 6.dp))
+                    Wheel(60, minutes) { minutes = it }
+                }
+                Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.Center) {
+                    Meta("小时", Modifier.width(84.dp).wrapContentWidth())
+                    Spacer(Modifier.width(30.dp))
+                    Meta("分钟", Modifier.width(84.dp).wrapContentWidth())
+                }
+                val total = hours * 60 + minutes
+                Meta(
+                    if (total == 0) "请至少选 1 分钟" else "将在 ${if (hours > 0) "$hours 小时 " else ""}${if (minutes > 0) "$minutes 分钟" else ""}后暂停",
+                    Modifier.fillMaxWidth().padding(top = 8.dp).wrapContentWidth(),
+                    color = if (total == 0) LiveRed else c.fg2,
+                )
+                Row(Modifier.padding(top = 12.dp, bottom = 8.dp), horizontalArrangement = Arrangement.spacedBy(16.dp), verticalAlignment = Alignment.CenterVertically) {
+                    AccentButton("开始定时") { if (total > 0) onPick(total) }
+                    TextAction("返回", onClick = { custom = false }, dim = true)
+                }
+            }
+        }
+    }
+}
+
+/** One wheel of digits (`00`…`count - 1`) that snaps to the middle row. */
+@Composable
+private fun Wheel(count: Int, value: Int, onChange: (Int) -> Unit) {
+    val c = LocalMetro.current
+    val rowPx = with(LocalDensity.current) { WHEEL_ROW.toPx() }
+    val state = rememberLazyListState(initialFirstVisibleItemIndex = value)
+    val picked by remember { derivedStateOf { (state.firstVisibleItemIndex + if (state.firstVisibleItemScrollOffset > rowPx / 2) 1 else 0).coerceIn(0, count - 1) } }
+    LaunchedEffect(picked) { onChange(picked) }
+    Box(Modifier.width(84.dp).height(WHEEL_ROW * 3)) {
+        LazyColumn(
+            state = state,
+            flingBehavior = rememberSnapFlingBehavior(state),
+            contentPadding = PaddingValues(vertical = WHEEL_ROW),
+            modifier = Modifier.fillMaxSize(),
+        ) {
+            items(count) { i ->
+                Text(
+                    "%02d".format(i),
+                    fontSize = 34.sp,
+                    fontFamily = FontFamily.Monospace,
+                    color = if (i == picked) c.fg else c.fg2.copy(alpha = 0.5f),
+                    modifier = Modifier.fillMaxWidth().height(WHEEL_ROW).wrapContentSize(),
+                )
+            }
+        }
+        // The middle row's rules.
+        Box(Modifier.fillMaxWidth().height(1.dp).align(Alignment.TopCenter).offset(y = WHEEL_ROW).background(c.line))
+        Box(Modifier.fillMaxWidth().height(1.dp).align(Alignment.TopCenter).offset(y = WHEEL_ROW * 2).background(c.line))
+    }
+}
+
+private val WHEEL_ROW = 50.dp

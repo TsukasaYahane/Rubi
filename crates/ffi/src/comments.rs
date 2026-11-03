@@ -53,8 +53,10 @@ impl RubiCore {
         root: u64,
         parent: u64,
         text: String,
+        mentions: Vec<FfiMention>,
     ) -> Res<FfiCommentRow> {
-        let (row, c) = self.comments.reply(area_of(area), root, parent, &text).await?;
+        let at: Vec<(String, u64)> = mentions.into_iter().map(|m| (m.name, m.mid)).collect();
+        let (row, c) = self.comments.reply(area_of(area), root, parent, &text, &at).await?;
         Ok(FfiCommentRow::of(&row, &c))
     }
 
@@ -63,4 +65,11 @@ impl RubiCore {
     pub async fn focus_thread(&self, area: FfiCommentArea, comment: FfiCommentRef) -> Res<FfiCommentThread> {
         Ok((&self.comments.focus(area_of(area), comment.root).await?).into())
     }
+}
+
+/// Someone picked from the @ list while writing a comment.
+#[derive(Debug, Clone, uniffi::Record)]
+pub struct FfiMention {
+    pub name: String,
+    pub mid: u64,
 }

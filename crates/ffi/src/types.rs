@@ -3,6 +3,7 @@
 use rubi_api::Stream;
 use rubi_model::{
     ChatMessage, ChatSession, Comment, Danmaku, JumpMark, Notice, ThreadRow, UnreadCounts, VideoCard, VideoRef,
+    without_reply_prefix,
 };
 use rubi_recommend::ScoreBreakdown;
 
@@ -117,6 +118,7 @@ pub struct FfiSeasonSection {
 /// The 合集 a video is in.
 #[derive(Debug, Clone, uniffi::Record)]
 pub struct FfiSeason {
+    pub id: u64,
     pub title: String,
     pub sections: Vec<FfiSeasonSection>,
 }
@@ -148,6 +150,7 @@ impl FfiVideoDetail {
                 .map(|p| FfiPart { cid: p.cid, title: p.part.clone(), duration_s: p.duration_s })
                 .collect(),
             season: info.season.as_ref().map(|s| FfiSeason {
+                id: s.id,
                 title: s.title.clone(),
                 sections: s
                     .sections
@@ -398,7 +401,7 @@ impl FfiCommentRow {
             has_later_sibling: row.has_later_sibling,
             reply_to: row.reply_to.clone(),
             name: c.name.clone(),
-            text: c.text.clone(),
+            text: if row.reply_to.is_some() { without_reply_prefix(&c.text).to_owned() } else { c.text.clone() },
             likes: c.likes,
             is_up: c.is_up,
             ctime: c.ctime,
@@ -666,11 +669,14 @@ pub struct FfiFavFolder {
     pub count: u32,
     /// Whether the video asked about is already in this folder.
     pub contains: bool,
+    pub private: bool,
+    /// 默认收藏夹: cannot be deleted.
+    pub default: bool,
 }
 
 impl From<rubi_model::FavFolder> for FfiFavFolder {
     fn from(f: rubi_model::FavFolder) -> Self {
-        Self { id: f.id, title: f.title, count: f.count, contains: f.contains }
+        Self { id: f.id, title: f.title, count: f.count, contains: f.contains, private: f.private, default: f.default }
     }
 }
 
@@ -724,7 +730,6 @@ impl From<rubi_model::UpProfile> for FfiUpProfile {
 pub enum FfiUpOrder {
     Newest,
     MostViewed,
-    MostFavorited,
 }
 
 #[derive(Debug, Clone, uniffi::Record)]
@@ -936,6 +941,9 @@ pub struct FfiDynamic {
     pub published_at: i64,
     pub body: FfiDynamicBody,
     pub orig: Option<FfiDynamicBody>,
+    /// Where its comments are; `None` when it has none.
+    pub comments: Option<FfiCommentArea>,
+    pub comment_count: u64,
 }
 
 #[derive(Debug, Clone, uniffi::Record)]
@@ -976,6 +984,9 @@ impl FfiDynamic {
             published_at: d.published_at,
             body: FfiDynamicBody::of(d),
             orig: d.orig.as_deref().map(FfiDynamicBody::of),
+            comments: (d.comment_kind > 0 && d.comment_oid > 0)
+                .then_some(FfiCommentArea { kind: d.comment_kind, oid: d.comment_oid }),
+            comment_count: d.comment_count,
         }
     }
 }
@@ -1085,4 +1096,175 @@ pub struct FfiFollowings {
     pub ups: Vec<FfiFollowing>,
     /// How far back posts were read (Unix seconds).
     pub checked_since: i64,
+}
+
+#[derive(Debug, Clone, uniffi::Record)]
+pub struct FfiLiveRoom {
+    pub room_id: u64,
+    pub title: String,
+    pub cover: String,
+    pub uid: u64,
+    pub uname: String,
+    pub face: String,
+    pub online: u64,
+    pub area: String,
+    pub live: bool,
+}
+
+impl From<rubi_model::LiveRoom> for FfiLiveRoom {
+    fn from(r: rubi_model::LiveRoom) -> Self {
+        Self {
+            room_id: r.room_id,
+            title: r.title,
+            cover: r.cover,
+            uid: r.uid,
+            uname: r.uname,
+            face: r.face,
+            online: r.online,
+            area: r.area,
+            live: r.live,
+        }
+    }
+}
+
+#[derive(Debug, Clone, uniffi::Record)]
+pub struct FfiLiveRoomPage {
+    pub rooms: Vec<FfiLiveRoom>,
+    pub has_more: bool,
+}
+
+/// A parent 直播 area (网游, 手游…).
+#[derive(Debug, Clone, uniffi::Record)]
+pub struct FfiLiveArea {
+    pub id: u32,
+    pub name: String,
+}
+
+#[derive(Debug, Clone, uniffi::Record)]
+pub struct FfiLiveQuality {
+    pub qn: u32,
+    pub name: String,
+}
+
+#[derive(Debug, Clone, uniffi::Record)]
+pub struct FfiLiveStream {
+    pub url: String,
+    /// HLS (`.m3u8`); otherwise FLV.
+    pub hls: bool,
+}
+
+#[derive(Debug, Clone, uniffi::Record)]
+pub struct FfiLivePlay {
+    pub live: bool,
+    pub qn: u32,
+    pub qualities: Vec<FfiLiveQuality>,
+    /// Most suitable first; try the next when one fails.
+    pub streams: Vec<FfiLiveStream>,
+    pub headers: Vec<FfiHeader>,
+}
+
+/// What the room page shows of each kind of extra; `true` holds it back.
+#[derive(Debug, Clone, Copy, uniffi::Record)]
+pub struct FfiLiveFilter {
+    pub gifts: bool,
+    pub popups: bool,
+    pub effects: bool,
+}
+
+#[derive(Debug, Clone, uniffi::Enum)]
+pub enum FfiLiveEvent {
+    Danmaku { uname: String, text: String, color: u32 },
+    Gift { text: String },
+    Popup { text: String },
+    Effect { text: String },
+    Online { count: u64 },
+    Status { live: bool },
+}
+
+impl From<rubi_model::LiveEvent> for FfiLiveEvent {
+    fn from(e: rubi_model::LiveEvent) -> Self {
+        use rubi_model::LiveEvent as E;
+        match e {
+            E::Danmaku { uname, text, color } => Self::Danmaku { uname, text, color },
+            E::Gift { text } => Self::Gift { text },
+            E::Popup { text } => Self::Popup { text },
+            E::Effect { text } => Self::Effect { text },
+            E::Online { count } => Self::Online { count },
+            E::Status { live } => Self::Status { live },
+        }
+    }
+}
+
+#[derive(Debug, Clone, uniffi::Record)]
+pub struct FfiLiveBatch {
+    pub events: Vec<FfiLiveEvent>,
+    pub blocked_gifts: u32,
+    pub blocked_popups: u32,
+    pub blocked_effects: u32,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, uniffi::Enum)]
+pub enum FfiMatchState {
+    Upcoming,
+    Live,
+    Done,
+}
+
+#[derive(Debug, Clone, uniffi::Record)]
+pub struct FfiTeam {
+    pub name: String,
+    pub logo: String,
+}
+
+#[derive(Debug, Clone, uniffi::Record)]
+pub struct FfiMatch {
+    pub id: u64,
+    pub season: String,
+    pub stage: String,
+    pub start_at: i64,
+    pub home: FfiTeam,
+    pub away: FfiTeam,
+    pub home_score: u32,
+    pub away_score: u32,
+    pub state: FfiMatchState,
+    pub live_room: u64,
+    pub replay_bvid: String,
+    pub subscribed: bool,
+}
+
+impl From<rubi_model::EsportsMatch> for FfiMatch {
+    fn from(m: rubi_model::EsportsMatch) -> Self {
+        use rubi_model::MatchState as S;
+        let team = |t: rubi_model::Team| FfiTeam { name: t.name, logo: t.logo };
+        Self {
+            id: m.id,
+            season: m.season,
+            stage: m.stage,
+            start_at: m.start_at,
+            home: team(m.home),
+            away: team(m.away),
+            home_score: m.home_score,
+            away_score: m.away_score,
+            state: match m.state {
+                S::Upcoming => FfiMatchState::Upcoming,
+                S::Live => FfiMatchState::Live,
+                S::Done => FfiMatchState::Done,
+            },
+            live_room: m.live_room,
+            replay_bvid: m.replay_bvid,
+            subscribed: m.subscribed,
+        }
+    }
+}
+
+#[derive(Debug, Clone, uniffi::Record)]
+pub struct FfiMatchPage {
+    pub matches: Vec<FfiMatch>,
+    pub has_more: bool,
+}
+
+#[derive(Debug, Clone, uniffi::Record)]
+pub struct FfiEsportsGame {
+    pub id: u32,
+    pub title: String,
 }

@@ -7,8 +7,8 @@ use std::sync::Arc;
 
 use rubi_api::{
     ActionApi, ChatApi, FeedApi, HttpClient, LibraryApi, NoticeApi, Session, WebAccount, WebArticle, WebAuth,
-    WebComment, WebDanmaku, WebDynamic, WebEmote, WebFeed, WebMedia, WebMessages, WebSearch, WebSpace, WebStein,
-    WebVideo,
+    WebComment, WebDanmaku, WebDynamic, WebEmote, WebEsports, WebFeed, WebLive, WebMedia, WebMessages, WebPgc,
+    WebSearch, WebSeasons, WebSpace, WebStein, WebVideo,
 };
 use rubi_recommend::Source;
 use rubi_store::SqliteStore;
@@ -21,15 +21,19 @@ use crate::discover::Discover;
 use crate::downloads::Downloads;
 use crate::emotes::Emotes;
 use crate::error::Result;
+use crate::esports::Esports;
 use crate::feed::{FeedService, Seeded};
 use crate::following::Following;
 use crate::home::Home;
 use crate::library::Library;
+use crate::live::Live;
 use crate::messages::Messages;
+use crate::pgc::Pgc;
 use crate::playlist::{Playlist, Playlists};
 use crate::ports::{FeedbackSink, RuleSource};
 use crate::preferences::Preferences;
 use crate::reading::Reading;
+use crate::seasons::Seasons;
 use crate::sources::{
     BiliRecommendSource, FollowedUpsSource, PopularSource, PreferredZoneSource, RankingSource, RelatedSource,
 };
@@ -56,6 +60,10 @@ pub struct Services {
     pub emotes: Emotes,
     pub reading: Reading,
     pub downloads: Downloads,
+    pub live: Live,
+    pub esports: Esports,
+    pub pgc: Pgc,
+    pub seasons: Seasons,
 }
 
 impl Services {
@@ -93,6 +101,7 @@ impl Services {
         let account = Arc::new(Account::new(http.clone(), Arc::new(WebAuth::new(http.clone()))));
         let videos = Arc::new(Videos::new(Arc::new(WebVideo::new(http.clone())), cards.clone()));
         let playlist = Arc::new(Playlist::new(store.clone()));
+        let seasons = Seasons::new(Arc::new(WebSeasons::new(http.clone())), store.clone(), cards.clone());
         let downloads =
             Downloads::new(videos.clone(), Arc::new(WebMedia::new(http.clone())), store, data_dir.join("downloads"));
 
@@ -124,6 +133,10 @@ impl Services {
             preferences: Preferences::new(feed, playlist),
             reading: Reading::new(Arc::new(WebArticle::new(http.clone())), rules.clone()),
             downloads,
+            live: Live::new(Arc::new(WebLive::new(http.clone())), rules.clone()),
+            esports: Esports::new(Arc::new(WebEsports::new(http.clone()))),
+            pgc: Pgc::new(Arc::new(WebPgc::new(http.clone()))),
+            seasons,
             emotes: Emotes::new(Arc::new(WebEmote::new(http))),
             account,
             videos,

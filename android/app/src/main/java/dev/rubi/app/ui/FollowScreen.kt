@@ -175,7 +175,7 @@ fun FollowScreen(app: RubiApp, nav: Nav, state: FollowState, dual: Boolean) {
                     }
                 } else {
                     items(state.posts.items, key = { it.id }) { post ->
-                        DynamicCard(post, onOpenVideo = { nav.push(Screen.Player(it.bvid, it.title)) }, onOpenArticle = { nav.push(Screen.Article(it)) }, onOpenLink = { url ->
+                        DynamicCard(post, onOpenVideo = { nav.push(Screen.Player(it.bvid, it.title)) }, onOpenArticle = { nav.push(Screen.Article(it)) }, onComments = { nav.push(Screen.DynamicComments(post)) }, onOpenLink = { url ->
                             ctx.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(url)))
                         })
                     }
@@ -262,7 +262,13 @@ private fun BarItem(on: Boolean, label: String, onClick: () -> Unit, picture: @C
 
 /** One post: author and time, then what it holds; a repost shows its original indented. */
 @Composable
-private fun DynamicCard(post: FfiDynamic, onOpenVideo: (FfiVideoCard) -> Unit, onOpenArticle: (String) -> Unit, onOpenLink: (String) -> Unit) {
+internal fun DynamicCard(
+    post: FfiDynamic,
+    onOpenVideo: (FfiVideoCard) -> Unit,
+    onOpenArticle: (String) -> Unit,
+    onOpenLink: (String) -> Unit,
+    onComments: () -> Unit,
+) {
     val c = LocalMetro.current
     Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
         Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
@@ -281,6 +287,10 @@ private fun DynamicCard(post: FfiDynamic, onOpenVideo: (FfiVideoCard) -> Unit, o
                 Meta("@${orig.authorName}")
                 DynamicBody(orig, onOpenVideo, onOpenArticle, onOpenLink)
             }
+        }
+        // The post's own comments, on a page of their own.
+        if (post.comments != null) {
+            TextAction(if (post.commentCount > 0u) "评论 ${formatCount(post.commentCount)}" else "评论", onClick = onComments, dim = true)
         }
     }
 }

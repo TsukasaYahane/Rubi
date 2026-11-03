@@ -1,5 +1,8 @@
 package dev.rubi.app.ui
 
+import dev.rubi.core.FfiMention
+import androidx.compose.ui.text.input.TextFieldValue
+import androidx.compose.ui.text.TextRange
 import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.graphics.StrokeJoin
 import androidx.compose.ui.graphics.StrokeCap
@@ -135,15 +138,17 @@ private fun MenuRow(label: String, glyph: MenuGlyph, glyphColor: Color = LocalMe
  * `error` shows what the last send ran into.
  */
 @Composable
-fun ReplyComposer(to: String, sending: Boolean, error: String?, onDismiss: () -> Unit, onSend: (String) -> Unit) {
+fun ReplyComposer(to: String, sending: Boolean, error: String?, mentions: Mentions, onDismiss: () -> Unit, onSend: (String, List<FfiMention>) -> Unit) {
     val c = LocalMetro.current
-    var text by remember { mutableStateOf("") }
+    var field by remember { mutableStateOf(TextFieldValue("")) }
+    val text = field.text
     var hint by remember { mutableStateOf<String?>(null) }
     val focus = remember { FocusRequester() }
     LaunchedEffect(Unit) { runCatching { focus.requestFocus() } }
     PlayerSheet(side = false, onDismiss = onDismiss) {
         Column(Modifier.imePadding().padding(12.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
             Text("回复 @$to", fontSize = 12.sp, color = c.fg2)
+            MentionPicker(field, mentions) { field = it }
             Row(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
                 Box(
                     Modifier.weight(1f).heightIn(min = 40.dp).border(1.dp, c.line).padding(horizontal = 8.dp, vertical = 10.dp),
@@ -151,23 +156,163 @@ fun ReplyComposer(to: String, sending: Boolean, error: String?, onDismiss: () ->
                 ) {
                     if (text.isEmpty()) Text("说点什么", fontSize = 14.sp, color = c.fg2)
                     BasicTextField(
-                        value = text,
-                        onValueChange = { text = it; hint = null },
+                        value = field,
+                        onValueChange = { field = it; hint = null },
                         textStyle = TextStyle(color = c.fg, fontSize = 14.sp),
                         cursorBrush = SolidColor(c.accent),
                         keyboardOptions = KeyboardOptions(imeAction = ImeAction.Send),
-                        keyboardActions = KeyboardActions(onSend = { if (text.isBlank()) hint = "先写点内容" else onSend(text) }),
+                        keyboardActions = KeyboardActions(onSend = { if (text.isBlank()) hint = "先写点内容" else onSend(text, mentions.picked) }),
                         modifier = Modifier.fillMaxWidth().focusRequester(focus),
                     )
                 }
                 Box(
                     Modifier.height(40.dp).background(if (sending) c.line else c.accent).clickable(enabled = !sending) {
-                        if (text.isBlank()) hint = "先写点内容" else onSend(text)
+                        if (text.isBlank()) hint = "先写点内容" else onSend(text, mentions.picked)
                     }.padding(horizontal = 16.dp),
                     contentAlignment = Alignment.Center,
                 ) { Text(if (sending) "发送中" else "发送", color = Color.White, fontSize = 14.sp) }
             }
             Text(hint ?: error.orEmpty(), fontSize = 12.sp, color = Color(0xFFFF6B6B), modifier = Modifier.heightIn(min = 16.dp))
+        }
+    }
+}
+
+/** Longest comment B站 takes. */
+const val MAX_COMMENT = 1000
+
+/** What a comment area belongs to, for 「评论视频 / 专栏 / 动态」. */
+fun areaNoun(area: FfiCommentArea): String = when (area.kind) {
+    1u -> "视频"
+    12u -> "专栏"
+    else -> "动态"
+}
+
+/** The entry at the top of a comment area: a square field that opens the composer. */
+@Composable
+fun PostCommentEntry(onClick: () -> Unit) {
+    val c = LocalMetro.current
+    Row(
+        Modifier.fillMaxWidth().padding(vertical = 8.dp).border(1.dp, c.line).clickable(onClick = onClick).padding(10.dp),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(10.dp),
+    ) {
+        Box(Modifier.size(28.dp).background(c.accent))
+        Text("发一条友善的评论", fontSize = 14.sp, color = c.fg2)
+    }
+}
+
+/**
+ * Writing a new comment (a new floor, not a reply): several lines, a count against the
+ * limit, 取消 and 发表. Empty or too long text is stopped here.
+ */
+@Composable
+fun PostComposer(noun: String, sending: Boolean, error: String?, mentions: Mentions, onDismiss: () -> Unit, onSend: (String, List<FfiMention>) -> Unit) {
+    val c = LocalMetro.current
+    var field by remember { mutableStateOf(TextFieldValue("")) }
+    val text = field.text
+    var hint by remember { mutableStateOf<String?>(null) }
+    val focus = remember { FocusRequester() }
+    LaunchedEffect(Unit) { runCatching { focus.requestFocus() } }
+    fun submit() {
+        hint = when {
+            text.isBlank() -> "先写点内容"
+            text.length > MAX_COMMENT -> "最多 $MAX_COMMENT 字"
+            else -> null
+        }
+        if (hint == null) onSend(text, mentions.picked)
+    }
+    PlayerSheet(side = false, onDismiss = onDismiss) {
+        Column(Modifier.imePadding().padding(12.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+            Text("评论$noun", fontSize = 12.sp, color = c.fg2)
+            MentionPicker(field, mentions) { field = it }
+            Box(Modifier.fillMaxWidth().heightIn(min = 88.dp).border(1.dp, c.line).padding(8.dp)) {
+                if (text.isEmpty()) Text("发一条友善的评论", fontSize = 14.sp, color = c.fg2)
+                BasicTextField(
+                    value = field,
+                    onValueChange = { field = it; hint = null },
+                    textStyle = TextStyle(color = c.fg, fontSize = 14.sp),
+                    cursorBrush = SolidColor(c.accent),
+                    modifier = Modifier.fillMaxWidth().focusRequester(focus),
+                )
+            }
+            Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                Text(
+                    "@",
+                    fontSize = 16.sp,
+                    color = c.fg,
+                    modifier = Modifier.clickable {
+                        val t = field.text + "@"
+                        field = TextFieldValue(t, TextRange(t.length))
+                    }.padding(horizontal = 6.dp, vertical = 4.dp),
+                )
+                Text(
+                    "${text.length} / $MAX_COMMENT",
+                    fontSize = 12.sp,
+                    color = if (text.length > MAX_COMMENT) Color(0xFFFF6B6B) else c.fg2,
+                    modifier = Modifier.weight(1f),
+                )
+                Text("取消", fontSize = 14.sp, color = c.fg2, modifier = Modifier.clickable(onClick = onDismiss).padding(8.dp))
+                Box(
+                    Modifier.height(36.dp).background(if (sending) c.line else c.accent).clickable(enabled = !sending, onClick = ::submit).padding(horizontal = 18.dp),
+                    contentAlignment = Alignment.Center,
+                ) { Text(if (sending) "发表中" else "发表", color = Color.White, fontSize = 14.sp) }
+            }
+            Text(hint ?: error.orEmpty(), fontSize = 12.sp, color = Color(0xFFFF6B6B), modifier = Modifier.heightIn(min = 16.dp))
+        }
+    }
+}
+
+/**
+ * @ 提到: who can be picked (followed UPs and friends, read on the first @) and who has been
+ * picked in this composer.
+ */
+class Mentions(private val load: suspend () -> List<FfiMention>) {
+    var all by mutableStateOf<List<FfiMention>?>(null)
+        private set
+    val picked = mutableListOf<FfiMention>()
+
+    suspend fun ensure() {
+        if (all == null) all = runCatching { load() }.getOrDefault(emptyList())
+    }
+}
+
+/** How many names the @ list shows at once. */
+private const val MENTION_ROWS = 6
+
+/**
+ * While the word before the cursor starts with @, a list of matching people; picking one puts
+ * `@名字 ` in its place and remembers them for the send.
+ */
+@Composable
+fun MentionPicker(field: TextFieldValue, mentions: Mentions, onPick: (TextFieldValue) -> Unit) {
+    val c = LocalMetro.current
+    val before = field.text.substring(0, field.selection.start.coerceIn(0, field.text.length))
+    val typed = Regex("@([^\\s@]*)$").find(before)
+    LaunchedEffect(typed != null) { if (typed != null) mentions.ensure() }
+    if (typed == null) return
+    val word = typed.groupValues[1]
+    val all = mentions.all
+    Column(Modifier.fillMaxWidth().border(1.dp, c.line)) {
+        when {
+            all == null -> Meta("读取关注列表…", Modifier.padding(8.dp))
+            else -> {
+                val hits = all.filter { word.isEmpty() || it.name.contains(word, ignoreCase = true) }.take(MENTION_ROWS)
+                if (hits.isEmpty()) Meta(if (all.isEmpty()) "登录后可以 @ 关注的人" else "没有找到「$word」", Modifier.padding(8.dp))
+                hits.forEach { m ->
+                    Text(
+                        m.name,
+                        fontSize = 14.sp,
+                        color = c.fg,
+                        maxLines = 1,
+                        modifier = Modifier.fillMaxWidth().clickable {
+                            val start = typed.range.first
+                            val replaced = field.text.substring(0, start) + "@${m.name} " + field.text.substring(before.length)
+                            if (mentions.picked.none { it.mid == m.mid }) mentions.picked.add(m)
+                            onPick(TextFieldValue(replaced, TextRange(start + m.name.length + 2)))
+                        }.padding(horizontal = 10.dp, vertical = 8.dp),
+                    )
+                }
+            }
         }
     }
 }

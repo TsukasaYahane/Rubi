@@ -1,7 +1,16 @@
 package dev.rubi.app.ui
 
+import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.runtime.key
 import android.util.Log
 import androidx.compose.foundation.background
+import androidx.compose.animation.core.Animatable
+import androidx.compose.animation.core.tween
+import androidx.compose.foundation.border
+import androidx.compose.foundation.gestures.detectTapGestures
+import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.layout.Arrangement
@@ -94,6 +103,12 @@ class HomeState(private val ui: UiPrefs) {
         ui.homeDual = dual
     }
     var pivot by mutableStateOf(0)
+    /** On a zone: 0 its 推荐, 1 its 热门. */
+    var zoneSub by mutableStateOf(0)
+    private val zoneLists = mutableMapOf<String, FeedList>()
+
+    /** The list of zone `name`'s 推荐 or 热门, kept while the app runs. */
+    fun zoneList(name: String, sub: Int): FeedList = zoneLists.getOrPut("$name/$sub") { FeedList() }
 }
 
 @OptIn(ExperimentalMaterial3Api::class)
@@ -110,12 +125,15 @@ fun HomeScreen(app: RubiApp, nav: Nav, home: HomeState) {
     suspend fun loadPage(reset: Boolean) {
         // A rebuilt list may show earlier cards again; an appended page must not repeat them.
         if (reset || cards.isEmpty()) app.core.newFeedSession()
-        var report = if (reset || cards.isEmpty()) runCatching { app.core.refreshFeed(20u) } else null
+        // Off the main thread: the core filters and stores hundreds of candidates while this
+        // runs, and on the main thread taps would be dropped meanwhile.
+        suspend fun refresh() = withContext(Dispatchers.IO) { runCatching { app.core.refreshFeed(20u) } }
+        var report = if (reset || cards.isEmpty()) refresh() else null
         suspend fun next() = withContext(Dispatchers.IO) { runCatching { app.core.nextPage(PAGE) }.getOrDefault(emptyList()) }
         var page = next()
         if (page.isEmpty() && report == null) {
             // Pool used up while scrolling: fetch more candidates and append, never replace.
-            report = runCatching { app.core.refreshFeed(20u) }
+            report = refresh()
             page = next()
         }
         // Leaving the screen mid-refresh is not a failure worth reporting.
@@ -163,10 +181,32 @@ fun HomeScreen(app: RubiApp, nav: Nav, home: HomeState) {
     val preview = remember(nav.stack.size) { PreviewPrefs.load(app.core) }
     val previewing = rememberPreviewTarget(grid, enabled = !dual && home.pivot == 0 && preview.allowed(ctx))
     val pivot = home.pivot
+    val zones = remember { app.core.homeZones() }
+    val pgcZones = remember { app.core.pgcZones() }
+    var zoneMenu by remember { mutableStateOf(false) }
+    // How far the 分区 menu is shown: it and the dimming behind it fade in and out with the
+    // page switch instead of vanishing at once.
+    val motion = LocalMotion.current
+    val menuShown = remember { Animatable(0f) }
+    LaunchedEffect(zoneMenu) {
+        val to = if (zoneMenu) 1f else 0f
+        if (!motion.on) menuShown.snapTo(to) else runFixed { menuShown.animateTo(to, tween(motion.ms(380), easing = EnterEasing)) }
+    }
+    val turns = LocalPageTurns.current
 
     Column(Modifier.fillMaxSize()) {
         Row(verticalAlignment = Alignment.CenterVertically) {
-            Box(Modifier.weight(1f)) { Pivot(listOf("推荐", "热门", "排行"), pivot, { home.pivot = it }) }
+            // 推荐 / 热门 / 排行, then one 分区 button that unfolds the zones and takes the name of
+            // the one picked.
+            val zoneLabel = (zones.getOrNull(pivot - 3)?.name ?: "分区") + if (zoneMenu) " ▴" else " ▾"
+            // Fixed in place, sized so the four fit beside 双列 even with a four-character zone.
+            Box(Modifier.weight(1f)) { Pivot(listOf("推荐", "热门", "排行", zoneLabel), pivot.coerceAtMost(3), scroll = false, gap = 14.dp, style = MetroType.pivot.copy(fontSize = 22.sp, lineHeight = 32.sp), onSelect = { i ->
+                if (i == 3) zoneMenu = !zoneMenu
+                else {
+                    zoneMenu = false
+                    turns.switch(i > pivot) { home.pivot = i }
+                }
+            }) }
             Text(
                 if (dual) "▦ 双列" else "▭ 单列",
                 style = MetroType.meta.copy(fontSize = 12.sp),
@@ -174,8 +214,36 @@ fun HomeScreen(app: RubiApp, nav: Nav, home: HomeState) {
                 modifier = Modifier.padding(end = 16.dp).clickable { home.toggleDual() },
             )
         }
+        // The unfolded 分区 menu floats over the feed instead of pushing it down.
+        Box(Modifier.weight(1f)) {
+        // The chosen page slides in from the side it was picked on.
+        Column(Modifier.fillMaxSize().pivotSlide(pivot)) {
+        if (pivot >= 3) {
+            val zone = zones[pivot - 3]
+            Row(Modifier.padding(horizontal = 16.dp, vertical = 4.dp), horizontalArrangement = Arrangement.spacedBy(18.dp)) {
+                listOf("推荐", "热门").forEachIndexed { i, label ->
+                    val on = i == home.zoneSub
+                    Text(
+                        label,
+                        fontSize = 15.sp,
+                        fontWeight = if (on) FontWeight.SemiBold else FontWeight.Normal,
+                        color = if (on) c.fg else c.fg2,
+                        modifier = Modifier.clickable { home.zoneSub = i }.padding(vertical = 6.dp),
+                    )
+                }
+            }
+            val sub = home.zoneSub
+            key(zone.name, sub) {
+                HotRankList(app, nav, home.zoneList(zone.name, sub), ranking = sub == 1, dual = dual) { page ->
+                    if (sub == 1) app.core.zoneRanking(zone.rid) else app.core.zoneFeed(zone.region, page)
+                }
+            }
+            return@Column
+        }
         if (pivot != 0) {
-            HotRankList(app, nav, if (pivot == 2) home.rank else home.hot, ranking = pivot == 2, dual = dual)
+            HotRankList(app, nav, if (pivot == 2) home.rank else home.hot, ranking = pivot == 2, dual = dual) { page ->
+                if (pivot == 2) app.core.ranking() else app.core.popular(page)
+            }
             return@Column
         }
         Row(Modifier.fillMaxWidth().height(44.dp).padding(horizontal = 16.dp), verticalAlignment = Alignment.CenterVertically) {
@@ -215,6 +283,32 @@ fun HomeScreen(app: RubiApp, nav: Nav, home: HomeState) {
                 }
             }
         }
+        }
+        if (zoneMenu || menuShown.value > 0f) {
+            val shown = menuShown.value
+            // A tap beside the menu folds it.
+            Box(
+                Modifier.fillMaxSize().background(Color.Black.copy(alpha = 0.3f * shown))
+                    .then(if (zoneMenu) Modifier.pointerInput(Unit) { detectTapGestures { zoneMenu = false } } else Modifier),
+            )
+            ZoneMenu(
+                Modifier.graphicsLayer {
+                    alpha = shown
+                    translationY = -(1f - shown) * 16.dp.toPx()
+                },
+                zones.map { it.name }, pgcZones.map { it.name }, selected = pivot - 3,
+                onZone = { i ->
+                    zoneMenu = false
+                    if (pivot != 3 + i) turns.switch(3 + i > pivot) { home.pivot = 3 + i }
+                },
+                onPgc = { i ->
+                    zoneMenu = false
+                    val pgc = pgcZones[i]
+                    nav.push(Screen.PgcZone(pgc.seasonType, pgc.name, PgcZoneState(app.core, pgc.seasonType)))
+                },
+            )
+        }
+        }
     }
 
     why?.let { card ->
@@ -227,7 +321,7 @@ fun HomeScreen(app: RubiApp, nav: Nav, home: HomeState) {
 
 /** 热门 (paged grid) and 排行 (numbered list); both already filtered by the rule table. */
 @Composable
-private fun HotRankList(app: RubiApp, nav: Nav, list: FeedList, ranking: Boolean, dual: Boolean) {
+private fun HotRankList(app: RubiApp, nav: Nav, list: FeedList, ranking: Boolean, dual: Boolean, load: suspend (page: UInt) -> List<FfiVideoCard>) {
     val ctx = LocalContext.current
     val preview = remember(nav.stack.size) { PreviewPrefs.load(app.core) }
     val previewing = rememberPreviewTarget(list.grid, enabled = !dual && !ranking && preview.allowed(ctx))
@@ -240,7 +334,7 @@ private fun HotRankList(app: RubiApp, nav: Nav, list: FeedList, ranking: Boolean
         if (list.loading) return
         list.loading = true
         try {
-            val got = if (ranking) app.core.ranking() else app.core.popular(list.page)
+            val got = withContext(Dispatchers.IO) { load(list.page) }
             cards.addAll(got.filter { n -> cards.none { it.bvid == n.bvid } })
             list.page++
             list.error = null
@@ -287,7 +381,10 @@ private fun HotRankList(app: RubiApp, nav: Nav, list: FeedList, ranking: Boolean
                     )
                     Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(4.dp)) {
                         Text(card.title, fontSize = 15.sp, color = c.fg, maxLines = 2, overflow = TextOverflow.Ellipsis)
-                        Meta("${card.upName} · ${formatCount(card.views)}")
+                        Row {
+                            UpName(card.upName, card.upMid, MetroType.meta.fontSize, c.fg2)
+                            Meta(" · ${formatCount(card.views)}")
+                        }
                     }
                 }
             }
@@ -316,13 +413,24 @@ fun VideoCardView(
 ) {
     val c = LocalMetro.current
     val addToList = LocalAddToPlaylist.current
-    Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+    val flights = LocalCardFlights.current
+    val coverAt = remember { arrayOf<androidx.compose.ui.geometry.Rect?>(null) }
+    Column(Modifier.pressTilt(), verticalArrangement = Arrangement.spacedBy(8.dp)) {
         // Long-press: put it on the play list.
         Column(
-            Modifier.combinedClickable(onLongClick = { addToList(card) }, onClick = onOpen),
+            Modifier.combinedClickable(onLongClick = { addToList(card) }, onClick = {
+                // 卡牌 / 书页 grow the page out of this cover.
+                coverAt[0]?.let { flights.pending = CardOrigin(it, card.cover, card.bvid) }
+                onOpen()
+            }),
             verticalArrangement = Arrangement.spacedBy(8.dp),
         ) {
-            Box(Modifier.fillMaxWidth().aspectRatio(16f / 9f).background(c.bg2)) {
+            // While a flight back lands here the cover stays empty, so it does not show twice.
+            Box(
+                Modifier.fillMaxWidth().aspectRatio(16f / 9f).flightSource { coverAt[0] = it }
+                    .graphicsLayer { alpha = if (flights.landingOn(card.bvid)) 0f else 1f }
+                    .background(c.bg2),
+            ) {
                 AsyncImage(model = card.cover, contentDescription = null, contentScale = ContentScale.Crop, modifier = Modifier.fillMaxSize())
                 preview?.invoke()
                 if (card.reason.isNotEmpty()) Tag(card.reason, Modifier.align(Alignment.TopStart))
@@ -343,7 +451,7 @@ fun VideoCardView(
         }
         Row(verticalAlignment = Alignment.Top) {
             Column(Modifier.weight(1f)) {
-                Text(card.upName, fontSize = 12.sp, color = c.fg2, maxLines = 1)
+                UpName(card.upName, card.upMid, 12.sp, c.fg2)
                 Meta("${formatCount(card.views)} · ${formatAge(card.pubdate)}")
             }
             if (onMore != null) {
@@ -397,4 +505,38 @@ private fun WhySheet(app: RubiApp, card: FfiVideoCard, onDismiss: () -> Unit, on
             }
         }
     }
+}
+
+/**
+ * The unfolded 分区 button: the zones as tiles, four to a row, the one showing in Cobalt; below,
+ * the 影视专区, which open pages of their own.
+ */
+@Composable
+private fun ZoneMenu(modifier: Modifier, zones: List<String>, pgcZones: List<String>, selected: Int, onZone: (Int) -> Unit, onPgc: (Int) -> Unit) {
+    val c = LocalMetro.current
+    Column(modifier.fillMaxWidth().background(c.bg2).padding(start = 16.dp, end = 16.dp, top = 8.dp, bottom = 14.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+        Meta("分区")
+        zones.indices.chunked(4).forEach { row ->
+            Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                row.forEach { i -> ZoneTile(zones[i], on = i == selected, Modifier.weight(1f)) { onZone(i) } }
+                repeat(4 - row.size) { Spacer(Modifier.weight(1f)) }
+            }
+        }
+        Meta("影视专区 · 打开专区页", Modifier.padding(top = 6.dp))
+        pgcZones.indices.chunked(4).forEach { row ->
+            Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                row.forEach { i -> ZoneTile(pgcZones[i] + " →", on = true, Modifier.weight(1f)) { onPgc(i) } }
+                repeat(4 - row.size) { Spacer(Modifier.weight(1f)) }
+            }
+        }
+    }
+}
+
+@Composable
+private fun ZoneTile(label: String, on: Boolean, modifier: Modifier, onClick: () -> Unit) {
+    val c = LocalMetro.current
+    Box(
+        modifier.height(40.dp).then(if (on) Modifier.background(c.accent) else Modifier.border(1.dp, c.line)).clickable(onClick = onClick),
+        contentAlignment = Alignment.Center,
+    ) { Text(label, fontSize = 13.sp, color = if (on) Color.White else c.fg, maxLines = 1) }
 }

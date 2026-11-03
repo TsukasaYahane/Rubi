@@ -109,6 +109,16 @@ pub struct Stream {
     pub height: u32,
 }
 
+/// A whole video as one file, with the qualities it can come in.
+#[derive(Debug, Clone, Default, PartialEq)]
+pub struct SingleFile {
+    pub url: String,
+    pub backup_urls: Vec<String>,
+    pub quality: u32,
+    pub accept: Vec<(u32, String)>,
+    pub duration_ms: u64,
+}
+
 #[derive(Debug, Clone, PartialEq)]
 pub struct PlayUrl {
     pub duration_ms: u64,
@@ -129,6 +139,8 @@ pub trait VideoApi: Send + Sync {
     async fn expand_short(&self, url: &str) -> Result<Option<String>>;
     async fn tags(&self, bvid: &str) -> Result<Vec<String>>;
     async fn playurl(&self, bvid: &str, cid: u64, qn: u32) -> Result<PlayUrl>;
+    /// One MP4 file (video and sound together) for 投屏: TVs cannot join DASH streams.
+    async fn single_file(&self, bvid: &str, cid: u64, qn: u32) -> Result<SingleFile>;
     /// Where the signed-in user stopped watching: the part (`cid`) and the position in ms.
     /// `None` for guests and for videos never watched.
     async fn last_watched(&self, bvid: &str, cid: u64) -> Result<Option<(u64, u64)>>;
@@ -184,6 +196,69 @@ fn stream_of(v: &Value) -> Stream {
     }
 }
 
+/// A playurl answer (videos' `data`, or a 番剧 episode's `video_info`) as DASH streams. Quality
+/// names come from `accept_description`, or from `support_formats` where that is missing.
+pub(crate) fn play_url_of(d: &Value) -> Result<PlayUrl> {
+    let dash = &d["dash"];
+    if dash.is_null() {
+        return Err(ApiError::Decode("playurl returned no DASH streams".into()));
+    }
+    let mut audio = streams(&dash["audio"]);
+    if dash["flac"]["audio"].is_object() {
+        audio.push(stream_of(&dash["flac"]["audio"]));
+    }
+    audio.extend(streams(&dash["dolby"]["audio"]));
+    let named: Vec<(u32, String)> = d["support_formats"]
+        .as_array()
+        .map(|l| l.iter().map(|f| (u64_of(&f["quality"]) as u32, str_of(&f["new_description"]))).collect())
+        .unwrap_or_default();
+    let accept = d["accept_quality"]
+        .as_array()
+        .map(|q| {
+            q.iter()
+                .enumerate()
+                .map(|(i, q)| {
+                    let qn = u64_of(q) as u32;
+                    let name = d["accept_description"][i]
+                        .as_str()
+                        .map(str::to_owned)
+                        .or_else(|| named.iter().find(|(n, _)| *n == qn).map(|(_, s)| s.clone()))
+                        .unwrap_or_else(|| qn.to_string());
+                    (qn, name)
+                })
+                .collect()
+        })
+        .unwrap_or_default();
+    Ok(PlayUrl {
+        duration_ms: u64_of(&d["timelength"]),
+        quality: u64_of(&d["quality"]) as u32,
+        accept,
+        video: streams(&dash["video"]),
+        audio,
+    })
+}
+
+/// The `durl` answer (`fnval` 1): one file when the video comes whole.
+pub(crate) fn single_file_of(d: &Value) -> Option<SingleFile> {
+    let first = d["durl"].as_array()?.first()?;
+    let url = str_of(&first["url"]);
+    if url.is_empty() {
+        return None;
+    }
+    let accept = d["accept_quality"]
+        .as_array()
+        .zip(d["accept_description"].as_array())
+        .map(|(q, desc)| q.iter().zip(desc).map(|(q, d)| (u64_of(q) as u32, str_of(d))).collect())
+        .unwrap_or_default();
+    Some(SingleFile {
+        url,
+        backup_urls: first["backup_url"].as_array().map(|l| l.iter().map(str_of).collect()).unwrap_or_default(),
+        quality: u64_of(&d["quality"]) as u32,
+        accept,
+        duration_ms: u64_of(&d["timelength"]),
+    })
+}
+
 fn streams(list: &Value) -> Vec<Stream> {
     list.as_array().map(|a| a.iter().map(stream_of).collect()).unwrap_or_default()
 }
@@ -232,27 +307,13 @@ impl VideoApi for WebVideo {
     async fn playurl(&self, bvid: &str, cid: u64, qn: u32) -> Result<PlayUrl> {
         let p = params!["bvid" => bvid, "cid" => cid, "qn" => qn, "fnval" => FNVAL, "fnver" => 0, "fourk" => 1];
         let d = self.http.get_json(PLAYURL, p, true).await?;
-        let dash = &d["dash"];
-        if dash.is_null() {
-            return Err(ApiError::Decode("playurl returned no DASH streams".into()));
-        }
-        let mut audio = streams(&dash["audio"]);
-        if dash["flac"]["audio"].is_object() {
-            audio.push(stream_of(&dash["flac"]["audio"]));
-        }
-        audio.extend(streams(&dash["dolby"]["audio"]));
-        let accept = d["accept_quality"]
-            .as_array()
-            .zip(d["accept_description"].as_array())
-            .map(|(q, desc)| q.iter().zip(desc).map(|(q, d)| (u64_of(q) as u32, str_of(d))).collect())
-            .unwrap_or_default();
-        Ok(PlayUrl {
-            duration_ms: u64_of(&d["timelength"]),
-            quality: u64_of(&d["quality"]) as u32,
-            accept,
-            video: streams(&dash["video"]),
-            audio,
-        })
+        play_url_of(&d)
+    }
+
+    async fn single_file(&self, bvid: &str, cid: u64, qn: u32) -> Result<SingleFile> {
+        let p = params!["bvid" => bvid, "cid" => cid, "qn" => qn, "fnval" => 1, "fnver" => 0, "platform" => "html5", "high_quality" => 1];
+        let d = self.http.get_json(PLAYURL, p, true).await?;
+        single_file_of(&d).ok_or_else(|| ApiError::Decode("playurl returned no single file".into()))
     }
 
     fn stream_headers(&self) -> Vec<(String, String)> {
@@ -268,6 +329,15 @@ impl VideoApi for WebVideo {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn reads_a_single_file() {
+        let d = serde_json::json!({"quality": 64, "timelength": 1000, "accept_quality": [80, 64], "accept_description": ["高清 1080P", "高清 720P"],
+            "durl": [{"url": "https://upos/x.mp4", "backup_url": ["https://b/x.mp4"]}]});
+        let f = single_file_of(&d).unwrap();
+        assert_eq!((f.url.as_str(), f.quality, f.backup_urls.len(), f.accept[0].0), ("https://upos/x.mp4", 64, 1, 80));
+        assert!(single_file_of(&serde_json::json!({"dash": {}})).is_none());
+    }
 
     #[test]
     fn last_watched_needs_a_position() {

@@ -65,7 +65,15 @@ pub trait CommentApi: Send + Sync {
     async fn like(&self, area: CommentArea, rpid: u64, on: bool) -> Result<()>;
     /// Replies to `parent` in the thread under `root` (both 0: a new root comment) and returns
     /// the reply as it will show. Login required.
-    async fn reply(&self, area: CommentArea, root: u64, parent: u64, text: &str) -> Result<Comment>;
+    /// Posts `text`; `mentions` are the (name, mid) of every `@name` in it, so B站 notifies them.
+    async fn reply(
+        &self,
+        area: CommentArea,
+        root: u64,
+        parent: u64,
+        text: &str,
+        mentions: &[(String, u64)],
+    ) -> Result<Comment>;
 }
 
 pub struct WebComment {
@@ -225,8 +233,21 @@ impl CommentApi for WebComment {
         self.http.post_form(ACTION, form).await.map(|_| ())
     }
 
-    async fn reply(&self, area: CommentArea, root: u64, parent: u64, text: &str) -> Result<Comment> {
+    async fn reply(
+        &self,
+        area: CommentArea,
+        root: u64,
+        parent: u64,
+        text: &str,
+        mentions: &[(String, u64)],
+    ) -> Result<Comment> {
         let mut form = params!["type" => area.kind, "oid" => area.oid, "message" => text, "plat" => 1];
+        if !mentions.is_empty() {
+            // `{"name": mid, …}`: how the web page tells B站 who an `@name` is.
+            let at: serde_json::Map<String, Value> =
+                mentions.iter().map(|(n, m)| (n.clone(), Value::from(*m))).collect();
+            form.push(("at_name_to_mid".into(), Value::Object(at).to_string()));
+        }
         if root > 0 {
             form.push(("root".into(), root.to_string()));
             form.push(("parent".into(), parent.max(root).to_string()));

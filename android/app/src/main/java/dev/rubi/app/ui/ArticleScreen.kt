@@ -33,9 +33,8 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.layout.ContentScale
-import androidx.compose.ui.platform.LocalClipboardManager
+import androidx.compose.ui.platform.LocalClipboard
 import androidx.compose.ui.platform.LocalContext
-import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
@@ -59,7 +58,7 @@ private const val MAX_SP = 22
 fun ArticleScreen(app: RubiApp, nav: Nav, link: String) {
     val c = LocalMetro.current
     val ctx = LocalContext.current
-    val clipboard = LocalClipboardManager.current
+    val clipboard = LocalClipboard.current
     val scope = rememberCoroutineScope()
     var article by remember { mutableStateOf<FfiArticle?>(null) }
     var error by remember { mutableStateOf<Throwable?>(null) }
@@ -142,7 +141,7 @@ fun ArticleScreen(app: RubiApp, nav: Nav, link: String) {
             BarAction("评论", Modifier.weight(1f), enabled = a.comments != null) { scope.launch { list.animateScrollToItem(commentsAt) } }
             BarAction("在浏览器打开", Modifier.weight(1f)) { pageUrl?.let { open(ctx, it) } }
             BarAction("复制链接", Modifier.weight(1f)) {
-                pageUrl?.let { clipboard.setText(AnnotatedString(it)) }
+                pageUrl?.let { scope.launch { clipboard.copyText(it) } }
                 Toast.makeText(ctx, "已复制链接", Toast.LENGTH_SHORT).show()
             }
         }

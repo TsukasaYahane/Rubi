@@ -38,6 +38,7 @@ import androidx.compose.ui.unit.sp
 import coil3.compose.AsyncImage
 import dev.rubi.app.RubiApp
 import dev.rubi.app.data.onUnmeteredNetwork
+import dev.rubi.app.playback.DownloadService
 import dev.rubi.app.ui.theme.LocalMetro
 import dev.rubi.core.FfiDownload
 import dev.rubi.core.FfiDownloadState
@@ -59,7 +60,13 @@ fun formatBytes(n: ULong): String = when {
  */
 suspend fun startDownload(app: RubiApp, bvid: String, qn: UInt, label: String): String {
     if (app.ui.downloadWifiOnly && !app.onUnmeteredNetwork()) return "当前不是 Wi-Fi：已开启仅 Wi-Fi 下载，可在离线缓存页关闭"
-    return runCatching { app.core.downloadStart(bvid, qn) }.fold({ "已加入离线缓存 · $label" }, { "缓存失败：${it.message}" })
+    return runCatching { app.core.downloadStart(bvid, qn) }.fold(
+        {
+            DownloadService.start(app)
+            "已加入离线缓存 · $label"
+        },
+        { "缓存失败：${it.message}" },
+    )
 }
 
 /** Picks the quality of an offline copy. */
@@ -138,7 +145,9 @@ fun DownloadsScreen(app: RubiApp, nav: Nav) {
                                 if (wifiOnly && !ctx.onUnmeteredNetwork()) say("当前不是 Wi-Fi：已开启仅 Wi-Fi 下载")
                                 else scope.launch {
                                     // Returns once the copy is under way; it carries on without this page.
-                                    runCatching { app.core.downloadStart(d.card.bvid, d.quality) }.onFailure { say("继续失败：${it.message}") }
+                                    runCatching { app.core.downloadStart(d.card.bvid, d.quality) }
+                                        .onSuccess { DownloadService.start(app) }
+                                        .onFailure { say("继续失败：${it.message}") }
                                     version++
                                 }
                             }

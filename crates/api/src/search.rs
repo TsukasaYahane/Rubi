@@ -42,9 +42,32 @@ pub struct HotWord {
     pub raw: Value,
 }
 
+/// An UP found by name. B站 matches aliases too: 「TES」 finds 滔搏电子竞技俱乐部.
+#[derive(Debug, Clone, Default, PartialEq)]
+pub struct UserHit {
+    pub mid: u64,
+    pub name: String,
+    pub face: String,
+    pub sign: String,
+    pub fans: u64,
+    pub videos: u64,
+    pub level: u32,
+    /// The live room when on air, else 0.
+    pub live_room: u64,
+}
+
+/// One page of UPs and whether more follow.
+#[derive(Debug, Clone, Default)]
+pub struct UserHits {
+    pub users: Vec<UserHit>,
+    pub has_more: bool,
+}
+
 #[async_trait]
 pub trait SearchApi: Send + Sync {
     async fn videos(&self, keyword: &str, page: u32, order: SearchOrder) -> Result<Vec<VideoCard>>;
+    /// Page `page` (from 1) of UPs whose name (or alias) fits.
+    async fn users(&self, keyword: &str, page: u32) -> Result<UserHits>;
     /// Trending search words, unfiltered.
     async fn hot_words(&self, limit: u32) -> Result<Vec<HotWord>>;
 }
@@ -144,12 +167,42 @@ pub(crate) fn card_of_search(v: &Value) -> VideoCard {
     }
 }
 
+/// `search/type?search_type=bili_user`.
+pub(crate) fn users_of(d: &Value, page: u32) -> UserHits {
+    let users: Vec<UserHit> = d["result"]
+        .as_array()
+        .map(|l| {
+            l.iter()
+                .map(|u| UserHit {
+                    mid: u64_of(&u["mid"]),
+                    name: strip_markup(u["uname"].as_str().unwrap_or_default()),
+                    face: image_of(&u["upic"]),
+                    sign: str_of(&u["usign"]),
+                    fans: u64_of(&u["fans"]),
+                    videos: u64_of(&u["videos"]),
+                    level: u64_of(&u["level"]) as u32,
+                    live_room: if u64_of(&u["is_live"]) == 1 { u64_of(&u["room_id"]) } else { 0 },
+                })
+                .filter(|u| u.mid > 0)
+                .collect()
+        })
+        .unwrap_or_default();
+    let has_more = !users.is_empty() && u64_of(&d["numPages"]) > u64::from(page);
+    UserHits { users, has_more }
+}
+
 #[async_trait]
 impl SearchApi for WebSearch {
     async fn videos(&self, keyword: &str, page: u32, order: SearchOrder) -> Result<Vec<VideoCard>> {
         let p = params!["search_type" => "video", "keyword" => keyword, "page" => page, "order" => order.param()];
         let d = self.http.get_json(SEARCH_TYPE, p, true).await?;
         Ok(d["result"].as_array().map(|a| a.iter().map(card_of_search).collect()).unwrap_or_default())
+    }
+
+    async fn users(&self, keyword: &str, page: u32) -> Result<UserHits> {
+        let p = params!["search_type" => "bili_user", "keyword" => keyword, "page" => page.max(1)];
+        let d = self.http.get_json(SEARCH_TYPE, p, true).await?;
+        Ok(users_of(&d, page.max(1)))
     }
 
     async fn hot_words(&self, limit: u32) -> Result<Vec<HotWord>> {
@@ -186,6 +239,23 @@ mod tests {
         assert_eq!(c.duration_s, 725);
         assert_eq!(c.tags, vec!["rust", "编程"]);
         assert_eq!(c.zone.unwrap().tid, 36);
+    }
+
+    /// 2026-11-02: 「TES」 finds the club by its alias first.
+    #[test]
+    fn reads_found_users() {
+        let d = serde_json::json!({"numPages": 3, "result": [
+            {"mid": 300634025, "uname": "滔搏电子竞技俱乐部", "upic": "//i0.hdslb.com/f.jpg", "usign": "欢迎关注", "fans": 955303,
+             "videos": 1200, "level": 6, "is_live": 1, "room_id": 22},
+            {"mid": 12524890, "uname": "<em class=\"keyword\">TES</em>首席观察员", "fans": 18352, "is_live": 0, "room_id": 5}]});
+        let p = users_of(&d, 1);
+        assert!(p.has_more);
+        assert_eq!(
+            (p.users[0].name.as_str(), p.users[0].live_room, p.users[0].face.as_str()),
+            ("滔搏电子竞技俱乐部", 22, "https://i0.hdslb.com/f.jpg")
+        );
+        assert_eq!((p.users[1].name.as_str(), p.users[1].live_room), ("TES首席观察员", 0));
+        assert!(!users_of(&d, 3).has_more);
     }
 
     #[test]

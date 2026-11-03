@@ -1,5 +1,10 @@
 package dev.rubi.app.ui
 
+import androidx.compose.ui.graphics.Color
+import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.border
+import androidx.compose.foundation.background
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
@@ -182,7 +187,51 @@ fun SettingsScreen(app: RubiApp, nav: Nav) {
             }
             item {
                 SectionTitle("外观")
-                Meta("强调色 Cobalt · 跟随系统深浅色 · 自定义调色盘为后续版本", Modifier.padding(16.dp))
+                Text("应用图标", fontSize = 16.sp, color = c.fg, modifier = Modifier.padding(start = 16.dp, top = 4.dp))
+                Row(Modifier.padding(horizontal = 16.dp, vertical = 6.dp), horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                    AppIcon.LABELS.forEachIndexed { i, label ->
+                        val on = app.appIcon.value == i
+                        Column(
+                            Modifier.then(if (on) Modifier.border(2.dp, c.accent) else Modifier.border(1.dp, c.line))
+                                .clickable {
+                                    if (!on) {
+                                        app.appIcon.value = i
+                                        app.ui.appIcon = i
+                                    }
+                                }
+                                .padding(10.dp),
+                            horizontalAlignment = Alignment.CenterHorizontally,
+                            verticalArrangement = Arrangement.spacedBy(6.dp),
+                        ) {
+                            RubiLogo(48.dp, i)
+                            Text(if (i == AppIcon.TV) "$label（默认）" else label, fontSize = 12.sp, color = c.fg)
+                        }
+                    }
+                }
+                Meta("关于页和分享卡片立即换；桌面图标在退出 Rubi 后（返回退出或下次启动时）再换，部分桌面要几秒才刷新，有的需要重新把图标放到主屏幕。", Modifier.padding(horizontal = 16.dp))
+                Segmented(listOf("跟随系统", "浅色", "深色"), app.themeMode.value) {
+                    app.themeMode.value = it
+                    app.ui.themeMode = it
+                }
+                Text("动效风格", fontSize = 16.sp, color = c.fg, modifier = Modifier.padding(start = 16.dp, top = 12.dp))
+                Segmented(Motion.STYLES, app.motionStyle.value) {
+                    app.motionStyle.value = it
+                    app.ui.motionStyle = it
+                }
+                Meta(
+                    listOf(
+                        "页面绕边缘翻入，栏目滑入，按住卡片倾斜",
+                        "点卡片以卡片中心为轴旋转放大，封面渐隐露出播放页；切页以画面中心为轴翻转",
+                        "点卡片放大后从左侧翻开，封面渐隐露出播放页，返回时封面从左侧翻回再缩小；切页以屏幕左侧为轴翻页",
+                    )[app.motionStyle.value.coerceIn(0, 2)],
+                    Modifier.padding(horizontal = 16.dp),
+                )
+                Text("动效速度", fontSize = 16.sp, color = c.fg, modifier = Modifier.padding(start = 16.dp, top = 12.dp))
+                Segmented(Motion.LABELS, app.motion.value) {
+                    app.motion.value = it
+                    app.ui.motion = it
+                }
+                Meta("非线性缓动：进入先快后慢；「无动效」立即切换。强调色 Cobalt。", Modifier.padding(16.dp))
             }
         }
     }
@@ -216,5 +265,22 @@ private fun KeywordField(value: String, onChange: (String) -> Unit, modifier: Mo
             cursorBrush = androidx.compose.ui.graphics.SolidColor(c.accent),
             modifier = Modifier.fillMaxWidth(),
         )
+    }
+}
+
+/** A row of square segments, the chosen one filled with accent. */
+@Composable
+private fun Segmented(labels: List<String>, selected: Int, onSelect: (Int) -> Unit) {
+    val c = LocalMetro.current
+    Row(Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 6.dp), horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+        labels.forEachIndexed { i, label ->
+            val on = i == selected
+            Box(
+                Modifier.weight(1f).height(36.dp)
+                    .then(if (on) Modifier.background(c.accent) else Modifier.border(1.dp, c.line))
+                    .clickable { onSelect(i) },
+                contentAlignment = Alignment.Center,
+            ) { Text(label, fontSize = 13.sp, color = if (on) Color.White else c.fg) }
+        }
     }
 }

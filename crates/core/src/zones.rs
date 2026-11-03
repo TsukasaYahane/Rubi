@@ -5,6 +5,28 @@
 //! region ids. Parents and their subs come from the API collection's zone table; v2 ids from the
 //! web channel config (`channelConfigMap` on www.bilibili.com/c/…), both read 2026-11-01.
 
+/// The zones on the home bar after 推荐 / 热门 / 排行: name, v2 main region (for its 推荐 feed)
+/// and old parent tid (for its 热门 ranking). 番剧 / 国创 / 电影 / 电视剧 / 纪录片 get their own
+/// 专区 instead.
+pub const HOME_ZONES: &[(&str, u32, u32)] = &[
+    ("动画", 1005, 1),
+    ("游戏", 1008, 4),
+    ("知识", 1010, 36),
+    ("科技数码", 1012, 188),
+    ("音乐", 1003, 3),
+    ("舞蹈", 1004, 129),
+    ("生活兴趣", 1030, 160),
+    ("美食", 1020, 211),
+    ("动物", 1024, 217),
+    ("体育运动", 1018, 234),
+    ("汽车", 1013, 223),
+    ("时尚美妆", 1014, 155),
+    ("鬼畜", 1007, 119),
+    ("娱乐", 1002, 5),
+    ("资讯", 1009, 202),
+    ("影视", 1001, 181),
+];
+
 /// Old parent tid → v2 main region.
 const PARENTS: &[(u32, u32)] = &[
     (1, 1005),   // 动画 → 动画

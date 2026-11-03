@@ -156,6 +156,26 @@ impl Videos {
         self.playback_part(bvid, cid, qn).await
     }
 
+    /// 投屏: the video (part `cid`, or the first) as one file, at most the free quality, with the
+    /// headers it must be fetched with (the phone relays it to the TV with them).
+    pub async fn cast_file(
+        &self,
+        bvid: &str,
+        cid: Option<u64>,
+        qn: u32,
+    ) -> Result<(rubi_api::SingleFile, Vec<(String, String)>)> {
+        let cid = match cid {
+            Some(c) => c,
+            None => match self.cards.get(bvid).and_then(|c| c.cid) {
+                Some(c) => c,
+                None => self.api.view(bvid).await?.cid,
+            },
+        };
+        let mut f = self.api.single_file(bvid, cid, qn.min(MAX_FREE_QN)).await?;
+        f.accept.retain(|(qn, _)| *qn <= MAX_FREE_QN);
+        Ok((f, self.api.stream_headers()))
+    }
+
     /// Streams of one part (`cid`), e.g. a branch of an interactive video.
     pub async fn playback_part(&self, bvid: &str, cid: u64, qn: u32) -> Result<Playback> {
         let mut url = self.api.playurl(bvid, cid, qn.min(MAX_FREE_QN)).await?;

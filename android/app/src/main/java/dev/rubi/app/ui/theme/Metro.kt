@@ -49,9 +49,10 @@ object MetroType {
     val brand = TextStyle(fontSize = 13.sp, fontFamily = FontFamily.Monospace, fontWeight = FontWeight.SemiBold, letterSpacing = 4.sp)
 }
 
+/** `mode`: 0 follows the system, 1 light, 2 dark. */
 @Composable
-fun MetroTheme(content: @Composable () -> Unit) {
-    val dark = isSystemInDarkTheme()
+fun MetroTheme(mode: Int = 0, content: @Composable () -> Unit) {
+    val dark = isDark(mode)
     val c = if (dark) Dark else Light
     val scheme = if (dark) {
         darkColorScheme(primary = c.accent, background = c.bg, surface = c.bg2, onBackground = c.fg, onSurface = c.fg)
@@ -61,4 +62,12 @@ fun MetroTheme(content: @Composable () -> Unit) {
     CompositionLocalProvider(LocalMetro provides c) {
         MaterialTheme(colorScheme = scheme, content = content)
     }
+}
+
+/** Whether 外观 `mode` comes out dark here and now. */
+@Composable
+fun isDark(mode: Int): Boolean = when (mode) {
+    1 -> false
+    2 -> true
+    else -> isSystemInDarkTheme()
 }

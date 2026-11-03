@@ -22,6 +22,9 @@ class Media(context: Context, core: RubiCore) {
 
     val pip = Pip()
 
+    /** 投屏 to a TV, kept while the remote is closed. */
+    val cast = dev.rubi.app.cast.CastSession()
+
     /**
      * True while the player is fullscreen: the root then paints black edge to edge instead of
      * keeping clear of the camera cutout and system bars.

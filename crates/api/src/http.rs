@@ -128,6 +128,18 @@ impl HttpClient {
         unwrap_envelope(json_body(resp).await?)
     }
 
+    /// POST form like `post_form`, with WBI-signed `query` parameters on the URL (as the web
+    /// private-message sender does).
+    pub async fn post_form_signed(&self, url: &str, query: Params, mut form: Params) -> Result<Value> {
+        let csrf = self.session().csrf().map(str::to_owned).ok_or(ApiError::NotLoggedIn)?;
+        form.push(("csrf".into(), csrf));
+        let mixin = self.wbi_keys().await?.mixin_key();
+        let query = wbi::sign(&query, &mixin, rubi_model::now_secs());
+        self.limiter.acquire().await;
+        let resp = self.decorate(self.client.post(url)).query(&query).form(&form).send().await?;
+        unwrap_envelope(json_body(resp).await?)
+    }
+
     async fn send_get(&self, url: &str, params: Params, sign: bool) -> Result<reqwest::Response> {
         let params = if sign {
             let mixin = self.wbi_keys().await?.mixin_key();

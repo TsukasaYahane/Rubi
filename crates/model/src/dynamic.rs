@@ -40,6 +40,13 @@ pub struct Dynamic {
     pub link: String,
     /// The reposted dynamic (one level).
     pub orig: Option<Box<Dynamic>>,
+    /// Its comment area (`type`, `oid`); kind 0 when it has none.
+    #[serde(default)]
+    pub comment_kind: u32,
+    #[serde(default)]
+    pub comment_oid: u64,
+    #[serde(default)]
+    pub comment_count: u64,
 }
 
 /// Someone the user follows, from the full following list.

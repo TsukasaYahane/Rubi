@@ -45,6 +45,22 @@ const MIGRATIONS: &[&str] = &[
         created_at INTEGER NOT NULL,
         body TEXT NOT NULL
      );",
+    // Several named play lists; the old single list becomes 默认 (id 1).
+    "CREATE TABLE playlists(
+        id INTEGER PRIMARY KEY,
+        name TEXT NOT NULL UNIQUE,
+        pos INTEGER NOT NULL
+     );
+     INSERT INTO playlists(id, name, pos) VALUES (1, '默认', 0);
+     CREATE TABLE playlist_items(
+        list_id INTEGER NOT NULL,
+        pos INTEGER NOT NULL,
+        bvid TEXT NOT NULL,
+        card TEXT NOT NULL,
+        PRIMARY KEY(list_id, bvid)
+     );
+     INSERT INTO playlist_items(list_id, pos, bvid, card) SELECT 1, pos, bvid, card FROM playlist;
+     DROP TABLE playlist;",
 ];
 
 pub fn migrate(conn: &Connection) -> rusqlite::Result<()> {

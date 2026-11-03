@@ -100,7 +100,14 @@ mod tests {
         async fn like(&self, _: CommentArea, _: u64, _: bool) -> rubi_api::Result<()> {
             Ok(())
         }
-        async fn reply(&self, _: CommentArea, _: u64, _: u64, _: &str) -> rubi_api::Result<Comment> {
+        async fn reply(
+            &self,
+            _: CommentArea,
+            _: u64,
+            _: u64,
+            _: &str,
+            _: &[(String, u64)],
+        ) -> rubi_api::Result<Comment> {
             Ok(Comment::default())
         }
     }

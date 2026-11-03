@@ -83,6 +83,16 @@ pub fn flatten_thread(root: &Comment, replies: &[Comment], limit: usize) -> (Vec
     (rows, hidden)
 }
 
+/// B站 starts the text of a reply to a reply with "回复 @name :"; the thread view shows who is
+/// answered on its own, so this drops that lead-in.
+pub fn without_reply_prefix(text: &str) -> &str {
+    let Some(rest) = text.strip_prefix("回复 @") else { return text };
+    match rest.find([':', '：']) {
+        Some(i) => rest[i..].trim_start_matches([':', '：']).trim_start(),
+        None => text,
+    }
+}
+
 fn walk<'a>(parent: u64, depth: u32, replies: &'a [Comment], out: &mut Vec<(&'a Comment, u32)>) {
     let mut kids: Vec<&Comment> = replies.iter().filter(|c| c.parent == parent).collect();
     kids.sort_by_key(|c| c.ctime);
@@ -95,6 +105,13 @@ fn walk<'a>(parent: u64, depth: u32, replies: &'a [Comment], out: &mut Vec<(&'a 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn reply_prefix_is_dropped_once() {
+        assert_eq!(without_reply_prefix("回复 @某人 :好的"), "好的");
+        assert_eq!(without_reply_prefix("回复 @某人：好的"), "好的");
+        assert_eq!(without_reply_prefix("好的 回复 @某人 :"), "好的 回复 @某人 :");
+    }
 
     fn c(rpid: u64, parent: u64, ctime: i64) -> Comment {
         Comment { rpid, root: 1, parent, ctime, name: format!("u{rpid}"), ..Default::default() }

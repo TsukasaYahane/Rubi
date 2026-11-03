@@ -30,6 +30,13 @@ impl RubiCore {
         Ok(msgs.into_iter().map(|m| FfiChatMessage::of(m, talker_mid)).collect())
     }
 
+    /// Sends video `bvid` to `talker_mid`: as B站's share card when the server takes it, else
+    /// as its title and link. True when it went as a card.
+    pub async fn share_video_to(&self, talker_mid: u64, bvid: String) -> Res<bool> {
+        let card = self.videos.card(&bvid).await?;
+        Ok(self.messages.share_video(talker_mid, &card).await?)
+    }
+
     pub async fn send_message(&self, talker_mid: u64, text: String) -> Res<()> {
         Ok(self.messages.send(talker_mid, &text).await?)
     }

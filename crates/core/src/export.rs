@@ -62,7 +62,7 @@ pub fn export_bundle<W: Write + Seek>(
     settings: &Settings,
     profile: &InterestProfile,
     history: &[FeedbackEvent],
-    playlist: &[VideoCard],
+    playlists: &[(String, Vec<VideoCard>)],
     opts: ExportOptions,
 ) -> Result<()> {
     let mut zip = zip::ZipWriter::new(out);
@@ -91,11 +91,16 @@ pub fn export_bundle<W: Write + Seek>(
     };
     zip.start_file("settings.json", o)?;
     zip.write_all(&serde_json::to_vec_pretty(&sf)?)?;
-    if !playlist.is_empty() {
-        // Without the raw API JSON: the list needs the card, not what it was parsed from.
-        let slim: Vec<VideoCard> =
-            playlist.iter().map(|c| VideoCard { raw: serde_json::Value::Null, ..c.clone() }).collect();
-        zip.start_file("playlist.json", o)?;
+    if playlists.iter().any(|(_, items)| !items.is_empty()) {
+        // Without the raw API JSON: the lists need the cards, not what they were parsed from.
+        let slim: Vec<NamedList> = playlists
+            .iter()
+            .map(|(name, items)| NamedList {
+                name: name.clone(),
+                items: items.iter().map(|c| VideoCard { raw: serde_json::Value::Null, ..c.clone() }).collect(),
+            })
+            .collect();
+        zip.start_file("playlists.json", o)?;
         zip.write_all(&serde_json::to_vec_pretty(&slim)?)?;
     }
     zip.start_file("profile.json", o)?;
@@ -115,8 +120,15 @@ pub struct Imported {
     pub settings: Settings,
     pub profile: InterestProfile,
     pub history: Vec<FeedbackEvent>,
-    /// Empty for exports made before the play list existed.
-    pub playlist: Vec<VideoCard>,
+    /// Every play list as (name, items); empty for exports made before play lists existed.
+    pub playlists: Vec<(String, Vec<VideoCard>)>,
+}
+
+/// A play list in `playlists.json`.
+#[derive(Serialize, Deserialize)]
+struct NamedList {
+    name: String,
+    items: Vec<VideoCard>,
 }
 
 pub fn import_bundle<R: Read + Seek>(input: R) -> Result<Imported> {
@@ -163,9 +175,16 @@ pub fn import_bundle<R: Read + Seek>(input: R) -> Result<Imported> {
         })
         .transpose()?
         .unwrap_or_default();
-    let playlist: Vec<VideoCard> =
-        read("playlist.json")?.map(|p| serde_json::from_str(&p)).transpose()?.unwrap_or_default();
-    Ok(Imported { settings, profile, history, playlist })
+    // Exports from before named lists hold one list, `playlist.json`: it becomes 默认.
+    let playlists = match read("playlists.json")? {
+        Some(p) => serde_json::from_str::<Vec<NamedList>>(&p)?.into_iter().map(|l| (l.name, l.items)).collect(),
+        None => read("playlist.json")?
+            .map(|p| serde_json::from_str::<Vec<VideoCard>>(&p))
+            .transpose()?
+            .map(|items| vec![(crate::playlist::DEFAULT_NAME.to_owned(), items)])
+            .unwrap_or_default(),
+    };
+    Ok(Imported { settings, profile, history, playlists })
 }
 
 #[cfg(test)]
@@ -182,8 +201,9 @@ mod tests {
         let history = vec![FeedbackEvent { signal: Signal::Like, item: None, at: 1 }];
 
         let mut buf = Cursor::new(Vec::new());
-        let playlist = vec![VideoCard { bvid: "BV1".into(), raw: serde_json::json!({"big": 1}), ..Default::default() }];
-        export_bundle(&mut buf, &settings, &profile, &history, &playlist, ExportOptions { include_history: true })
+        let card = VideoCard { bvid: "BV1".into(), raw: serde_json::json!({"big": 1}), ..Default::default() };
+        let lists = vec![("默认".to_owned(), vec![card]), ("通勤".to_owned(), Vec::new())];
+        export_bundle(&mut buf, &settings, &profile, &history, &lists, ExportOptions { include_history: true })
             .unwrap();
         let bytes = buf.into_inner();
         let text = String::from_utf8_lossy(&bytes);
@@ -193,8 +213,8 @@ mod tests {
         assert_eq!(back.settings.rules.up_blacklist, vec![42]);
         assert_eq!(back.profile.half_life_days, 14.0);
         assert_eq!(back.history, history);
-        assert_eq!(back.playlist.len(), 1);
-        assert_eq!(back.playlist[0].bvid, "BV1");
-        assert!(back.playlist[0].raw.is_null(), "raw API JSON is not exported");
+        assert_eq!(back.playlists.len(), 2);
+        assert_eq!((back.playlists[1].0.as_str(), back.playlists[0].1[0].bvid.as_str()), ("通勤", "BV1"));
+        assert!(back.playlists[0].1[0].raw.is_null(), "raw API JSON is not exported");
     }
 }

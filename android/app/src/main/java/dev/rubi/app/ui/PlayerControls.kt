@@ -1,5 +1,9 @@
 package dev.rubi.app.ui
 
+import kotlinx.coroutines.withTimeoutOrNull
+import kotlinx.coroutines.delay
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.foundation.gestures.waitForUpOrCancellation
 import android.media.AudioManager
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.rememberScrollState
@@ -101,27 +105,27 @@ private const val SEEK_SPAN_MS = 90_000L
 
 /**
  * Fullscreen touch layer over the video. What a touch does is decided by what happens first:
- * - it lifts before moving: a tap, showing / hiding the player controls;
+ * - it lifts before moving: a tap, showing / hiding the player controls; two taps in quick
+ *   succession play or pause instead;
  * - it stays put for the long-press time: a hold, playing at `speed` until released;
  * - it moves first: a drag. Mostly sideways it scrubs (left back, right forward, applied on
- *   release); mostly up / down it sets the window brightness on the left half (restored when
- *   fullscreen ends) or the media volume on the right half.
+ *   release); mostly up / down it sets the window brightness on the left half or the media
+ *   volume on the right half; [restore] puts both back when the video page closes.
  * A badge shows the value while it lasts.
  */
 @Composable
-fun FullscreenGestures(player: Player, view: PlayerView?, speed: Float) {
+fun FullscreenGestures(player: Player, view: PlayerView?, speed: Float, restore: GestureRestore) {
     val ctx = LocalContext.current
     val window = remember(ctx) { ctx.activity()?.window }
     val audio = remember(ctx) { ctx.getSystemService(AudioManager::class.java) }
     var hold by remember { mutableStateOf(Hold.None) }
     var badge by remember { mutableStateOf("") }
-
-    // Brightness is changed for this window only and handed back when fullscreen ends.
-    DisposableEffect(window) {
-        onDispose {
-            window?.let { w ->
-                w.attributes = w.attributes.apply { screenBrightness = WindowManager.LayoutParams.BRIGHTNESS_OVERRIDE_NONE }
-            }
+    // 暂停 / 继续 after a double tap, shown for a moment.
+    var flash by remember { mutableStateOf("") }
+    LaunchedEffect(flash) {
+        if (flash.isNotEmpty()) {
+            delay(FLASH_MS)
+            flash = ""
         }
     }
 
@@ -150,8 +154,19 @@ fun FullscreenGestures(player: Player, view: PlayerView?, speed: Float) {
                             player.setPlaybackSpeed(before)
                         }
                         slop == null -> {
-                            // Lifted before moving: a tap.
-                            view?.let { v -> if (v.isControllerFullyVisible) v.hideController() else v.showController() }
+                            // Lifted before moving: a tap. Another one soon after makes a double
+                            // tap, which plays or pauses; a single tap shows the controls.
+                            val second = withTimeoutOrNull(viewConfiguration.doubleTapTimeoutMillis) {
+                                awaitFirstDown(requireUnconsumed = false)
+                            }
+                            if (second != null) {
+                                val play = !player.playWhenReady
+                                if (play) player.play() else player.pause()
+                                flash = if (play) "继续播放" else "已暂停"
+                                waitForUpOrCancellation()
+                            } else {
+                                view?.let { v -> if (v.isControllerFullyVisible) v.hideController() else v.showController() }
+                            }
                         }
                         else -> {
                             val first = slop.position - down.position
@@ -186,6 +201,7 @@ fun FullscreenGestures(player: Player, view: PlayerView?, speed: Float) {
                                     Hold.Volume -> {
                                         value = (value - stepY / heightPx).coerceIn(0f, 1f)
                                         val max = audio.getStreamMaxVolume(AudioManager.STREAM_MUSIC)
+                                        if (restore.volumeBefore == null) restore.volumeBefore = audio.getStreamVolume(AudioManager.STREAM_MUSIC)
                                         audio.setStreamVolume(AudioManager.STREAM_MUSIC, (value * max).toInt(), 0)
                                         badge = "音量 ${(value * 100).toInt()}%"
                                     }
@@ -204,9 +220,9 @@ fun FullscreenGestures(player: Player, view: PlayerView?, speed: Float) {
                 }
             },
         )
-        if (hold != Hold.None) {
+        if (hold != Hold.None || flash.isNotEmpty()) {
             Text(
-                badge,
+                if (hold != Hold.None) badge else flash,
                 fontSize = 16.sp,
                 fontWeight = FontWeight.SemiBold,
                 color = Color.White,
@@ -216,14 +232,43 @@ fun FullscreenGestures(player: Player, view: PlayerView?, speed: Float) {
     }
 }
 
+/** How long 暂停 / 继续 stays up after a double tap. */
+private const val FLASH_MS = 800L
+
 /** `mm:ss`, or `h:mm:ss` from an hour. */
 private fun clock(ms: Long): String {
     val s = ms.coerceAtLeast(0L) / 1000
     return if (s >= 3600) "%d:%02d:%02d".format(s / 3600, s / 60 % 60, s % 60) else "%02d:%02d".format(s / 60, s % 60)
 }
 
+/**
+ * What the fullscreen gestures changed: the window brightness and the media volume. Lives as
+ * long as the video page, not the gesture layer (which leaves whenever the controls show), and
+ * puts both back when the page closes.
+ */
+class GestureRestore {
+    /** The media volume before the first drag changed it. */
+    var volumeBefore: Int? = null
+}
+
+@Composable
+fun rememberGestureRestore(): GestureRestore {
+    val ctx = LocalContext.current
+    val restore = remember { GestureRestore() }
+    DisposableEffect(ctx) {
+        onDispose {
+            ctx.activity()?.window?.let { w ->
+                w.attributes = w.attributes.apply { screenBrightness = WindowManager.LayoutParams.BRIGHTNESS_OVERRIDE_NONE }
+            }
+            restore.volumeBefore?.let { ctx.getSystemService(AudioManager::class.java).setStreamVolume(AudioManager.STREAM_MUSIC, it, 0) }
+            restore.volumeBefore = null
+        }
+    }
+    return restore
+}
+
 /** The window's own brightness, or the system's when the window does not override it. */
-private fun currentBrightness(ctx: android.content.Context, window: android.view.Window?): Float {
+internal fun currentBrightness(ctx: android.content.Context, window: android.view.Window?): Float {
     val own = window?.attributes?.screenBrightness ?: -1f
     if (own >= 0f) return own
     return runCatching { Settings.System.getInt(ctx.contentResolver, Settings.System.SCREEN_BRIGHTNESS) / 255f }.getOrDefault(0.5f)

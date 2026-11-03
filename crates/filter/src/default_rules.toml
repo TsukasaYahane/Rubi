@@ -23,6 +23,18 @@ notice = true
 # ---------- 推荐流 / 列表卡片 ----------
 
 [[field_rules]]
+id = "promotion.bihuo_card"
+name = "必火推广 · 推荐流"
+category = "promotion"
+# 2026-11-03 抓包确认（www.bilibili.com 首页推荐 feed/rcmd，卡片右下角小火箭）：必火推广不是普通视频卡，
+# 而是装着真视频的广告位：goto = "ad"，business_info.card_type = 82、creative_type = 1，
+# business_info.archive 是被推广的视频，business_mark.type = 4 且 img_url 为火箭图标
+# （bfs/sycp/mng/202203/3621990414ef….png）。普通广告卡 card_type = 0、creative_type = 2、
+# business_mark.type = 2（文字「广告」）。放在 ad.goto 前，记录里写作必火推广而不是广告。
+when = { op = "any", of = [{ op = "eq", path = "business_info.card_type", value = 82 }, { op = "eq", path = "business_info.business_mark.type", value = 4 }, { op = "exists", path = "business_info.archive" }] }
+verified = true
+
+[[field_rules]]
 id = "ad.goto"
 name = "广告卡片 · goto"
 category = "ad"
@@ -48,7 +60,10 @@ when = { op = "any", of = [{ op = "contains", path = "card_goto", text = "ad" },
 id = "promotion.bihuo"
 name = "必火推广"
 category = "promotion"
-when = { op = "any", of = [{ op = "eq", path = "is_ad", value = true }, { op = "exists", path = "ad_info" }, { op = "exists", path = "creative_id" }, { op = "contains", path = "rcmd_reason.content", text = "推广" }] }
+# 2026-11-02：用户在官方 App 见到 BV1RNJ16NEJX 带「必火推广」角标；同一视频的网页接口（view、view/detail、
+# 相关推荐、搜索 search/type、视频页）都没有任何标记（spread_id = 0、biz_data / corner / rec_reason 为空），
+# 角标只在 App 接口里。以下覆盖网页推荐的推荐理由与搜索结果的角标 / 推荐理由，网页一旦标出即可拦下。
+when = { op = "any", of = [{ op = "eq", path = "is_ad", value = true }, { op = "exists", path = "ad_info" }, { op = "exists", path = "creative_id" }, { op = "contains", path = "rcmd_reason.content", text = "推广" }, { op = "contains", path = "rcmd_reason.content", text = "必火" }, { op = "contains", path = "rec_reason", text = "推广" }, { op = "contains", path = "rec_reason", text = "必火" }, { op = "contains", path = "corner", text = "推广" }, { op = "contains", path = "corner", text = "必火" }] }
 
 [[field_rules]]
 id = "promotion.goto_misc"

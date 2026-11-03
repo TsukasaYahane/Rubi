@@ -34,13 +34,18 @@ impl Preferences {
     pub fn export_to(&self, path: &str, include_history: bool) -> Result<()> {
         let history = if include_history { self.feed.history()? } else { Vec::new() };
         let file = File::create(path)?;
-        let playlist = self.playlist.items()?;
+        let playlists = self
+            .playlist
+            .lists()?
+            .into_iter()
+            .map(|l| Ok((l.name, self.playlist.items(l.id)?)))
+            .collect::<Result<Vec<_>>>()?;
         export_bundle(
             file,
             &self.feed.settings(),
             &self.feed.profile(),
             &history,
-            &playlist,
+            &playlists,
             ExportOptions { include_history },
         )
     }
@@ -54,8 +59,8 @@ impl Preferences {
         for ev in imported.history {
             self.feed.record(ev)?;
         }
-        if !imported.playlist.is_empty() {
-            self.playlist.replace(&imported.playlist)?;
+        if !imported.playlists.is_empty() {
+            self.playlist.replace_all(&imported.playlists)?;
         }
         Ok(())
     }

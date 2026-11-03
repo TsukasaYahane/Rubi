@@ -6,7 +6,7 @@ use std::sync::{Arc, Mutex, RwLock};
 use std::time::{Duration, Instant};
 
 use rubi_filter::{Category, RuleSet, WatchedLookup};
-use rubi_model::{FeedbackEvent, Signal, SourceKind, VideoCard, now_secs};
+use rubi_model::{DislikeReason, FeedbackEvent, ItemRef, Signal, SourceKind, VideoCard, now_secs};
 use rubi_recommend::{
     Candidate, FeedEngine, InterestProfile, Ranked, ScoreBreakdown, ScoringContext, Source, SourceWeights, Weights,
     default_factors,
@@ -20,6 +20,10 @@ use crate::sources::{PreferredZoneSource, RelatedSource};
 const KEY_SETTINGS: &str = "settings";
 const KEY_PROFILE: &str = "profile";
 const KEY_FOLLOWED: &str = "followed";
+/// Videos marked 不感兴趣: never offered again.
+const KEY_DISLIKED: &str = "disliked";
+/// How many 不感兴趣 videos are remembered (oldest forgotten first).
+const MAX_DISLIKED: usize = 5000;
 
 /// Everything the store has to offer the feed.
 pub trait AppStore:
@@ -159,6 +163,8 @@ pub struct FeedService<S: AppStore> {
     /// Cards handed out by `next_page` since the last `new_session`: the visible list, which
     /// later pages must not repeat.
     shown: Mutex<HashSet<String>>,
+    /// 不感兴趣 videos, oldest first; kept out of the pool for good.
+    disliked: Mutex<Vec<String>>,
 }
 
 fn category_name(c: Category) -> String {
@@ -183,6 +189,7 @@ impl<S: AppStore> FeedService<S> {
         let mut settings: Settings = store.get_json(KEY_SETTINGS)?.unwrap_or_default();
         settings.rules.merge_builtin();
         let profile = store.get_json(KEY_PROFILE)?.unwrap_or_default();
+        let disliked = store.get_json(KEY_DISLIKED)?.unwrap_or_default();
         Ok(Self {
             store,
             sources,
@@ -191,6 +198,7 @@ impl<S: AppStore> FeedService<S> {
             profile: Mutex::new(profile),
             last_fetch: Mutex::new(HashMap::new()),
             shown: Mutex::new(HashSet::new()),
+            disliked: Mutex::new(disliked),
         })
     }
 
@@ -260,7 +268,12 @@ impl<S: AppStore> FeedService<S> {
             self.last_fetch.lock().unwrap_or_else(|e| e.into_inner()).insert(kind, Instant::now());
             report.fetched.push((kind, cards.len()));
             let now = now_secs();
+            let disliked = self.disliked_set();
             for mut card in cards {
+                if disliked.contains(&card.bvid) {
+                    report.blocked += 1;
+                    continue;
+                }
                 card.add_source(kind);
                 let decision = pipeline.judge(&card);
                 match decision.blocked_by {
@@ -314,11 +327,12 @@ impl<S: AppStore> FeedService<S> {
         // Re-judge: rules may have changed and the user may have watched some since.
         let pipeline = settings.rules.card_pipeline(Some(self.watched()), now_secs)?;
         let now = now_secs();
+        let disliked = self.disliked_set();
         let candidates: Vec<Candidate> = self
             .store
             .fresh_candidates(now)?
             .into_iter()
-            .filter(|(card, _)| !exclude.contains(&card.bvid))
+            .filter(|(card, _)| !exclude.contains(&card.bvid) && !disliked.contains(&card.bvid))
             .filter_map(|(card, penalty)| {
                 let d = pipeline.judge(&card);
                 (!d.is_blocked()).then(|| Candidate { penalty: penalty.min(d.multiplier), card })
@@ -341,6 +355,7 @@ impl<S: AppStore> FeedService<S> {
                     self.store.record_click(&item.bvid)?;
                     self.store.mark_watched(&item.bvid, ev.at)?;
                 }
+                Signal::Dislike { ref reason } => self.dislike(item, reason, ev.at)?,
                 Signal::Follow => {
                     let mut f: Vec<u64> = self.followed()?.into_iter().collect();
                     f.push(item.up_mid);
@@ -357,6 +372,40 @@ impl<S: AppStore> FeedService<S> {
             p.clone()
         };
         Ok(self.store.put_json(KEY_PROFILE, &profile)?)
+    }
+
+    /// Keeps a 不感兴趣 video out of the feed for good and lists it under 被过滤内容.
+    fn dislike(&self, item: &ItemRef, reason: &DislikeReason, at: i64) -> Result<()> {
+        let list = {
+            let mut d = self.disliked.lock().unwrap_or_else(|e| e.into_inner());
+            if d.contains(&item.bvid) {
+                return Ok(());
+            }
+            d.push(item.bvid.clone());
+            let over = d.len().saturating_sub(MAX_DISLIKED);
+            d.drain(..over);
+            d.clone()
+        };
+        self.store.put_json(KEY_DISLIKED, &list)?;
+        let why = match reason {
+            DislikeReason::Up => "不想看这个 UP".to_owned(),
+            DislikeReason::Zone => "不想看这个分区".to_owned(),
+            DislikeReason::Tag(t) if !t.is_empty() => format!("不想看「{t}」"),
+            DislikeReason::Tag(_) => "不想看这类标签".to_owned(),
+            DislikeReason::Title => "标题不感兴趣".to_owned(),
+        };
+        Ok(self.store.append_filter_log(&[FilterLogEntry {
+            at,
+            rule_id: "user.dislike".into(),
+            category: "dislike".into(),
+            title: if item.title.is_empty() { item.bvid.clone() } else { item.title.clone() },
+            source: "home".into(),
+            reason: why,
+        }])?)
+    }
+
+    fn disliked_set(&self) -> HashSet<String> {
+        self.disliked.lock().unwrap_or_else(|e| e.into_inner()).iter().cloned().collect()
     }
 
     /// Every recorded feedback event, oldest first (for export).
@@ -483,7 +532,11 @@ mod tests {
         .unwrap();
         let page = svc.next_page(10).unwrap();
         let ids: Vec<&str> = page.iter().map(|r| r.card.bvid.as_str()).collect();
-        assert_eq!(ids, vec!["c", "b"], "a is watched, b is disliked so it ranks last");
+        assert_eq!(ids, vec!["c"], "a is watched, b is disliked so it never comes back");
+        svc.new_session();
+        svc.refresh(10).await.unwrap();
+        assert!(svc.next_page(10).unwrap().iter().all(|r| r.card.bvid != "b"), "not even after a refresh");
+        assert_eq!(svc.filter_log(5).unwrap()[0].rule_id, "user.dislike");
         assert!(svc.explain("c").unwrap().is_some());
     }
 }

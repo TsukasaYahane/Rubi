@@ -1,0 +1,21 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Rubi 图标（方案 B）：白色直角色块拼出的 R，放在自适应图标的安全区内。 -->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="108dp"
+    android:height="108dp"
+    android:viewportWidth="108"
+    android:viewportHeight="108">
+    <group
+        android:pivotX="51"
+        android:pivotY="50"
+        android:scaleX="0.8"
+        android:scaleY="0.8"
+        android:translateX="3"
+        android:translateY="4">
+        <path android:fillColor="#FFFFFF" android:pathData="M28,22h12v56h-12z" />
+        <path android:fillColor="#FFFFFF" android:pathData="M28,22h40v12h-40z" />
+        <path android:fillColor="#FFFFFF" android:pathData="M56,22h12v32h-12z" />
+        <path android:fillColor="#FFFFFF" android:pathData="M28,44h40v10h-40z" />
+        <path android:fillColor="#FFFFFF" android:pathData="M44,54L58,54L74,78L60,78z" />
+    </group>
+</vector>

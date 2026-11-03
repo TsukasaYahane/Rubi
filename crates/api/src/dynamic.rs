@@ -13,6 +13,7 @@ use crate::parse::{card_of_dynamic, https_image, image_of, str_of, u64_of};
 
 const PORTAL: &str = "https://api.bilibili.com/x/polymer/web-dynamic/v1/portal";
 const FEED: &str = "https://api.bilibili.com/x/polymer/web-dynamic/v1/feed/all";
+const SPACE_SEARCH: &str = "https://api.bilibili.com/x/polymer/web-dynamic/v1/feed/space/search";
 
 #[async_trait]
 pub trait DynamicApi: Send + Sync {
@@ -22,6 +23,9 @@ pub trait DynamicApi: Send + Sync {
     async fn up_dynamics(&self, mid: u64, offset: Option<&str>) -> Result<(Vec<Dynamic>, Option<String>)>;
     /// Every followed UP's posts, newest first; pass the returned offset back for older ones.
     async fn followed_posts(&self, offset: Option<&str>) -> Result<(Vec<Dynamic>, Option<String>)>;
+    /// Page `page` (from 1) of an UP's posts matching `keyword` (videos, 专栏 and posts alike),
+    /// and whether more follow.
+    async fn search_up(&self, mid: u64, keyword: &str, page: u32) -> Result<(Vec<Dynamic>, bool)>;
 }
 
 pub struct WebDynamic {
@@ -50,6 +54,9 @@ pub(crate) fn dynamic_of(item: &Value) -> Dynamic {
         author_face: image_of(&author["face"]),
         published_at: u64_of(&author["pub_ts"]) as i64,
         text: str_of(&md["desc"]["text"]),
+        comment_kind: u64_of(&item["basic"]["comment_type"]) as u32,
+        comment_oid: u64_of(&item["basic"]["comment_id_str"]),
+        comment_count: u64_of(&item["modules"]["module_stat"]["comment"]["count"]),
         ..Default::default()
     };
     d.kind = match str_of(&item["type"]).as_str() {
@@ -135,6 +142,15 @@ impl DynamicApi for WebDynamic {
     async fn followed_posts(&self, offset: Option<&str>) -> Result<(Vec<Dynamic>, Option<String>)> {
         self.feed(params!["type" => "all", "timezone_offset" => -480], offset).await
     }
+
+    async fn search_up(&self, mid: u64, keyword: &str, page: u32) -> Result<(Vec<Dynamic>, bool)> {
+        let d = self
+            .http
+            .get_json(SPACE_SEARCH, params!["host_mid" => mid, "keyword" => keyword, "page" => page.max(1)], false)
+            .await?;
+        let items = d["items"].as_array().map(|a| a.iter().map(dynamic_of).collect()).unwrap_or_default();
+        Ok((items, d["has_more"].as_bool().unwrap_or(false)))
+    }
 }
 
 impl WebDynamic {
@@ -172,6 +188,10 @@ mod tests {
             "module_dynamic": {"desc": {"text": "转发说两句"}, "major": null}}, "orig": draw});
         let f = dynamic_of(&forward);
         assert_eq!(f.kind, DynamicKind::Forward);
+        let commented = json!({"id_str": "5", "basic": {"comment_type": 17, "comment_id_str": "1265"},
+            "modules": {"module_author": author, "module_dynamic": {}, "module_stat": {"comment": {"count": 12}}}});
+        let c = dynamic_of(&commented);
+        assert_eq!((c.comment_kind, c.comment_oid, c.comment_count), (17, 1265, 12));
         assert_eq!(f.orig.as_ref().unwrap().kind, DynamicKind::Draw);
 
         let video = json!({"id_str": "3", "type": "DYNAMIC_TYPE_AV", "modules": {"module_author": author, "module_dynamic": {"desc": null,

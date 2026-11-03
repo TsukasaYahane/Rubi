@@ -11,10 +11,13 @@ mod error;
 mod following;
 mod home;
 mod library;
+mod live;
 mod messages;
+mod pgc;
 mod player;
 mod playlist;
 mod reading;
+mod seasons;
 mod settings;
 mod space;
 mod types;
@@ -24,11 +27,12 @@ use std::sync::Arc;
 
 use rubi_api::Session;
 use rubi_core::{
-    Account, Actions, Comments, Danmakus, Discover, Downloads, Emotes, Following, Home, Library, Messages, Playlists,
-    Preferences, Reading, Services, Space, Stein, Videos,
+    Account, Actions, Comments, Danmakus, Discover, Downloads, Emotes, Esports, Following, Home, Library, Live,
+    Messages, Pgc, Playlists, Preferences, Reading, Seasons, Services, Space, Stein, Videos,
 };
 
 pub use error::RubiError;
+pub use live::FfiLiveChannel;
 pub use player::{FfiDanmakuSession, FfiStein};
 pub use types::*;
 
@@ -55,6 +59,10 @@ pub struct RubiCore {
     preferences: Preferences,
     reading: Reading,
     downloads: Downloads,
+    live: Live,
+    esports: Esports,
+    pgc: Pgc,
+    seasons: Seasons,
 }
 
 #[uniffi::export]
@@ -82,6 +90,10 @@ impl RubiCore {
             emotes,
             reading,
             downloads,
+            live,
+            esports,
+            pgc,
+            seasons,
         } = Services::open(PathBuf::from(data_dir), session)?;
         Ok(Arc::new(Self {
             account,
@@ -101,6 +113,10 @@ impl RubiCore {
             preferences,
             reading,
             downloads,
+            live,
+            esports,
+            pgc,
+            seasons,
         }))
     }
 }

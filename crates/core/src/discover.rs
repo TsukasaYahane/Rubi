@@ -3,7 +3,7 @@
 
 use std::sync::Arc;
 
-use rubi_api::{FeedApi, HotWord, SearchApi, SearchOrder};
+use rubi_api::{FeedApi, HotWord, SearchApi, SearchOrder, UserHits};
 use rubi_model::{FeedbackEvent, Signal, VideoCard, now_secs};
 
 use crate::error::Result;
@@ -40,6 +40,18 @@ impl Discover {
         self.shown(cards).map(|(kept, _)| kept)
     }
 
+    /// A zone's 推荐 (v2 main `region`), page from 1, through the rule table.
+    pub async fn zone_feed(&self, region: u32, page: u32) -> Result<Vec<VideoCard>> {
+        let cards = self.feed.region_feed(region, page.max(1), 20).await?;
+        self.shown(cards).map(|(kept, _)| kept)
+    }
+
+    /// A zone's 热门: its ranking (old parent tid `rid`), through the rule table.
+    pub async fn zone_ranking(&self, rid: u32) -> Result<Vec<VideoCard>> {
+        let cards = self.feed.ranking(rid).await?;
+        self.shown(cards).map(|(kept, _)| kept)
+    }
+
     pub async fn related(&self, bvid: &str) -> Result<Vec<VideoCard>> {
         let cards = self.feed.related(bvid).await?;
         let (kept, _) = self.shown(cards)?;
@@ -56,6 +68,14 @@ impl Discover {
             at: now_secs(),
         })?;
         Ok(found)
+    }
+
+    /// UPs whose name or alias fits, without those the rule table blocks.
+    pub async fn search_users(&self, keyword: &str, page: u32) -> Result<UserHits> {
+        let mut hits = self.search.users(keyword, page.max(1)).await?;
+        let blocked = self.rules.rules().up_blacklist;
+        hits.users.retain(|u| !blocked.contains(&u.mid));
+        Ok(hits)
     }
 
     /// 热搜 without the promoted ones; also how many were dropped.

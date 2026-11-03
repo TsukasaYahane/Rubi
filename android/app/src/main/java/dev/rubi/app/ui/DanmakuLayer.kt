@@ -1,5 +1,6 @@
 package dev.rubi.app.ui
 
+import dev.rubi.app.LocalFrozen
 import dev.rubi.app.playback.LocalMedia
 import android.graphics.Paint
 import androidx.compose.foundation.Canvas
@@ -133,7 +134,9 @@ fun DanmakuLayer(
 
         val player = source ?: LocalMedia.current.player.get()
         var pos by remember { mutableLongStateOf(0L) }
-        LaunchedEffect(player) { while (true) withFrameMillis { pos = player.currentPosition } }
+        // Every frame while awake; frozen (节电) the danmaku hold still.
+        val frozen = LocalFrozen.current
+        LaunchedEffect(player, frozen) { if (!frozen) while (true) withFrameMillis { pos = player.currentPosition } }
 
         val measurer = rememberTextMeasurer(cacheSize = 256)
         val base = remember(fontSp) { TextStyle(fontSize = fontSp.sp, shadow = Shadow(Color.Black, blurRadius = 3f)) }

@@ -40,6 +40,26 @@ impl RubiCore {
         Ok(self.videos.resolve(video).await?)
     }
 
+    /// The video a piece of text links to (BV / av / b23.tv short link), as a card to offer;
+    /// `None` when the text names no video or it cannot be found.
+    pub async fn video_in_text(&self, text: String) -> Option<FfiVideoCard> {
+        let found = rubi_model::find_video_ref(&text)?;
+        let bvid = self.videos.resolve(found).await.ok()?;
+        self.videos.card(&bvid).await.ok().map(|c| FfiVideoCard::of(&c, None))
+    }
+
+    /// 投屏: the video as one MP4 (video and sound together), and the headers to fetch it with.
+    pub async fn cast_file(&self, bvid: String, cid: Option<u64>, qn: u32) -> Res<FfiCastFile> {
+        let (f, headers) = self.videos.cast_file(&bvid, cid, qn).await?;
+        Ok(FfiCastFile {
+            urls: std::iter::once(f.url).chain(f.backup_urls).collect(),
+            quality: f.quality,
+            qualities: f.accept.into_iter().map(|(qn, name)| crate::FfiLiveQuality { qn, name }).collect(),
+            duration_ms: f.duration_ms,
+            headers: headers.into_iter().map(|(name, value)| crate::FfiHeader { name, value }).collect(),
+        })
+    }
+
     /// Where the user stopped watching this video, when worth offering; `None` otherwise.
     pub async fn resume_point(&self, bvid: String) -> Option<FfiResumePoint> {
         self.videos.resume_point(&bvid).await.map(|r| FfiResumePoint { cid: r.cid, position_ms: r.position_ms })
@@ -180,4 +200,14 @@ impl From<rubi_filter::danmaku::DanmakuOutput> for FfiDanmakuSet {
             removed,
         }
     }
+}
+
+/// 投屏: one file to hand to a TV, best first, with the headers the phone fetches it with.
+#[derive(Debug, Clone, uniffi::Record)]
+pub struct FfiCastFile {
+    pub urls: Vec<String>,
+    pub quality: u32,
+    pub qualities: Vec<crate::FfiLiveQuality>,
+    pub duration_ms: u64,
+    pub headers: Vec<crate::FfiHeader>,
 }

@@ -1,5 +1,8 @@
 package dev.rubi.app.ui
 
+import androidx.compose.ui.platform.Clipboard
+import androidx.compose.ui.platform.ClipEntry
+import android.content.ClipData
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
@@ -31,18 +34,30 @@ import androidx.compose.ui.unit.sp
 import dev.rubi.app.ui.theme.LocalMetro
 import dev.rubi.app.ui.theme.MetroType
 
-/** Big lowercase-style pivot headers; the active one is brighter and heavier. */
+/**
+ * Big lowercase-style pivot headers; the active one is brighter and heavier. They scroll
+ * sideways unless `scroll` is off, when they stay put (and must fit).
+ */
 @Composable
-fun Pivot(labels: List<String>, selected: Int, onSelect: (Int) -> Unit, style: TextStyle = MetroType.pivot) {
+fun Pivot(
+    labels: List<String>,
+    selected: Int,
+    onSelect: (Int) -> Unit,
+    style: TextStyle = MetroType.pivot,
+    scroll: Boolean = true,
+    gap: Dp = 22.dp,
+) {
     val c = LocalMetro.current
     Row(
-        Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()).padding(horizontal = 16.dp),
-        horizontalArrangement = Arrangement.spacedBy(22.dp),
+        Modifier.fillMaxWidth().then(if (scroll) Modifier.horizontalScroll(rememberScrollState()) else Modifier).padding(horizontal = 16.dp),
+        horizontalArrangement = Arrangement.spacedBy(gap),
     ) {
         labels.forEachIndexed { i, label ->
             Text(
                 label,
                 style = style.copy(fontWeight = if (i == selected) FontWeight.Normal else FontWeight.Light),
+                maxLines = 1,
+                softWrap = false,
                 color = if (i == selected) c.fg else c.fg2,
                 modifier = Modifier.sizeIn(minHeight = 44.dp).wrapContentSize(Alignment.CenterStart).clickable { onSelect(i) },
             )
@@ -184,4 +199,24 @@ fun Modifier.swipeTabs(current: Int, count: Int, onChange: (Int) -> Unit): Modif
         total += dx
         change.consume()
     }
+}
+
+/** Puts `text` on the clipboard as plain text. */
+suspend fun Clipboard.copyText(text: String) = setClipEntry(ClipEntry(ClipData.newPlainText("Rubi", text)))
+
+/** Opens an UP's space from wherever their name is shown. Provided by the root. */
+val LocalOpenUp = androidx.compose.runtime.compositionLocalOf<(ULong, String) -> Unit> { { _, _ -> } }
+
+/** An UP's name that opens their space when tapped (nothing when the mid is unknown). */
+@Composable
+fun UpName(name: String, mid: ULong, size: androidx.compose.ui.unit.TextUnit, color: Color) {
+    val open = LocalOpenUp.current
+    Text(
+        name,
+        fontSize = size,
+        color = color,
+        maxLines = 1,
+        overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis,
+        modifier = if (mid > 0uL && name.isNotEmpty()) Modifier.clickable { open(mid, name) } else Modifier,
+    )
 }

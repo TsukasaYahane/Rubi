@@ -156,15 +156,18 @@ suspend fun loadDanmakuNearFirst(
 ) {
     var shown = false
     runCatching {
-        val session = app.core.danmakuSession(cid, durationMs)
-        val total = session.segmentCount()
-        val here = session.segmentAt(positionMs.toUInt())
-        val order = (1u..total).sortedBy { kotlin.math.abs(it.toInt() - here.toInt()) }
-        for (batch in listOf(order.take(1)) + order.drop(1).chunked(3)) {
-            onUpdate(session.load(batch), null)
-            shown = true
+        // Closed when done (or cancelled): the session holds every loaded danmaku in the core,
+        // and left to the garbage collector each video entered again kept another copy.
+        app.core.danmakuSession(cid, durationMs).use { session ->
+            val total = session.segmentCount()
+            val here = session.segmentAt(positionMs.toUInt())
+            val order = (1u..total).sortedBy { kotlin.math.abs(it.toInt() - here.toInt()) }
+            for (batch in listOf(order.take(1)) + order.drop(1).chunked(3)) {
+                onUpdate(session.load(batch), null)
+                shown = true
+            }
         }
-        Log.i(TAG, "danmaku loaded in $total segments")
+        Log.i(TAG, "danmaku loaded")
     }.onFailure { e ->
         onUpdate(null, if (shown) "部分弹幕加载失败：${e.message}" else "弹幕加载失败：${e.message}")
         Log.w(TAG, "danmaku load failed", e)

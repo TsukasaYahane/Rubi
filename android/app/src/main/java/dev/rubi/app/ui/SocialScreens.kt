@@ -1,5 +1,13 @@
 package dev.rubi.app.ui
 
+import dev.rubi.core.FfiUserHit
+import androidx.compose.foundation.border
+import kotlinx.coroutines.withContext
+import kotlinx.coroutines.Job
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.CoroutineScope
+import dev.rubi.core.FfiMatch
 import dev.rubi.core.RubiCore
 import androidx.compose.ui.platform.LocalFocusManager
 import androidx.compose.ui.platform.LocalSoftwareKeyboardController
@@ -57,7 +65,7 @@ import kotlinx.coroutines.launch
 
 /** Underlined single-line input (Metro text box). */
 @Composable
-private fun MetroField(value: String, onChange: (String) -> Unit, hint: String, modifier: Modifier = Modifier, onSubmit: () -> Unit) {
+internal fun MetroField(value: String, onChange: (String) -> Unit, hint: String, modifier: Modifier = Modifier, onSubmit: () -> Unit) {
     val c = LocalMetro.current
     Box(modifier.height(44.dp), contentAlignment = Alignment.CenterStart) {
         if (value.isEmpty()) Text(hint, color = c.fg2, fontSize = 16.sp)
@@ -87,6 +95,18 @@ class SearchState(private val core: RubiCore) {
     var searched by mutableStateOf("")
         private set
     val list = LazyListState()
+    /** 综合, 视频 or UP 主. */
+    var tab by mutableStateOf(0)
+    /** UPs whose name or alias fits; 综合 shows the first few. */
+    val users = Paged<FfiUserHit, UInt>(key = { it.mid }, minGapMs = 800L) { pn ->
+        val at = pn ?: 1u
+        val r = withContext(Dispatchers.IO) { core.searchUsers(searched, at) }
+        Page(r.users, if (r.hasMore) at + 1u else null)
+    }
+    /** Matches the term is about (a team, an event), shown above the videos. */
+    var matches by mutableStateOf(emptyList<FfiMatch>())
+    private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Main)
+    private var matchJob: Job? = null
 
     /** Result pages; one that comes back empty (all filtered) still moves on, up to B站's 50. */
     val results = Paged<FfiVideoCard, UInt>(key = { it.bvid }) { pn ->
@@ -100,10 +120,39 @@ class SearchState(private val core: RubiCore) {
         query = term
         searched = term
         results.reset()
+        users.reset()
+        matches = emptyList()
+        matchJob?.cancel()
+        matchJob = scope.launch {
+            matches = runCatching { withContext(Dispatchers.IO) { core.esportsRelated(term) } }.getOrDefault(emptyList())
+        }
     }
 }
 
 private const val MAX_SEARCH_PAGES = 50u
+
+private val SEARCH_TABS = listOf("综合", "视频", "UP 主")
+
+/** A found UP: face, name, fans and uploads, 直播中 when on air; tap for their space. */
+@Composable
+private fun UserRow(u: FfiUserHit, nav: Nav) {
+    val c = LocalMetro.current
+    Row(
+        Modifier.fillMaxWidth().clickable { nav.push(Screen.Up(u.mid, u.name)) }.padding(horizontal = 16.dp, vertical = 8.dp),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(12.dp),
+    ) {
+        AsyncImage(model = u.face, contentDescription = null, contentScale = ContentScale.Crop, modifier = Modifier.size(44.dp).background(c.bg2))
+        Column(Modifier.weight(1f)) {
+            Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                Text(u.name, fontSize = 15.sp, color = c.fg, maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.weight(1f, fill = false))
+                if (u.liveRoom > 0uL) LiveBadge(Modifier.clickable { nav.push(Screen.LiveRoom(u.liveRoom, u.name)) })
+            }
+            Meta("${formatCount(u.fans)} 粉丝 · ${u.videos} 投稿")
+            if (u.sign.isNotBlank()) Text(u.sign, fontSize = 12.sp, color = c.fg2, maxLines = 1, overflow = TextOverflow.Ellipsis)
+        }
+    }
+}
 
 @Composable
 fun SearchScreen(app: RubiApp, nav: Nav, state: SearchState) {
@@ -113,6 +162,7 @@ fun SearchScreen(app: RubiApp, nav: Nav, state: SearchState) {
     val focus = LocalFocusManager.current
     val results = state.results
     val list = state.list
+    var matchNote by remember { mutableStateOf<String?>(null) }
 
     LaunchedEffect(Unit) {
         if (state.hot.isEmpty()) runCatching { app.core.hotWords() }.onSuccess { state.hot = it.words; state.hotHidden = it.hidden }
@@ -124,9 +174,12 @@ fun SearchScreen(app: RubiApp, nav: Nav, state: SearchState) {
         state.search(q)
         scope.launch { list.scrollToItem(0) }
     }
-    if (state.searched.isNotEmpty()) LoadMoreNearEnd(list, results, ahead = 3)
+    if (state.searched.isNotEmpty()) {
+        if (state.tab == 2) LoadMoreNearEnd(list, state.users, ahead = 3) else LoadMoreNearEnd(list, results, ahead = 3)
+    }
     val note = when {
         state.searched.isEmpty() -> if (state.hotHidden > 0u) "已过滤推广热搜词 ${state.hotHidden} 条" else ""
+        state.tab == 2 -> state.users.error?.let(::errorText) ?: ""
         results.error != null -> errorText(results.error!!)
         else -> "结果 ${results.items.size} · 已过滤 ${results.hidden}"
     }
@@ -136,7 +189,22 @@ fun SearchScreen(app: RubiApp, nav: Nav, state: SearchState) {
             Box(Modifier.size(44.dp).clickable { nav.pop() }, contentAlignment = Alignment.Center) { GlyphIcon(Glyph.Back) }
             MetroField(state.query, { state.query = it }, "搜索视频、UP 主", Modifier.weight(1f)) { if (state.query.isNotBlank()) search(state.query) }
         }
-        Meta(note, Modifier.padding(horizontal = 16.dp, vertical = 8.dp))
+        if (state.searched.isNotEmpty()) {
+            Row(Modifier.padding(start = 16.dp, end = 16.dp, top = 4.dp), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                SEARCH_TABS.forEachIndexed { i, label ->
+                    val on = i == state.tab
+                    Text(
+                        label,
+                        fontSize = 13.sp,
+                        color = if (on) Color.White else c.fg,
+                        modifier = Modifier.then(if (on) Modifier.background(c.accent) else Modifier.border(1.dp, c.line))
+                            .clickable { state.tab = i; scope.launch { list.scrollToItem(0) } }
+                            .padding(horizontal = 10.dp, vertical = 5.dp),
+                    )
+                }
+            }
+        }
+        if (note.isNotEmpty()) Meta(note, Modifier.padding(horizontal = 16.dp, vertical = 8.dp))
         LazyColumn(Modifier.weight(1f), state = list) {
             if (state.searched.isEmpty()) {
                 item { SectionTitle("热搜") }
@@ -149,7 +217,46 @@ fun SearchScreen(app: RubiApp, nav: Nav, state: SearchState) {
                         Text(w, fontSize = 16.sp, color = c.fg)
                     }
                 }
+            } else if (state.tab == 2) {
+                items(state.users.items, key = { "u" + it.mid }) { u -> UserRow(u, nav) }
+                item {
+                    Column(Modifier.padding(16.dp)) {
+                        val users = state.users
+                        when {
+                            users.loading -> Meta("加载中…")
+                            users.error != null -> TextAction("重试", onClick = users::retry)
+                            users.ended && users.items.isNotEmpty() -> Meta("没有更多了")
+                            users.ended -> Meta("没有找到相关 UP 主")
+                        }
+                    }
+                }
             } else {
+                // 综合: matches and the best-fitting UPs above the videos.
+                if (state.tab == 0 && state.matches.isNotEmpty()) {
+                    item(key = "esports") {
+                        Column(Modifier.padding(horizontal = 16.dp, vertical = 6.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                            Meta("赛事 · ${state.matches.first().season}")
+                            state.matches.forEach { m ->
+                                MatchCard(m) {
+                                    openMatch(m, nav, app.core, scope, changed = { n -> state.matches = state.matches.map { if (it.id == n.id) n else it } }, say = { matchNote = it })
+                                }
+                            }
+                            matchNote?.let { Meta(it, color = LiveRed) }
+                            TextAction("查看全部赛程 ›", onClick = { nav.showSchedule() }, dim = true)
+                        }
+                    }
+                }
+                if (state.tab == 0 && state.users.items.isNotEmpty()) {
+                    item(key = "users") {
+                        Column(Modifier.padding(top = 4.dp)) {
+                            Meta("UP 主", Modifier.padding(horizontal = 16.dp))
+                            state.users.items.take(3).forEach { u -> UserRow(u, nav) }
+                            Box(Modifier.padding(horizontal = 16.dp)) {
+                                TextAction("查看全部 UP 主 ›", onClick = { state.tab = 2; scope.launch { list.scrollToItem(0) } }, dim = true)
+                            }
+                        }
+                    }
+                }
                 items(results.items, key = { it.bvid }) { card ->
                     Box(Modifier.padding(horizontal = 16.dp, vertical = 12.dp)) {
                         VideoCardView(card, big = true, onOpen = { nav.push(Screen.Player(card.bvid, card.title)) })

@@ -259,6 +259,32 @@ mod tests {
         VideoCard { bvid: bvid.into(), raw, ..Default::default() }
     }
 
+    #[test]
+    fn bihuo_marks_on_feed_and_search_cards_are_blocked() {
+        let rs = RuleSet::builtin();
+        let p = rs.card_pipeline(None, || 0).unwrap();
+        let card = |raw: Value| VideoCard { bvid: "BV1".into(), raw, ..Default::default() };
+        assert!(p.judge(&card(json!({"rcmd_reason": {"content": "必火推荐"}}))).is_blocked());
+        assert!(p.judge(&card(json!({"corner": "必火推广"}))).is_blocked());
+        assert!(!p.judge(&card(json!({"corner": "", "rec_reason": "", "spread_id": 0}))).is_blocked());
+    }
+
+    /// 2026-11-03, www.bilibili.com 首页: a 必火 card (rocket on the cover) is an ad slot carrying a
+    /// real video; it is told apart from a plain ad and logged as 必火推广.
+    #[test]
+    fn bihuo_rocket_cards_are_promotion() {
+        let p = RuleSet::builtin().card_pipeline(None, || 0).unwrap();
+        let card = |raw: Value| VideoCard { bvid: "BV1".into(), raw, ..Default::default() };
+        let rocket = json!({"goto": "ad", "business_info": {"is_ad": true, "card_type": 82, "creative_type": 1,
+            "archive": {"aid": 1, "title": "戴它，不是为了好看"},
+            "business_mark": {"type": 4, "img_url": "https://i0.hdslb.com/bfs/sycp/mng/202203/3621990414ef2de04c5730f1002d8dae.png"}}});
+        let d = p.judge(&card(rocket));
+        assert_eq!(d.blocked_by.map(|h| h.rule_id).as_deref(), Some("promotion.bihuo_card"));
+        let plain_ad = json!({"goto": "ad", "business_info": {"is_ad": true, "card_type": 0, "creative_type": 2,
+            "business_mark": {"type": 2, "text": "广告"}}});
+        assert_eq!(p.judge(&card(plain_ad)).blocked_by.map(|h| h.rule_id).as_deref(), Some("ad.goto"));
+    }
+
     /// 2026-11-01: an UP's pinned Taobao links (b23.tv/mall-…, goods_item_id, no prefetch cache).
     #[test]
     fn pinned_mall_links_are_goods() {

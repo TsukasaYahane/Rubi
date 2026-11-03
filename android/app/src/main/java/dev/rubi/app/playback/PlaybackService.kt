@@ -11,6 +11,7 @@ import androidx.annotation.OptIn
 import androidx.media3.common.MediaItem
 import androidx.media3.common.ForwardingPlayer
 import androidx.media3.common.MediaMetadata
+import androidx.media3.common.MimeTypes
 import androidx.media3.common.PlaybackException
 import androidx.media3.common.Player
 import androidx.media3.common.util.UnstableApi
@@ -18,6 +19,7 @@ import androidx.media3.datasource.DefaultDataSource
 import androidx.media3.datasource.DefaultHttpDataSource
 import androidx.media3.exoplayer.DefaultLoadControl
 import androidx.media3.exoplayer.ExoPlayer
+import androidx.media3.exoplayer.hls.HlsMediaSource
 import androidx.media3.exoplayer.source.MergingMediaSource
 import androidx.media3.exoplayer.source.ProgressiveMediaSource
 import androidx.media3.session.MediaController
@@ -25,6 +27,7 @@ import androidx.media3.session.MediaSession
 import androidx.media3.session.MediaSessionService
 import androidx.media3.session.SessionToken
 import dev.rubi.app.RubiApp
+import dev.rubi.core.FfiLivePlay
 import dev.rubi.core.FfiPlayback
 import dev.rubi.core.FfiStream
 
@@ -52,6 +55,14 @@ class MainPlayer(context: Context) {
     @Volatile
     private var current: Current? = null
 
+    /** A live room playing now: its streams, tried in order when one fails. */
+    private class Live(val play: FfiLivePlay, val title: String, val artist: String) {
+        var attempt = 0
+    }
+
+    @Volatile
+    private var live: Live? = null
+
     @OptIn(UnstableApi::class)
     fun get(): ExoPlayer =
         player ?: synchronized(this) {
@@ -72,6 +83,7 @@ class MainPlayer(context: Context) {
     /** Plays the DASH pair (video + audio) chosen from [playback], from `positionMs`. */
     fun play(playback: FfiPlayback, title: String, positionMs: Long = 0L) {
         val video = pickVideo(playback) ?: return
+        live = null
         val c = Current(playback, title, video, pickAudio(playback))
         current = c
         load(c, positionMs)
@@ -82,6 +94,7 @@ class MainPlayer(context: Context) {
     @OptIn(UnstableApi::class)
     fun playLocal(videoPath: String, audioPath: String?, title: String, positionMs: Long = 0L) {
         current = null
+        live = null
         val factory = ProgressiveMediaSource.Factory(DefaultDataSource.Factory(context))
         val sources = listOfNotNull(videoPath, audioPath).map {
             factory.createMediaSource(item(Uri.fromFile(java.io.File(it)).toString(), title))
@@ -98,6 +111,7 @@ class MainPlayer(context: Context) {
     fun playAudioOnly(playback: FfiPlayback, title: String, artist: String, cover: String) {
         val audio = pickAudio(playback) ?: return
         current = null
+        live = null
         val p = get()
         val meta = MediaMetadata.Builder().setTitle(title).setArtist(artist).setArtworkUri(Uri.parse(cover)).build()
         val media = MediaItem.Builder().setUri(audio.url).setMediaMetadata(meta).build()
@@ -111,8 +125,37 @@ class MainPlayer(context: Context) {
      * Stops and empties the player, so nothing of the previous video keeps playing or stays
      * on screen while the next one loads. The view then shows its black shutter.
      */
+    /** A live room: HLS or FLV, the first of its streams that plays. */
+    fun playLive(play: FfiLivePlay, title: String, artist: String) {
+        if (play.streams.isEmpty()) return
+        current = null
+        val l = Live(play, title, artist)
+        live = l
+        loadLive(l)
+        bindService()
+    }
+
+    @OptIn(UnstableApi::class)
+    private fun loadLive(l: Live) {
+        val s = l.play.streams[l.attempt]
+        val http = DefaultHttpDataSource.Factory()
+            .setDefaultRequestProperties(l.play.headers.associate { it.name to it.value })
+            .setAllowCrossProtocolRedirects(true)
+        val meta = MediaMetadata.Builder().setTitle(l.title).setArtist(l.artist).build()
+        val item = MediaItem.Builder().setUri(s.url).setMediaMetadata(meta)
+            .apply { if (s.hls) setMimeType(MimeTypes.APPLICATION_M3U8) }
+            .build()
+        val source = if (s.hls) HlsMediaSource.Factory(http).createMediaSource(item) else ProgressiveMediaSource.Factory(http).createMediaSource(item)
+        val p = get()
+        p.setMediaSource(source)
+        p.prepare()
+        p.playWhenReady = true
+        Log.i(TAG, "live attempt ${l.attempt + 1}/${l.play.streams.size}: ${if (s.hls) "hls" else "flv"} ${host(s.url)}")
+    }
+
     fun clear() {
         current = null
+        live = null
         player?.run {
             stop()
             clearMediaItems()
@@ -123,6 +166,7 @@ class MainPlayer(context: Context) {
         player?.release()
         player = null
         current = null
+        live = null
     }
 
     @OptIn(UnstableApi::class)
@@ -155,6 +199,19 @@ class MainPlayer(context: Context) {
         }
 
         override fun onPlayerError(error: PlaybackException) {
+            live?.let { l ->
+                Log.w(TAG, "live error on attempt ${l.attempt + 1}: ${error.errorCodeName}", error)
+                val p = player ?: return
+                if (error.errorCode == PlaybackException.ERROR_CODE_BEHIND_LIVE_WINDOW) {
+                    // Fell behind the stream's window: rejoin at the live edge.
+                    p.seekToDefaultPosition()
+                    p.prepare()
+                } else if (l.attempt + 1 < l.play.streams.size) {
+                    l.attempt++
+                    loadLive(l)
+                }
+                return
+            }
             val c = current ?: return
             Log.w(TAG, "playback error on attempt ${c.attempt + 1}: ${error.errorCodeName}", error)
             if (c.attempt + 1 < c.attempts) {

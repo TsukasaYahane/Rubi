@@ -160,7 +160,8 @@ fn print_thread(thread: &ThreadView) {
         open.resize(d + 1, false);
         let lead: String = (1..d).map(|l| if open[l] { "│  " } else { "   " }).collect();
         let branch = if row.has_later_sibling { "├─ " } else { "└─ " };
-        println!("{lead}{branch}{}{up}: {to}{}", c.name, short(&c.text, 50));
+        let text = if row.reply_to.is_some() { rubi_model::without_reply_prefix(&c.text) } else { &c.text };
+        println!("{lead}{branch}{}{up}: {to}{}", c.name, short(text, 50));
         open[d] = row.has_later_sibling;
     }
     if thread.hidden > 0 {

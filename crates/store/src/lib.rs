@@ -60,11 +60,31 @@ pub trait FilterLogRepo {
     fn recent_filter_log(&self, limit: usize) -> Result<Vec<FilterLogEntry>>;
 }
 
-/// The custom play list, in order.
+/// A named play list and how many videos it holds.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct PlaylistInfo {
+    pub id: i64,
+    pub name: String,
+    pub count: usize,
+}
+
+/// The id of 默认, the list that always exists.
+pub const DEFAULT_PLAYLIST: i64 = 1;
+
+/// The custom play lists, each in order.
 pub trait PlaylistRepo {
-    fn playlist(&self) -> Result<Vec<VideoCard>>;
-    /// Replaces the whole list (it is short).
-    fn set_playlist(&self, items: &[VideoCard]) -> Result<()>;
+    /// Every list, 默认 first, then in the order they were made.
+    fn playlists(&self) -> Result<Vec<PlaylistInfo>>;
+    /// Adds an empty list at the end; returns its id. Names are unique.
+    fn create_playlist(&self, name: &str) -> Result<i64>;
+    fn rename_playlist(&self, id: i64, name: &str) -> Result<()>;
+    /// Removes a list and its items (默认 stays).
+    fn delete_playlist(&self, id: i64) -> Result<()>;
+    fn playlist(&self, id: i64) -> Result<Vec<VideoCard>>;
+    /// Replaces a whole list (lists are short).
+    fn set_playlist(&self, id: i64, items: &[VideoCard]) -> Result<()>;
+    /// The lists that hold `bvid`.
+    fn lists_with(&self, bvid: &str) -> Result<Vec<i64>>;
 }
 
 /// 离线缓存 records.
@@ -298,10 +318,61 @@ impl FilterLogRepo for SqliteStore {
 }
 
 impl PlaylistRepo for SqliteStore {
-    fn playlist(&self) -> Result<Vec<VideoCard>> {
+    fn playlists(&self) -> Result<Vec<PlaylistInfo>> {
         self.with(|c| {
-            let mut stmt = c.prepare("SELECT card FROM playlist ORDER BY pos")?;
-            let rows = stmt.query_map([], |r| r.get::<_, String>(0))?;
+            let mut stmt = c.prepare(
+                "SELECT p.id, p.name, (SELECT count(*) FROM playlist_items i WHERE i.list_id = p.id)
+                 FROM playlists p ORDER BY p.pos, p.id",
+            )?;
+            let rows = stmt.query_map([], |r| {
+                Ok(PlaylistInfo { id: r.get(0)?, name: r.get(1)?, count: r.get::<_, i64>(2)? as usize })
+            })?;
+            Ok(rows.collect::<std::result::Result<_, _>>()?)
+        })
+    }
+
+    fn create_playlist(&self, name: &str) -> Result<i64> {
+        self.with(|c| {
+            c.execute(
+                "INSERT INTO playlists(name, pos) VALUES (?1, (SELECT coalesce(max(pos), 0) + 1 FROM playlists))",
+                [name],
+            )?;
+            Ok(c.last_insert_rowid())
+        })
+    }
+
+    fn rename_playlist(&self, id: i64, name: &str) -> Result<()> {
+        self.with(|c| {
+            c.execute("UPDATE playlists SET name = ?2 WHERE id = ?1", params![id, name])?;
+            Ok(())
+        })
+    }
+
+    fn delete_playlist(&self, id: i64) -> Result<()> {
+        if id == DEFAULT_PLAYLIST {
+            return Ok(());
+        }
+        self.with(|c| {
+            let tx = c.transaction()?;
+            tx.execute("DELETE FROM playlist_items WHERE list_id = ?1", [id])?;
+            tx.execute("DELETE FROM playlists WHERE id = ?1", [id])?;
+            tx.commit()?;
+            Ok(())
+        })
+    }
+
+    fn lists_with(&self, bvid: &str) -> Result<Vec<i64>> {
+        self.with(|c| {
+            let mut stmt = c.prepare("SELECT list_id FROM playlist_items WHERE bvid = ?1 ORDER BY list_id")?;
+            let rows = stmt.query_map([bvid], |r| r.get(0))?;
+            Ok(rows.collect::<std::result::Result<_, _>>()?)
+        })
+    }
+
+    fn playlist(&self, id: i64) -> Result<Vec<VideoCard>> {
+        self.with(|c| {
+            let mut stmt = c.prepare("SELECT card FROM playlist_items WHERE list_id = ?1 ORDER BY pos")?;
+            let rows = stmt.query_map([id], |r| r.get::<_, String>(0))?;
             let mut out = Vec::new();
             for row in rows {
                 out.push(serde_json::from_str(&row?)?);
@@ -310,14 +381,14 @@ impl PlaylistRepo for SqliteStore {
         })
     }
 
-    fn set_playlist(&self, items: &[VideoCard]) -> Result<()> {
+    fn set_playlist(&self, id: i64, items: &[VideoCard]) -> Result<()> {
         self.with(|c| {
             let tx = c.transaction()?;
-            tx.execute("DELETE FROM playlist", [])?;
+            tx.execute("DELETE FROM playlist_items WHERE list_id = ?1", [id])?;
             for (pos, card) in items.iter().enumerate() {
                 tx.execute(
-                    "INSERT OR IGNORE INTO playlist(pos, bvid, card) VALUES (?1, ?2, ?3)",
-                    params![pos as i64, card.bvid, serde_json::to_string(card)?],
+                    "INSERT OR IGNORE INTO playlist_items(list_id, pos, bvid, card) VALUES (?1, ?2, ?3, ?4)",
+                    params![id, pos as i64, card.bvid, serde_json::to_string(card)?],
                 )?;
             }
             tx.commit()?;

@@ -27,6 +27,16 @@ impl RubiCore {
         Ok(FfiDynamicPage { items: items.iter().map(FfiDynamic::of).collect(), next })
     }
 
+    /// 空间内搜索: an UP's posts (videos, 专栏, posts) matching `keyword`, page from 1; `next` is
+    /// the following page number, absent at the end.
+    pub async fn up_search_posts(&self, mid: u64, keyword: String, page: u32) -> Res<FfiDynamicPage> {
+        let (items, more) = self.following.search_up_posts(mid, &keyword, page).await?;
+        Ok(FfiDynamicPage {
+            items: items.iter().map(FfiDynamic::of).collect(),
+            next: more.then(|| (page.max(1) + 1).to_string()),
+        })
+    }
+
     /// 全部关注: every followed UP, those who posted lately first (with when).
     pub async fn all_followings(&self) -> Res<FfiFollowings> {
         let all = self.following.all().await?;
