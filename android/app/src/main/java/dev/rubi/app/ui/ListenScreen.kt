@@ -94,13 +94,13 @@ fun ListenScreen(app: RubiApp, nav: Nav) {
     // While the bar is held: the fraction under the finger, applied on release.
     var dragging by remember { mutableStateOf<Float?>(null) }
 
-    LaunchedEffect(Unit) { mode = runCatching { app.core.playlistMode() }.getOrDefault(FfiPlaylistMode.SEQUENTIAL) }
+    LaunchedEffect(Unit) { mode = offMain { runCatching { app.core.playlistMode() }.getOrDefault(FfiPlaylistMode.SEQUENTIAL) } }
     // Read again with each item: following 相关推荐, more are added as it goes.
     LaunchedEffect(now?.bvid) {
-        items = runCatching { app.core.listeningItems() }.getOrDefault(emptyList())
+        items = offMain { runCatching { app.core.listeningItems() }.getOrDefault(emptyList()) }
         if (related) {
             delay(2_000)
-            items = runCatching { app.core.listeningItems() }.getOrDefault(items)
+            items = offMain { runCatching { app.core.listeningItems() }.getOrDefault(items) }
         }
     }
     LaunchedEffect(Unit) {

@@ -2,10 +2,13 @@
 
 use std::sync::Arc;
 
+use async_trait::async_trait;
+use futures_util::future::join;
 use rubi_api::{Page, PlayUrl, Season, VideoApi};
 use rubi_model::{VideoCard, VideoRef, find_video_ref};
 
 use crate::error::{CoreError, Result};
+use crate::ports::{VideoLookup, VideoStreams};
 use crate::recent::Recent;
 
 /// Cards kept so actions and signals on a shown video need no second lookup.
@@ -15,7 +18,9 @@ const CARD_CACHE: usize = 3_000;
 /// Dolby, 8K) is 大会员 only, which Rubi does not offer.
 pub const MAX_FREE_QN: u32 = 80;
 
-/// Cards seen in any list, by BV id. Shared by every service that hands cards out.
+/// Cards seen in any list, by BV id. Shared by every service that hands cards out. Kept without
+/// the raw API JSON they were parsed from: the filters have judged them already, and the raw
+/// object is most of a card's size.
 pub struct CardCache(Recent<String, VideoCard>);
 
 impl Default for CardCache {
@@ -27,7 +32,9 @@ impl Default for CardCache {
 impl CardCache {
     pub fn remember(&self, cards: &[VideoCard]) {
         for c in cards {
-            self.0.put(c.bvid.clone(), c.clone());
+            let mut slim = c.clone();
+            slim.raw = serde_json::Value::Null;
+            self.0.put(c.bvid.clone(), slim);
         }
     }
 
@@ -92,8 +99,9 @@ impl Videos {
         if let Some(c) = self.cards.get(bvid) {
             return Ok(c);
         }
-        let mut card = self.api.view(bvid).await?.card;
-        card.tags = self.api.tags(bvid).await.unwrap_or_default();
+        let (view, tags) = join(self.api.view(bvid), self.api.tags(bvid)).await;
+        let mut card = view?.card;
+        card.tags = tags.unwrap_or_default();
         self.cards.remember(std::slice::from_ref(&card));
         Ok(card)
     }
@@ -105,9 +113,10 @@ impl Videos {
 
     /// Fresh details for the player page: the card (with tags and cid), its parts and 合集.
     pub async fn detail(&self, bvid: &str) -> Result<VideoInfo> {
-        let detail = self.api.view(bvid).await?;
+        let (detail, tags) = join(self.api.view(bvid), self.api.tags(bvid)).await;
+        let detail = detail?;
         let mut card = detail.card;
-        card.tags = self.api.tags(bvid).await.unwrap_or_default();
+        card.tags = tags.unwrap_or_default();
         card.cid = card.cid.or(Some(detail.cid)).filter(|&c| c > 0);
         self.cards.remember(std::slice::from_ref(&card));
         Ok(VideoInfo { card, parts: detail.pages, season: detail.season })
@@ -181,6 +190,20 @@ impl Videos {
         let mut url = self.api.playurl(bvid, cid, qn.min(MAX_FREE_QN)).await?;
         url.accept.retain(|(qn, _)| *qn <= MAX_FREE_QN);
         Ok(Playback { cid, url, headers: self.api.stream_headers() })
+    }
+}
+
+#[async_trait]
+impl VideoLookup for Videos {
+    async fn card(&self, bvid: &str) -> Result<VideoCard> {
+        Videos::card(self, bvid).await
+    }
+}
+
+#[async_trait]
+impl VideoStreams for Videos {
+    async fn playback(&self, bvid: &str, qn: u32) -> Result<Playback> {
+        Videos::playback(self, bvid, qn).await
     }
 }
 

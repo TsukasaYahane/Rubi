@@ -116,7 +116,7 @@ fun PlayerScreen(
     var danmaku by remember { mutableStateOf<FfiDanmakuSet?>(null) }
     var error by remember { mutableStateOf<String?>(null) }
     var tab by remember { mutableStateOf(if (focus != null) 1 else 0) }
-    var display by remember { mutableStateOf(DanmakuDisplay.load(app.core)) }
+    var display by remember { mutableStateOf(DanmakuDisplay.load(app.settings)) }
     var dmProblem by remember { mutableStateOf<String?>(null) }
     var dmSheet by remember { mutableStateOf(false) }
     var detail by remember { mutableStateOf<FfiVideoDetail?>(null) }
@@ -140,7 +140,7 @@ fun PlayerScreen(
     }
     /** The part the current story node plays; its question waits until that part is loaded. */
     var nodeCid by remember { mutableStateOf<ULong?>(null) }
-    val holdSpeed = remember { PlaybackPrefs.longPressSpeed(app.core) }
+    val holdSpeed = remember { PlaybackPrefs.longPressSpeed(app.settings) }
     val inPip by media.pip.active
     // Fullscreen and picture-in-picture both show the video alone.
     val compact = fullscreen || inPip
@@ -196,10 +196,10 @@ fun PlayerScreen(
         dmProblem = null
         runCatching {
             val t0 = SystemClock.elapsedRealtime()
-            val qn = PlaybackPrefs.preferredQuality(app.core)
+            val qn = PlaybackPrefs.preferredQuality(app.settings)
             val part = partCid
             // 离线缓存: a finished copy plays from its files, network or not.
-            val local = if (part == null && episode == null) runCatching { app.core.downloadLocal(bvid) }.getOrNull() else null
+            val local = if (part == null && episode == null) offMain { runCatching { app.core.downloadLocal(bvid) }.getOrNull() } else null
             // 卡牌 / 书页: the video starts once the card has finished turning into this page.
             snapshotFlow { flights.flight }.first { it == null }
             if (local != null) {
@@ -251,7 +251,7 @@ fun PlayerScreen(
                 color = if (display.enabled) c.fg else c.fg2,
                 modifier = Modifier.size(52.dp, 44.dp).wrapContentSize(Alignment.CenterEnd).clickable {
                     display = display.copy(enabled = !display.enabled)
-                    runCatching { DanmakuDisplay.save(app.core, display) }
+                    runCatching { DanmakuDisplay.save(app.settings, display) }
                 },
             )
             Text(
@@ -357,7 +357,7 @@ fun PlayerScreen(
                     onExit = { fullscreen = false },
                     onToggleDanmaku = {
                         display = display.copy(enabled = !display.enabled)
-                        runCatching { DanmakuDisplay.save(app.core, display) }
+                        runCatching { DanmakuDisplay.save(app.settings, display) }
                     },
                     onSettings = { dmSheet = true },
                     quality = playback?.let(::qualityLabel).orEmpty(),
@@ -497,7 +497,7 @@ fun PlayerScreen(
     if (qualitySheet && current != null) {
         QualitySheet(current.accept, current.quality, onDismiss = { qualitySheet = false }, side = fullscreen) { q ->
             qualitySheet = false
-            PlaybackPrefs.setPreferredQuality(app.core, q.qn)
+            PlaybackPrefs.setPreferredQuality(app.settings, q.qn)
             scope.launch {
                 // Same video, other streams: carry on from where it was.
                 val at = media.player.get().currentPosition
@@ -513,7 +513,7 @@ fun PlayerScreen(
             display = display,
             onChange = {
                 display = it
-                runCatching { DanmakuDisplay.save(app.core, it) }
+                runCatching { DanmakuDisplay.save(app.settings, it) }
             },
             onDismiss = { dmSheet = false },
             side = fullscreen,

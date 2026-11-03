@@ -1,6 +1,5 @@
 package dev.rubi.app.data
 
-import dev.rubi.core.RubiCore
 import org.json.JSONObject
 
 /** Mirror of `rubi_core::DanmakuDisplay`, stored inside the core's settings JSON. */
@@ -24,8 +23,8 @@ data class DanmakuDisplay(
         const val FIXED_MS = 4_000L
         private const val KEY = "danmaku_display"
 
-        fun load(core: RubiCore): DanmakuDisplay = runCatching {
-            val o = JSONObject(core.settingsJson()).optJSONObject(KEY) ?: return DanmakuDisplay()
+        fun load(settings: CoreSettings): DanmakuDisplay = runCatching {
+            val o = settings.read().optJSONObject(KEY) ?: return DanmakuDisplay()
             DanmakuDisplay(
                 enabled = o.optBoolean("enabled", true),
                 area = o.optDouble("area", 0.75).toFloat(),
@@ -39,9 +38,10 @@ data class DanmakuDisplay(
             )
         }.getOrDefault(DanmakuDisplay())
 
-        fun save(core: RubiCore, d: DanmakuDisplay) {
-            val settings = JSONObject(core.settingsJson())
-            settings.put(
+        /** Writes only this section; other settings stay as they are. */
+        fun save(settings: CoreSettings, d: DanmakuDisplay) {
+            val patch = JSONObject()
+            patch.put(
                 KEY,
                 JSONObject()
                     .put("enabled", d.enabled)
@@ -54,7 +54,7 @@ data class DanmakuDisplay(
                     .put("show_bottom", d.showBottom)
                     .put("show_colored", d.showColored),
             )
-            core.setSettingsJson(settings.toString())
+            settings.patch(patch)
         }
     }
 }

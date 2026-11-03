@@ -8,6 +8,8 @@ use rubi_api::{ApiError, FeedApi};
 use rubi_model::{SourceKind, VideoCard};
 use rubi_recommend::{Source, SourceError};
 
+use crate::feed::{Seedable, Seeds};
+
 fn err(kind: SourceKind) -> impl Fn(ApiError) -> SourceError {
     move |e| SourceError { kind, message: e.to_string() }
 }
@@ -124,9 +126,11 @@ impl RelatedSource {
     pub fn new(api: Arc<dyn FeedApi>) -> Self {
         Self { api, seeds: Mutex::new(Vec::new()) }
     }
+}
 
-    pub fn set_seeds(&self, seeds: Vec<String>) {
-        *self.seeds.lock().unwrap_or_else(|e| e.into_inner()) = seeds;
+impl Seedable for RelatedSource {
+    fn seed(&self, seeds: &Seeds) {
+        *self.seeds.lock().unwrap_or_else(|e| e.into_inner()) = seeds.liked.clone();
     }
 }
 
@@ -159,9 +163,11 @@ impl PreferredZoneSource {
     pub fn new(api: Arc<dyn FeedApi>) -> Self {
         Self { api, zones: Mutex::new(Vec::new()) }
     }
+}
 
-    pub fn set_zones(&self, zones: Vec<u32>) {
-        *self.zones.lock().unwrap_or_else(|e| e.into_inner()) = zones;
+impl Seedable for PreferredZoneSource {
+    fn seed(&self, seeds: &Seeds) {
+        *self.zones.lock().unwrap_or_else(|e| e.into_inner()) = seeds.zones.clone();
     }
 }
 

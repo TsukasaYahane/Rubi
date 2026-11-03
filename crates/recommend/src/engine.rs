@@ -85,6 +85,17 @@ pub struct ScoreBreakdown {
     pub penalty_adjust: f32,
 }
 
+impl ScoreBreakdown {
+    /// The factor that raised the score most, if any did: the reason shown on the card.
+    pub fn main_factor(&self) -> Option<FactorId> {
+        self.parts
+            .iter()
+            .filter(|p| p.contribution > 0.0)
+            .max_by(|a, b| a.contribution.total_cmp(&b.contribution))
+            .map(|p| p.factor)
+    }
+}
+
 #[derive(Debug, Clone)]
 pub struct Ranked {
     pub card: VideoCard,

@@ -217,7 +217,7 @@ internal fun CommentSection(
         scope.launch {
             runCatching { app.core.replyComment(area, 0u, 0u, text, mentioned) }
                 .onSuccess { r ->
-                    paged.items.add(0, FfiCommentThread(r.rpid, listOf(r), 0u, 0u))
+                    paged.prepend(FfiCommentThread(r.rpid, listOf(r), 0u, 0u))
                     posting = false
                     say("已发表")
                 }

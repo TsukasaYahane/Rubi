@@ -38,7 +38,7 @@ fun PlayerPageLifecycle(app: RubiApp) {
     val activity = remember(ctx) { ctx.activity() }
     DisposableEffect(Unit) {
         media.pip.onPlayer = true
-        media.pip.autoEnter = PlaybackPrefs.autoPip(app.core)
+        media.pip.autoEnter = PlaybackPrefs.autoPip(app.settings)
         activity?.let(media.pip::sync)
         onDispose {
             media.pip.onPlayer = false
@@ -50,7 +50,7 @@ fun PlayerPageLifecycle(app: RubiApp) {
     val lifecycle = LocalLifecycleOwner.current.lifecycle
     DisposableEffect(lifecycle) {
         val observer = LifecycleEventObserver { _, event ->
-            if (event == Lifecycle.Event.ON_STOP && !PlaybackPrefs.backgroundPlay(app.core)) {
+            if (event == Lifecycle.Event.ON_STOP && !PlaybackPrefs.backgroundPlay(app.settings)) {
                 media.player.get().pause()
             }
         }
@@ -127,7 +127,7 @@ fun ContinuePlaylistOnEnd(app: RubiApp, nav: Nav, bvid: String, enabled: Boolean
             override fun onPlaybackStateChanged(state: Int) {
                 if (state != Player.STATE_ENDED) return
                 scope.launch {
-                    val next = runCatching { app.core.playlistNext(bvid) }.getOrNull() ?: return@launch
+                    val next = offMain { runCatching { app.core.playlistNext(bvid) }.getOrNull() } ?: return@launch
                     if (next.bvid == bvid) {
                         player.seekTo(0)
                         player.play()

@@ -53,6 +53,8 @@ class Paged<T, C>(
     var hidden by mutableStateOf(0u)
         private set
 
+    /** Keys of [items], to drop repeats without scanning the list for each new item. */
+    private val keys = HashSet<Any>()
     private var cursor: C? = null
     private var generation = 0
     private var lastStart = 0L
@@ -78,8 +80,21 @@ class Paged<T, C>(
 
     /** Puts `item` in place of the listed one with the same key (e.g. a thread grown longer). */
     fun replace(item: T) {
-        val at = items.indexOfFirst { key(it) == key(item) }
+        val k = key(item)
+        if (k !in keys) return
+        val at = items.indexOfFirst { key(it) == k }
         if (at >= 0) items[at] = item
+    }
+
+    /** Puts `item` first (e.g. a comment just posted), unless it is listed already. */
+    fun prepend(item: T) {
+        if (keys.add(key(item))) items.add(0, item)
+    }
+
+    /** Takes the items `gone` picks out of the list. */
+    fun removeAll(gone: (T) -> Boolean) {
+        items.filter(gone).forEach { keys.remove(key(it)) }
+        items.removeAll(gone)
     }
 
     /** Tries again after an error. */
@@ -92,6 +107,7 @@ class Paged<T, C>(
     fun reset() {
         generation++
         items.clear()
+        keys.clear()
         cursor = null
         ended = false
         error = null
@@ -110,7 +126,7 @@ class Paged<T, C>(
             try {
                 val page = fetch(at)
                 if (gen != generation) return@launch
-                items.addAll(page.items.filter { n -> items.none { key(it) == key(n) } })
+                items.addAll(page.items.filter { keys.add(key(it)) })
                 hidden += page.hidden
                 cursor = page.next
                 ended = page.next == null

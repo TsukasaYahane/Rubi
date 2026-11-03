@@ -25,8 +25,9 @@ mod ports;
 mod preferences;
 mod queue;
 mod reading;
-mod seasons;
 mod recent;
+mod seasons;
+mod settings;
 mod social;
 mod sources;
 mod space;
@@ -46,7 +47,7 @@ pub use downloads::{Downloads, LocalCopy, pick_streams};
 pub use emotes::Emotes;
 pub use error::{CoreError, Result};
 pub use esports::Esports;
-pub use feed::{DanmakuDisplay, PreviewSettings, RefreshReport, Settings};
+pub use feed::RefreshReport;
 pub use following::{AllFollowings, FollowedPage, Following};
 pub use home::Home;
 pub use library::Library;
@@ -55,9 +56,17 @@ pub use messages::Messages;
 pub use pgc::{DRM_ONLY, NEED_RIGHTS, PGC_ZONES, Pgc};
 pub use playlist::{MAX_PLAYLIST_NAME, PlaylistMode, Playlists, RELATED_PLAYLIST, TEMP_PLAYLIST};
 pub use preferences::Preferences;
-pub use seasons::{Seasons, Subscription};
 pub use reading::Reading;
-pub use rubi_api::CommentArea;
+pub use seasons::{Seasons, Subscription};
+pub use settings::{DanmakuDisplay, FeedSettings, PlaybackSettings, PreviewSettings, Settings};
+// The lower crates' types the app-facing layer converts; it depends on this crate only.
+pub use rubi_api::{
+    ApiError, CommentArea, QrState, SendDanmaku, Session, SolvedCaptcha, SteinNode, Stream, Triple, UpOrder,
+    https_image, plain_letters,
+};
+pub use rubi_filter::danmaku::DanmakuOutput;
+pub use rubi_filter::danmaku::layout::{Lane, Placement};
+pub use rubi_recommend::{FactorId, ScoreBreakdown};
 pub use rubi_store::{DEFAULT_PLAYLIST, PlaylistInfo};
 pub use space::{Space, UpUploads};
 pub use stein::{Stein, SteinSession};

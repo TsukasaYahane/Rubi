@@ -215,7 +215,9 @@ fun LiveRoomScreen(app: RubiApp, nav: Nav, roomId: ULong, title: String) {
             } catch (e: Exception) {
                 tries++
             } finally {
-                channel?.let { ch -> scope.launch { runCatching { ch.leave(); ch.close() } } }
+                // The page scope is already cancelled when the page goes: leave on the app's,
+                // so the socket is closed and the Rust object freed now, not at some GC.
+                channel?.let { ch -> app.scope.launch { runCatching { ch.leave() }; ch.close() } }
                 channel = null
             }
             delay(3_000L)

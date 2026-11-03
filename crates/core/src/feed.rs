@@ -1,132 +1,60 @@
 //! The home feed: pulls candidates from every source, filters them, stores the pool
 //! and ranks pages out of it with the local engine.
 
-use std::collections::{HashMap, HashSet};
-use std::sync::{Arc, Mutex, RwLock};
+use std::collections::{HashMap, HashSet, VecDeque};
+use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
-use rubi_filter::{Category, RuleSet, WatchedLookup};
+use async_trait::async_trait;
+use futures_util::future::join_all;
+use rubi_filter::{Category, Rule, RuleSet, WatchedRule};
 use rubi_model::{DislikeReason, FeedbackEvent, ItemRef, Signal, SourceKind, VideoCard, now_secs};
 use rubi_recommend::{
-    Candidate, FeedEngine, InterestProfile, Ranked, ScoreBreakdown, ScoringContext, Source, SourceWeights, Weights,
-    default_factors,
+    Candidate, FeedEngine, InterestProfile, Ranked, ScoreBreakdown, ScoringContext, Source, default_factors,
 };
-use rubi_store::{CandidateRepo, EventRepo, ExposureRepo, FilterLogEntry, FilterLogRepo, KvRepo, WatchedRepo};
-use serde::{Deserialize, Serialize};
+use rubi_store::{
+    CandidateRepo, EventRepo, ExposureRepo, FilterLogEntry, FilterLogRepo, HousekeepingRepo, KvRepo, WatchedRepo,
+};
 
 use crate::error::Result;
-use crate::sources::{PreferredZoneSource, RelatedSource};
+use crate::ports::{FeedConfig, FeedbackSink, HomeFeed, ProfileBackup, WatchedSet};
 
-const KEY_SETTINGS: &str = "settings";
 const KEY_PROFILE: &str = "profile";
 const KEY_FOLLOWED: &str = "followed";
 /// Videos marked 不感兴趣: never offered again.
 const KEY_DISLIKED: &str = "disliked";
 /// How many 不感兴趣 videos are remembered (oldest forgotten first).
 const MAX_DISLIKED: usize = 5000;
+/// Signals that make a video a seed for 相关推荐 (completion counts when mostly watched).
+const SEED_KINDS: &[&str] = &["like", "coin", "favorite", "rewatch", "completion"];
 
 /// Everything the store has to offer the feed.
 pub trait AppStore:
-    CandidateRepo + ExposureRepo + EventRepo + WatchedRepo + FilterLogRepo + KvRepo + Send + Sync + 'static
+    CandidateRepo
+    + ExposureRepo
+    + EventRepo
+    + WatchedRepo
+    + FilterLogRepo
+    + HousekeepingRepo
+    + KvRepo
+    + Send
+    + Sync
+    + 'static
 {
 }
-impl<T: CandidateRepo + ExposureRepo + EventRepo + WatchedRepo + FilterLogRepo + KvRepo + Send + Sync + 'static>
-    AppStore for T
+impl<
+    T: CandidateRepo
+        + ExposureRepo
+        + EventRepo
+        + WatchedRepo
+        + FilterLogRepo
+        + HousekeepingRepo
+        + KvRepo
+        + Send
+        + Sync
+        + 'static,
+> AppStore for T
 {
-}
-
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
-#[serde(default)]
-pub struct Settings {
-    pub rules: RuleSet,
-    pub weights: Weights,
-    pub source_weights: SourceWeights,
-    /// How long a fetched candidate stays in the pool.
-    pub candidate_ttl_s: i64,
-    /// A source is not asked again within this interval (risk-control courtesy).
-    pub min_source_interval_s: u64,
-    pub danmaku_display: DanmakuDisplay,
-    /// Keep playing when the app goes to the background. Off: pause instead.
-    pub background_play: bool,
-    pub preview: PreviewSettings,
-    /// Playback speed while the fullscreen player is held down.
-    pub long_press_speed: f32,
-    /// Quality (qn) asked for when a video opens; the server caps it to what the account may play.
-    pub preferred_quality: u32,
-    /// Leaving the app from the player goes into picture-in-picture instead of pausing.
-    pub auto_pip: bool,
-}
-
-/// 大图预览: the card in the middle of the single-column feed plays a short preview.
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
-#[serde(default)]
-pub struct PreviewSettings {
-    pub enabled: bool,
-    /// Only on unmetered networks (Wi-Fi), so previews never spend mobile data.
-    pub wifi_only: bool,
-    /// 0.0 (muted) – 1.0.
-    pub volume: f32,
-    pub danmaku: bool,
-}
-
-impl Default for PreviewSettings {
-    fn default() -> Self {
-        Self { enabled: true, wifi_only: true, volume: 0.0, danmaku: false }
-    }
-}
-
-/// How danmaku are drawn (the filters themselves live in the rule table).
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
-#[serde(default)]
-pub struct DanmakuDisplay {
-    pub enabled: bool,
-    /// Share of the video height danmaku may use: 0.25, 0.5, 0.75 or 1.0.
-    pub area: f32,
-    /// Multiplies the base 14 sp size; 0.5–2.0.
-    pub font_scale: f32,
-    /// 0.2–1.0.
-    pub opacity: f32,
-    /// Scroll speed multiplier; 0.5–2.0 (base: 8 s across the screen).
-    pub speed: f32,
-    pub show_scroll: bool,
-    pub show_top: bool,
-    pub show_bottom: bool,
-    /// When false, only white danmaku are shown.
-    pub show_colored: bool,
-}
-
-impl Default for DanmakuDisplay {
-    fn default() -> Self {
-        Self {
-            enabled: true,
-            area: 0.75,
-            font_scale: 1.0,
-            opacity: 0.9,
-            speed: 1.0,
-            show_scroll: true,
-            show_top: true,
-            show_bottom: true,
-            show_colored: true,
-        }
-    }
-}
-
-impl Default for Settings {
-    fn default() -> Self {
-        Self {
-            rules: RuleSet::builtin(),
-            weights: Weights::default(),
-            source_weights: SourceWeights::default(),
-            candidate_ttl_s: 6 * 3600,
-            min_source_interval_s: 30,
-            danmaku_display: DanmakuDisplay::default(),
-            background_play: false,
-            preview: PreviewSettings::default(),
-            long_press_speed: 1.5,
-            preferred_quality: 80,
-            auto_pip: false,
-        }
-    }
 }
 
 #[derive(Debug, Clone, Default)]
@@ -138,33 +66,62 @@ pub struct RefreshReport {
     pub errors: Vec<String>,
 }
 
-/// Sources whose inputs are derived from the profile before each refresh.
-#[derive(Default)]
-pub struct Seeded {
-    pub related: Option<Arc<RelatedSource>>,
-    pub zones: Option<Arc<PreferredZoneSource>>,
+/// What the profile says the user likes, derived before each refresh.
+#[derive(Debug, Clone, Default)]
+pub struct Seeds {
+    /// Videos recently liked, coined, favourited, rewatched or mostly finished; newest first.
+    pub liked: Vec<String>,
+    /// The main regions liked most.
+    pub zones: Vec<u32>,
 }
 
-struct StoreWatched<S>(Arc<S>);
+/// A source whose inputs come from the profile: told the seeds before each refresh.
+pub trait Seedable: Send + Sync {
+    fn seed(&self, seeds: &Seeds);
+}
 
-impl<S: AppStore> WatchedLookup for StoreWatched<S> {
-    fn is_watched(&self, bvid: &str) -> bool {
-        self.0.is_watched(bvid).unwrap_or(false)
+/// 不感兴趣 videos: in the order marked (to forget the oldest), and as a set to look up.
+#[derive(Default)]
+struct Disliked {
+    order: VecDeque<String>,
+    set: HashSet<String>,
+}
+
+impl Disliked {
+    fn from_list(list: Vec<String>) -> Self {
+        let set = list.iter().cloned().collect();
+        Self { order: list.into(), set }
+    }
+
+    /// False when already listed.
+    fn add(&mut self, bvid: &str) -> bool {
+        if !self.set.insert(bvid.to_owned()) {
+            return false;
+        }
+        self.order.push_back(bvid.to_owned());
+        while self.order.len() > MAX_DISLIKED {
+            if let Some(old) = self.order.pop_front() {
+                self.set.remove(&old);
+            }
+        }
+        true
     }
 }
 
 pub struct FeedService<S: AppStore> {
     store: Arc<S>,
+    config: Arc<dyn FeedConfig>,
     sources: Vec<Arc<dyn Source>>,
-    seeded: Seeded,
-    settings: RwLock<Settings>,
+    seeded: Vec<Arc<dyn Seedable>>,
+    /// Lock order: `profile` / `disliked` / `shown` before the store's own lock, never after.
     profile: Mutex<InterestProfile>,
     last_fetch: Mutex<HashMap<SourceKind, Instant>>,
+    /// One refresh at a time: a second waits and then finds the sources cooling down.
+    refreshing: tokio::sync::Mutex<()>,
     /// Cards handed out by `next_page` since the last `new_session`: the visible list, which
     /// later pages must not repeat.
     shown: Mutex<HashSet<String>>,
-    /// 不感兴趣 videos, oldest first; kept out of the pool for good.
-    disliked: Mutex<Vec<String>>,
+    disliked: Mutex<Disliked>,
 }
 
 fn category_name(c: Category) -> String {
@@ -184,42 +141,40 @@ fn source_name(k: SourceKind) -> String {
     serde_json::to_value(k).ok().and_then(|v| v.as_str().map(str::to_owned)).unwrap_or_default()
 }
 
+fn lock<T>(m: &Mutex<T>) -> std::sync::MutexGuard<'_, T> {
+    m.lock().unwrap_or_else(|e| e.into_inner())
+}
+
 impl<S: AppStore> FeedService<S> {
-    pub fn new(store: Arc<S>, sources: Vec<Arc<dyn Source>>, seeded: Seeded) -> Result<Self> {
-        let mut settings: Settings = store.get_json(KEY_SETTINGS)?.unwrap_or_default();
-        settings.rules.merge_builtin();
+    pub fn new(
+        store: Arc<S>,
+        config: Arc<dyn FeedConfig>,
+        sources: Vec<Arc<dyn Source>>,
+        seeded: Vec<Arc<dyn Seedable>>,
+    ) -> Result<Self> {
         let profile = store.get_json(KEY_PROFILE)?.unwrap_or_default();
-        let disliked = store.get_json(KEY_DISLIKED)?.unwrap_or_default();
+        let disliked = Disliked::from_list(store.get_json(KEY_DISLIKED)?.unwrap_or_default());
         Ok(Self {
             store,
+            config,
             sources,
             seeded,
-            settings: RwLock::new(settings),
             profile: Mutex::new(profile),
             last_fetch: Mutex::new(HashMap::new()),
+            refreshing: tokio::sync::Mutex::new(()),
             shown: Mutex::new(HashSet::new()),
             disliked: Mutex::new(disliked),
         })
     }
 
-    pub fn settings(&self) -> Settings {
-        self.settings.read().unwrap_or_else(|e| e.into_inner()).clone()
-    }
-
-    pub fn set_settings(&self, settings: Settings) -> Result<()> {
-        settings.rules.card_pipeline(None, now_secs)?; // reject invalid regexes before saving
-        self.store.put_json(KEY_SETTINGS, &settings)?;
-        *self.settings.write().unwrap_or_else(|e| e.into_inner()) = settings;
-        Ok(())
-    }
-
     pub fn profile(&self) -> InterestProfile {
-        self.profile.lock().unwrap_or_else(|e| e.into_inner()).clone()
+        lock(&self.profile).clone()
     }
 
     pub fn set_profile(&self, profile: InterestProfile) -> Result<()> {
+        let mut p = lock(&self.profile);
         self.store.put_json(KEY_PROFILE, &profile)?;
-        *self.profile.lock().unwrap_or_else(|e| e.into_inner()) = profile;
+        *p = profile;
         Ok(())
     }
 
@@ -231,51 +186,76 @@ impl<S: AppStore> FeedService<S> {
         Ok(self.store.get_json::<Vec<u64>>(KEY_FOLLOWED)?.unwrap_or_default().into_iter().collect())
     }
 
-    fn watched(&self) -> Arc<dyn WatchedLookup> {
-        Arc::new(StoreWatched(self.store.clone()))
+    /// The watched check for these cards, read in one go; `None` when the rules leave it off.
+    fn watched_rule<'a>(
+        &self,
+        rules: &RuleSet,
+        cards: impl Iterator<Item = &'a VideoCard>,
+    ) -> Result<Option<WatchedRule>> {
+        if !rules.toggles.watched {
+            return Ok(None);
+        }
+        let ids: Vec<&str> = cards.map(|c| c.bvid.as_str()).collect();
+        let watched = WatchedSet(self.store.watched_among(&ids)?);
+        Ok(rules.watched_rule(Arc::new(watched)))
     }
 
-    /// Fetches from every source that is not cooling down and adds what survives the
-    /// filters to the candidate pool.
+    /// Fetches from every source that is not cooling down, all at once, and adds what survives
+    /// the filters to the candidate pool.
     pub async fn refresh(&self, want_per_source: usize) -> Result<RefreshReport> {
+        let _single = self.refreshing.lock().await;
         self.update_seeds()?;
-        let settings = self.settings();
-        let pipeline = settings.rules.card_pipeline(Some(self.watched()), now_secs)?;
+        let settings = self.config.feed_settings();
         let cooldown = Duration::from_secs(settings.min_source_interval_s);
         let mut report = RefreshReport::default();
+
+        let due: Vec<&Arc<dyn Source>> = {
+            let last = lock(&self.last_fetch);
+            self.sources
+                .iter()
+                .filter(|src| {
+                    let due = last.get(&src.kind()).is_none_or(|t| t.elapsed() >= cooldown);
+                    if !due {
+                        report.skipped.push(src.kind());
+                    }
+                    due
+                })
+                .collect()
+        };
+        let results =
+            join_all(due.iter().map(|src| async move { (src.kind(), src.fetch(want_per_source).await) })).await;
+
+        let mut fetched: Vec<(SourceKind, VideoCard)> = Vec::new();
+        {
+            let mut last = lock(&self.last_fetch);
+            for (kind, result) in results {
+                match result {
+                    Ok(cards) => {
+                        last.insert(kind, Instant::now());
+                        report.fetched.push((kind, cards.len()));
+                        fetched.extend(cards.into_iter().map(|c| (kind, c)));
+                    }
+                    Err(e) => report.errors.push(e.to_string()),
+                }
+            }
+        }
+
+        let rules = self.config.rules();
+        let filter = self.config.card_filter();
+        let watched = self.watched_rule(&rules, fetched.iter().map(|(_, c)| c))?;
+        let extra = watched.as_ref().map(|r| r as &dyn Rule<VideoCard>);
+        let now = now_secs();
         let mut accepted = Vec::new();
         let mut log = Vec::new();
-
-        for src in &self.sources {
-            let kind = src.kind();
-            let due = self
-                .last_fetch
-                .lock()
-                .unwrap_or_else(|e| e.into_inner())
-                .get(&kind)
-                .is_none_or(|t| t.elapsed() >= cooldown);
-            if !due {
-                report.skipped.push(kind);
-                continue;
-            }
-            let cards = match src.fetch(want_per_source).await {
-                Ok(c) => c,
-                Err(e) => {
-                    report.errors.push(e.to_string());
-                    continue;
-                }
-            };
-            self.last_fetch.lock().unwrap_or_else(|e| e.into_inner()).insert(kind, Instant::now());
-            report.fetched.push((kind, cards.len()));
-            let now = now_secs();
-            let disliked = self.disliked_set();
-            for mut card in cards {
-                if disliked.contains(&card.bvid) {
+        {
+            let disliked = lock(&self.disliked);
+            for (kind, mut card) in fetched {
+                if disliked.set.contains(&card.bvid) {
                     report.blocked += 1;
                     continue;
                 }
                 card.add_source(kind);
-                let decision = pipeline.judge(&card);
+                let decision = filter.judge_with(&card, extra);
                 match decision.blocked_by {
                     Some(hit) => {
                         report.blocked += 1;
@@ -293,100 +273,120 @@ impl<S: AppStore> FeedService<S> {
             }
         }
 
-        let now = now_secs();
         report.kept = accepted.len();
         self.store.put_candidates(&accepted, settings.candidate_ttl_s, now)?;
         self.store.append_filter_log(&log)?;
         self.store.purge_expired(now)?;
+        self.store.prune(now)?;
         Ok(report)
     }
 
     /// Starts a new visible list (pull to refresh): earlier pages may be ranked again.
     pub fn new_session(&self) {
-        self.shown.lock().unwrap_or_else(|e| e.into_inner()).clear();
+        lock(&self.shown).clear();
     }
 
     /// Ranks the pool and returns the next `n` cards not yet shown in this session, recording
-    /// them as shown. Empty when the pool has nothing new; refresh to fetch more.
+    /// them as shown. Empty when the pool has nothing new; refresh to fetch more. Two calls
+    /// at once never hand out the same card: the shown set is held throughout.
     pub fn next_page(&self, n: usize) -> Result<Vec<Ranked>> {
-        let exclude = self.shown.lock().unwrap_or_else(|e| e.into_inner()).clone();
-        let ranked = self.rank_pool(n, &exclude)?;
+        let mut shown = lock(&self.shown);
+        let ranked = self.rank_pool(n, &shown)?;
         let ids: Vec<String> = ranked.iter().map(|r| r.card.bvid.clone()).collect();
         self.store.record_impressions(&ids, now_secs())?;
-        self.shown.lock().unwrap_or_else(|e| e.into_inner()).extend(ids);
+        shown.extend(ids);
         Ok(ranked)
     }
 
     /// The score breakdown of a pooled card, for "为什么推荐".
     pub fn explain(&self, bvid: &str) -> Result<Option<ScoreBreakdown>> {
-        Ok(self.rank_pool(usize::MAX, &HashSet::new())?.into_iter().find(|r| r.card.bvid == bvid).map(|r| r.score))
+        let Some(candidate) = self.candidates(&HashSet::new())?.into_iter().find(|c| c.card.bvid == bvid) else {
+            return Ok(None);
+        };
+        let (exposures, followed, profile) = (self.store.exposures_since_click()?, self.followed()?, self.profile());
+        let ctx = ScoringContext { now: now_secs(), profile: &profile, followed: &followed, exposures: &exposures };
+        Ok(Some(self.engine().score(&candidate, &ctx)))
+    }
+
+    fn engine(&self) -> FeedEngine {
+        let settings = self.config.feed_settings();
+        FeedEngine::new(default_factors(), settings.weights, settings.source_weights)
+    }
+
+    /// The pool as it may be shown now: not excluded, not disliked, and passing the rules
+    /// (judged again: rules may have changed and the user may have watched some since).
+    fn candidates(&self, exclude: &HashSet<String>) -> Result<Vec<Candidate>> {
+        let pool: Vec<(VideoCard, f32)> = {
+            let disliked = lock(&self.disliked);
+            self.store
+                .fresh_candidates(now_secs())?
+                .into_iter()
+                .filter(|(card, _)| !exclude.contains(&card.bvid) && !disliked.set.contains(&card.bvid))
+                .collect()
+        };
+        let rules = self.config.rules();
+        let filter = self.config.card_filter();
+        let watched = self.watched_rule(&rules, pool.iter().map(|(c, _)| c))?;
+        let extra = watched.as_ref().map(|r| r as &dyn Rule<VideoCard>);
+        Ok(pool
+            .into_iter()
+            .filter_map(|(card, penalty)| {
+                let d = filter.judge_with(&card, extra);
+                (!d.is_blocked()).then(|| Candidate { penalty: penalty.min(d.multiplier), card })
+            })
+            .collect())
     }
 
     fn rank_pool(&self, n: usize, exclude: &HashSet<String>) -> Result<Vec<Ranked>> {
-        let settings = self.settings();
-        // Re-judge: rules may have changed and the user may have watched some since.
-        let pipeline = settings.rules.card_pipeline(Some(self.watched()), now_secs)?;
-        let now = now_secs();
-        let disliked = self.disliked_set();
-        let candidates: Vec<Candidate> = self
-            .store
-            .fresh_candidates(now)?
-            .into_iter()
-            .filter(|(card, _)| !exclude.contains(&card.bvid) && !disliked.contains(&card.bvid))
-            .filter_map(|(card, penalty)| {
-                let d = pipeline.judge(&card);
-                (!d.is_blocked()).then(|| Candidate { penalty: penalty.min(d.multiplier), card })
-            })
-            .collect();
+        let candidates = self.candidates(exclude)?;
         let exposures = self.store.exposures_since_click()?;
         let followed = self.followed()?;
         let profile = self.profile();
-        let ctx = ScoringContext { now, profile: &profile, followed: &followed, exposures: &exposures };
-        let engine = FeedEngine::new(default_factors(), settings.weights, settings.source_weights);
-        Ok(engine.rank(candidates, &ctx, n))
+        let ctx = ScoringContext { now: now_secs(), profile: &profile, followed: &followed, exposures: &exposures };
+        Ok(self.engine().rank(candidates, &ctx, n))
     }
 
     /// Records a feedback signal and updates the profile.
     pub fn record(&self, ev: FeedbackEvent) -> Result<()> {
         self.store.append_event(&ev)?;
-        if let Some(item) = &ev.item {
-            match ev.signal {
-                Signal::Click => {
-                    self.store.record_click(&item.bvid)?;
-                    self.store.mark_watched(&item.bvid, ev.at)?;
-                }
-                Signal::Dislike { ref reason } => self.dislike(item, reason, ev.at)?,
-                Signal::Follow => {
-                    let mut f: Vec<u64> = self.followed()?.into_iter().collect();
-                    f.push(item.up_mid);
-                    f.sort_unstable();
-                    f.dedup();
-                    self.set_followed(&f)?;
-                }
-                _ => {}
+        self.apply_marks(&ev)?;
+        // Held while writing, so a later event's profile is never overwritten by an earlier one.
+        let mut p = lock(&self.profile);
+        p.apply(&ev);
+        Ok(self.store.put_json(KEY_PROFILE, &*p)?)
+    }
+
+    /// What an event leaves besides the profile: watched, 不感兴趣, followed. Safe to repeat.
+    fn apply_marks(&self, ev: &FeedbackEvent) -> Result<()> {
+        let Some(item) = &ev.item else { return Ok(()) };
+        match &ev.signal {
+            Signal::Click => {
+                self.store.record_click(&item.bvid)?;
+                self.store.mark_watched(&item.bvid, ev.at)?;
             }
+            Signal::Dislike { reason } => self.dislike(item, reason, ev.at)?,
+            Signal::Follow => {
+                let mid = item.up_mid;
+                self.store.update_json(KEY_FOLLOWED, |f: &mut Vec<u64>| {
+                    if let Err(at) = f.binary_search(&mid) {
+                        f.insert(at, mid);
+                    }
+                })?;
+            }
+            _ => {}
         }
-        let profile = {
-            let mut p = self.profile.lock().unwrap_or_else(|e| e.into_inner());
-            p.apply(&ev);
-            p.clone()
-        };
-        Ok(self.store.put_json(KEY_PROFILE, &profile)?)
+        Ok(())
     }
 
     /// Keeps a 不感兴趣 video out of the feed for good and lists it under 被过滤内容.
     fn dislike(&self, item: &ItemRef, reason: &DislikeReason, at: i64) -> Result<()> {
-        let list = {
-            let mut d = self.disliked.lock().unwrap_or_else(|e| e.into_inner());
-            if d.contains(&item.bvid) {
+        {
+            let mut d = lock(&self.disliked);
+            if !d.add(&item.bvid) {
                 return Ok(());
             }
-            d.push(item.bvid.clone());
-            let over = d.len().saturating_sub(MAX_DISLIKED);
-            d.drain(..over);
-            d.clone()
-        };
-        self.store.put_json(KEY_DISLIKED, &list)?;
+            self.store.put_json(KEY_DISLIKED, &d.order)?;
+        }
         let why = match reason {
             DislikeReason::Up => "不想看这个 UP".to_owned(),
             DislikeReason::Zone => "不想看这个分区".to_owned(),
@@ -404,10 +404,6 @@ impl<S: AppStore> FeedService<S> {
         }])?)
     }
 
-    fn disliked_set(&self) -> HashSet<String> {
-        self.disliked.lock().unwrap_or_else(|e| e.into_inner()).iter().cloned().collect()
-    }
-
     /// Every recorded feedback event, oldest first (for export).
     pub fn history(&self) -> Result<Vec<FeedbackEvent>> {
         Ok(self.store.events_since(0)?)
@@ -418,38 +414,92 @@ impl<S: AppStore> FeedService<S> {
     }
 
     fn update_seeds(&self) -> Result<()> {
-        if let Some(related) = &self.seeded.related {
-            let since = now_secs() - 7 * 86_400;
-            let mut seeds: Vec<String> = self
-                .store
-                .events_since(since)?
-                .into_iter()
-                .rev()
-                .filter(|e| {
-                    matches!(e.signal, Signal::Like | Signal::Coin | Signal::Favorite | Signal::Rewatch)
-                        || matches!(e.signal, Signal::Completion { ratio } if ratio >= 0.6)
-                })
-                .filter_map(|e| e.item.map(|i| i.bvid))
-                .collect();
-            seeds.dedup();
-            related.set_seeds(seeds);
+        if self.seeded.is_empty() {
+            return Ok(());
         }
-        if let Some(zones) = &self.seeded.zones {
-            let p = self.profile();
-            let now = now_secs();
-            let mut z: Vec<(u32, f64)> =
-                p.likes.zones.iter().map(|(k, d)| (*k, d.get(now, p.half_life_days))).collect();
-            z.sort_by(|a, b| b.1.total_cmp(&a.1));
-            zones.set_zones(crate::zones::main_regions(z.into_iter().map(|(k, _)| k), 3));
+        let since = now_secs() - 7 * 86_400;
+        let mut liked: Vec<String> = self
+            .store
+            .events_of_kinds_since(since, SEED_KINDS)?
+            .into_iter()
+            .rev()
+            .filter(|e| !matches!(e.signal, Signal::Completion { ratio } if ratio < 0.6))
+            .filter_map(|e| e.item.map(|i| i.bvid))
+            .collect();
+        liked.dedup();
+        let p = self.profile();
+        let now = now_secs();
+        let mut z: Vec<(u32, f64)> = p.likes.zones.iter().map(|(k, d)| (*k, d.get(now, p.half_life_days))).collect();
+        z.sort_by(|a, b| b.1.total_cmp(&a.1));
+        let seeds = Seeds { liked, zones: crate::zones::main_regions(z.into_iter().map(|(k, _)| k), 3) };
+        for s in &self.seeded {
+            s.seed(&seeds);
         }
         Ok(())
+    }
+}
+
+impl<S: AppStore> FeedbackSink for FeedService<S> {
+    fn record(&self, ev: FeedbackEvent) -> Result<()> {
+        FeedService::record(self, ev)
+    }
+
+    fn set_followed(&self, mids: &[u64]) -> Result<()> {
+        let mut sorted = mids.to_vec();
+        sorted.sort_unstable();
+        sorted.dedup();
+        FeedService::set_followed(self, &sorted)
+    }
+}
+
+#[async_trait]
+impl<S: AppStore> HomeFeed for FeedService<S> {
+    async fn refresh(&self, want_per_source: usize) -> Result<RefreshReport> {
+        FeedService::refresh(self, want_per_source).await
+    }
+
+    fn new_session(&self) {
+        FeedService::new_session(self)
+    }
+
+    fn next_page(&self, n: usize) -> Result<Vec<Ranked>> {
+        FeedService::next_page(self, n)
+    }
+
+    fn explain(&self, bvid: &str) -> Result<Option<ScoreBreakdown>> {
+        FeedService::explain(self, bvid)
+    }
+
+    fn filter_log(&self, limit: usize) -> Result<Vec<FilterLogEntry>> {
+        FeedService::filter_log(self, limit)
+    }
+}
+
+impl<S: AppStore> ProfileBackup for FeedService<S> {
+    fn profile(&self) -> InterestProfile {
+        FeedService::profile(self)
+    }
+
+    fn history(&self) -> Result<Vec<FeedbackEvent>> {
+        FeedService::history(self)
+    }
+
+    fn restore(&self, profile: InterestProfile, history: &[FeedbackEvent]) -> Result<()> {
+        if !history.is_empty() {
+            self.store.replace_events(history)?;
+            for ev in history {
+                self.apply_marks(ev)?;
+            }
+        }
+        self.set_profile(profile)
     }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use async_trait::async_trait;
+    use crate::ports::SettingsPort;
+    use crate::settings::SettingsService;
     use rubi_model::{ItemRef, Owner, Stats, VideoCard};
     use rubi_recommend::SourceError;
     use rubi_store::SqliteStore;
@@ -485,7 +535,9 @@ mod tests {
             Arc::new(Fixed(SourceKind::BiliRecommend, vec![video("a", 1), ad])),
             Arc::new(Fixed(SourceKind::Popular, vec![video("a", 1), video("b", 2), video("c", 3)])),
         ];
-        FeedService::new(Arc::new(SqliteStore::in_memory().unwrap()), sources, Seeded::default()).unwrap()
+        let store = Arc::new(SqliteStore::in_memory().unwrap());
+        let config = Arc::new(SettingsService::open(store.clone()).unwrap());
+        FeedService::new(store, config, sources, Vec::new()).unwrap()
     }
 
     #[tokio::test]
@@ -519,6 +571,14 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn concurrent_refreshes_ask_each_source_once() {
+        let svc = service();
+        let (a, b) = tokio::join!(svc.refresh(10), svc.refresh(10));
+        let fetched = a.unwrap().fetched.len() + b.unwrap().fetched.len();
+        assert_eq!(fetched, 2, "the second refresh finds both sources cooling down");
+    }
+
+    #[tokio::test]
     async fn watched_and_disliked_items_drop() {
         let svc = service();
         svc.refresh(10).await.unwrap();
@@ -538,5 +598,42 @@ mod tests {
         assert!(svc.next_page(10).unwrap().iter().all(|r| r.card.bvid != "b"), "not even after a refresh");
         assert_eq!(svc.filter_log(5).unwrap()[0].rule_id, "user.dislike");
         assert!(svc.explain("c").unwrap().is_some());
+        assert!(svc.explain("b").unwrap().is_none());
+    }
+
+    #[test]
+    fn follows_merge_and_restore_does_not_count_twice() {
+        let svc = service();
+        let follow = |mid| FeedbackEvent {
+            signal: Signal::Follow,
+            item: Some(ItemRef { up_mid: mid, ..Default::default() }),
+            at: 1,
+        };
+        svc.record(follow(5)).unwrap();
+        svc.record(follow(3)).unwrap();
+        svc.record(follow(5)).unwrap();
+        assert_eq!(svc.followed().unwrap(), HashSet::from([3, 5]));
+
+        let like = FeedbackEvent {
+            signal: Signal::Like,
+            item: Some(ItemRef { bvid: "x".into(), ..Default::default() }),
+            at: 1,
+        };
+        svc.record(like.clone()).unwrap();
+        let (profile, history) = (svc.profile(), svc.history().unwrap());
+        svc.restore(profile.clone(), &history).unwrap();
+        assert_eq!(svc.profile(), profile, "the profile is taken as it is");
+        assert_eq!(svc.history().unwrap(), history, "events are not duplicated");
+    }
+
+    #[test]
+    fn settings_reach_the_feed() {
+        let store = Arc::new(SqliteStore::in_memory().unwrap());
+        let config = Arc::new(SettingsService::open(store.clone()).unwrap());
+        let mut s = config.settings();
+        s.feed.min_source_interval_s = 0;
+        config.set_settings(s).unwrap();
+        let svc = FeedService::new(store, config, Vec::new(), Vec::new()).unwrap();
+        assert_eq!(svc.config.feed_settings().min_source_interval_s, 0);
     }
 }

@@ -5,15 +5,15 @@ use std::sync::Arc;
 use rubi_api::{ActionApi, LibraryApi};
 use rubi_model::{FavFolder, HistoryEntry, VideoCard};
 
-use crate::account::Account;
 use crate::error::Result;
-use crate::videos::{CardCache, Videos};
+use crate::ports::{LoginState, VideoLookup};
+use crate::videos::CardCache;
 
 pub struct Library {
     api: Arc<dyn LibraryApi>,
     folders: Arc<dyn ActionApi>,
-    account: Arc<Account>,
-    videos: Arc<Videos>,
+    login: Arc<dyn LoginState>,
+    videos: Arc<dyn VideoLookup>,
     cards: Arc<CardCache>,
 }
 
@@ -21,11 +21,11 @@ impl Library {
     pub(crate) fn new(
         api: Arc<dyn LibraryApi>,
         folders: Arc<dyn ActionApi>,
-        account: Arc<Account>,
-        videos: Arc<Videos>,
+        login: Arc<dyn LoginState>,
+        videos: Arc<dyn VideoLookup>,
         cards: Arc<CardCache>,
     ) -> Self {
-        Self { api, folders, account, videos, cards }
+        Self { api, folders, login, videos, cards }
     }
 
     /// Watch history; pass the returned cursor back for the next page. Its cards are not
@@ -112,7 +112,7 @@ impl Library {
         realtime_s: u64,
         play_type: u8,
     ) -> Result<()> {
-        if !self.account.is_logged_in() {
+        if !self.login.is_logged_in() {
             return Ok(());
         }
         let card = self.videos.card(bvid).await?;

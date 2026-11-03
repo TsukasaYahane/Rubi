@@ -26,6 +26,8 @@ const VER_ZLIB: u16 = 2;
 const HEARTBEAT_EVERY: Duration = Duration::from_secs(30);
 /// No more than this many nested zlib layers (a real server sends one).
 const MAX_DEPTH: u8 = 2;
+/// A frame inflates to no more than this (a real one is a few KB); a bigger one is dropped.
+const MAX_INFLATED: u64 = 4 * 1024 * 1024;
 
 /// How to join a room's channel.
 pub struct ChannelJoin<'a> {
@@ -139,7 +141,8 @@ fn collect(mut buf: &[u8], depth: u8, out: &mut Vec<Value>) {
         match (op, ver) {
             (OP_MESSAGE, VER_ZLIB) if depth < MAX_DEPTH => {
                 let mut inner = Vec::new();
-                if ZlibDecoder::new(body).read_to_end(&mut inner).is_ok() {
+                let mut decoder = ZlibDecoder::new(body).take(MAX_INFLATED + 1);
+                if decoder.read_to_end(&mut inner).is_ok() && inner.len() as u64 <= MAX_INFLATED {
                     collect(&inner, depth + 1, out);
                 }
             }

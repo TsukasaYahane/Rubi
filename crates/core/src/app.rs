@@ -22,7 +22,7 @@ use crate::downloads::Downloads;
 use crate::emotes::Emotes;
 use crate::error::Result;
 use crate::esports::Esports;
-use crate::feed::{FeedService, Seeded};
+use crate::feed::{FeedService, Seedable};
 use crate::following::Following;
 use crate::home::Home;
 use crate::library::Library;
@@ -30,10 +30,11 @@ use crate::live::Live;
 use crate::messages::Messages;
 use crate::pgc::Pgc;
 use crate::playlist::{Playlist, Playlists};
-use crate::ports::{FeedbackSink, RuleSource};
+use crate::ports::{FeedConfig, FeedbackSink, HomeFeed, PlaylistBackup, ProfileBackup, RuleSource, SettingsPort};
 use crate::preferences::Preferences;
 use crate::reading::Reading;
 use crate::seasons::Seasons;
+use crate::settings::SettingsService;
 use crate::sources::{
     BiliRecommendSource, FollowedUpsSource, PopularSource, PreferredZoneSource, RankingSource, RelatedSource,
 };
@@ -74,6 +75,10 @@ impl Services {
         let http = Arc::new(HttpClient::new(session)?);
         let store = Arc::new(SqliteStore::open(data_dir.join("rubi.db"))?);
         let cards = Arc::new(CardCache::default());
+        let settings = Arc::new(SettingsService::open(store.clone())?);
+        let rules: Arc<dyn RuleSource> = settings.clone();
+        let feed_config: Arc<dyn FeedConfig> = settings.clone();
+        let settings_port: Arc<dyn SettingsPort> = settings;
 
         let feed_api: Arc<dyn FeedApi> = Arc::new(WebFeed::new(http.clone()));
         let related = Arc::new(RelatedSource::new(feed_api.clone()));
@@ -86,10 +91,11 @@ impl Services {
             related.clone(),
             zones.clone(),
         ];
-        let feed =
-            Arc::new(FeedService::new(store.clone(), sources, Seeded { related: Some(related), zones: Some(zones) })?);
-        let rules: Arc<dyn RuleSource> = feed.clone();
+        let seeded: Vec<Arc<dyn Seedable>> = vec![related, zones];
+        let feed = Arc::new(FeedService::new(store.clone(), feed_config, sources, seeded)?);
+        let home_feed: Arc<dyn HomeFeed> = feed.clone();
         let feedback: Arc<dyn FeedbackSink> = feed.clone();
+        let profile: Arc<dyn ProfileBackup> = feed;
 
         let web_account = Arc::new(WebAccount::new(http.clone()));
         let actions_api: Arc<dyn ActionApi> = web_account.clone();
@@ -101,12 +107,13 @@ impl Services {
         let account = Arc::new(Account::new(http.clone(), Arc::new(WebAuth::new(http.clone()))));
         let videos = Arc::new(Videos::new(Arc::new(WebVideo::new(http.clone())), cards.clone()));
         let playlist = Arc::new(Playlist::new(store.clone()));
+        let playlist_backup: Arc<dyn PlaylistBackup> = playlist.clone();
         let seasons = Seasons::new(Arc::new(WebSeasons::new(http.clone())), store.clone(), cards.clone());
         let downloads =
             Downloads::new(videos.clone(), Arc::new(WebMedia::new(http.clone())), store, data_dir.join("downloads"));
 
         Ok(Self {
-            home: Home::new(feed.clone(), videos.clone(), cards.clone()),
+            home: Home::new(home_feed, feedback.clone(), videos.clone(), cards.clone()),
             danmaku: Danmakus::new(Arc::new(WebDanmaku::new(http.clone())), rules.clone()),
             stein: Stein::new(Arc::new(WebStein::new(http.clone()))),
             comments: Comments::new(Arc::new(WebComment::new(http.clone())), rules.clone()),
@@ -130,7 +137,7 @@ impl Services {
             library: Library::new(library_api, actions_api, account.clone(), videos.clone(), cards.clone()),
             messages: Messages::new(notices, chat, rules.clone()),
             playlists: Playlists::new(playlist.clone(), videos.clone(), cards),
-            preferences: Preferences::new(feed, playlist),
+            preferences: Preferences::new(settings_port, profile, playlist_backup),
             reading: Reading::new(Arc::new(WebArticle::new(http.clone())), rules.clone()),
             downloads,
             live: Live::new(Arc::new(WebLive::new(http.clone())), rules.clone()),

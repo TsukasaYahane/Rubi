@@ -5,21 +5,28 @@ use std::sync::Arc;
 
 use rubi_model::{DislikeReason, FeedbackEvent, ItemRef, Signal, now_secs};
 use rubi_recommend::{Ranked, ScoreBreakdown};
-use rubi_store::{FilterLogEntry, SqliteStore};
+use rubi_store::FilterLogEntry;
 
 use crate::error::Result;
-use crate::feed::{FeedService, RefreshReport};
-use crate::videos::{CardCache, Videos};
+use crate::feed::RefreshReport;
+use crate::ports::{FeedbackSink, HomeFeed, VideoLookup};
+use crate::videos::CardCache;
 
 pub struct Home {
-    feed: Arc<FeedService<SqliteStore>>,
-    videos: Arc<Videos>,
+    feed: Arc<dyn HomeFeed>,
+    feedback: Arc<dyn FeedbackSink>,
+    videos: Arc<dyn VideoLookup>,
     cards: Arc<CardCache>,
 }
 
 impl Home {
-    pub(crate) fn new(feed: Arc<FeedService<SqliteStore>>, videos: Arc<Videos>, cards: Arc<CardCache>) -> Self {
-        Self { feed, videos, cards }
+    pub(crate) fn new(
+        feed: Arc<dyn HomeFeed>,
+        feedback: Arc<dyn FeedbackSink>,
+        videos: Arc<dyn VideoLookup>,
+        cards: Arc<CardCache>,
+    ) -> Self {
+        Self { feed, feedback, videos, cards }
     }
 
     /// Fills the candidate pool from every source that is not cooling down.
@@ -53,7 +60,7 @@ impl Home {
             }
             other => other,
         };
-        self.feed.record(FeedbackEvent { signal, item: Some(ItemRef::of(&card)), at: now_secs() })
+        self.feedback.record(FeedbackEvent { signal, item: Some(ItemRef::of(&card)), at: now_secs() })
     }
 
     /// What the rules removed lately, newest first.

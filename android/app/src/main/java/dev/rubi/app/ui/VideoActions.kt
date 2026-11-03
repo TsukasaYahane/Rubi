@@ -82,11 +82,11 @@ fun VideoActions(app: RubiApp, nav: Nav, d: FfiVideoDetail, offline: Boolean = t
     var sheet by remember { mutableStateOf(ActionSheet.None) }
     // Play lists are local: no login needed. How many lists hold this video.
     var listedIn by remember { mutableStateOf(0) }
-    LaunchedEffect(d.bvid, sheet) { listedIn = runCatching { app.core.playlistsWith(d.bvid).size }.getOrDefault(0) }
+    LaunchedEffect(d.bvid, sheet) { listedIn = offMain { runCatching { app.core.playlistsWith(d.bvid).size }.getOrDefault(0) } }
     // 离线缓存 of this video: 离线 (none yet), 下载中, 已缓存…
     var downloadState by remember { mutableStateOf("离线") }
     LaunchedEffect(d.bvid, sheet) {
-        val mine = runCatching { app.core.downloads() }.getOrNull()?.firstOrNull { it.card.bvid == d.bvid }
+        val mine = offMain { runCatching { app.core.downloads() }.getOrNull() }?.firstOrNull { it.card.bvid == d.bvid }
         downloadState = when (mine?.state) {
             null -> "离线"
             FfiDownloadState.DONE -> "已缓存"

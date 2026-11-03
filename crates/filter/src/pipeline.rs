@@ -131,9 +131,15 @@ impl<T: ?Sized> Pipeline<T> {
     }
 
     pub fn judge(&self, item: &T) -> Decision {
+        self.judge_with(item, None)
+    }
+
+    /// Like [`judge`](Self::judge), with `extra` as one more rule after the others: a check
+    /// that depends on the moment (what was watched) without rebuilding the pipeline.
+    pub fn judge_with(&self, item: &T, extra: Option<&dyn Rule<T>>) -> Decision {
         let mut penalties = Vec::new();
         let mut multiplier = 1.0;
-        for rule in &self.rules {
+        for rule in self.rules.iter().map(|r| r.as_ref()).chain(extra) {
             let hit = |reason: String| Hit { rule_id: rule.id().to_owned(), category: rule.category(), reason };
             match rule.judge(item) {
                 Verdict::Pass => {}

@@ -135,7 +135,7 @@ fun WatchLaterScreen(app: RubiApp, nav: Nav, state: WatchLaterState) {
         busy = true
         scope.launch {
             runCatching { block() }
-                .onSuccess { note = done; picked.clear(); pager.items.removeAll(gone) }
+                .onSuccess { note = done; picked.clear(); pager.removeAll(gone) }
                 .onFailure { note = if (it is RubiException.NotLoggedIn) "需要登录" else "操作失败：${it.message}" }
             busy = false
         }

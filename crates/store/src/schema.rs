@@ -61,6 +61,10 @@ const MIGRATIONS: &[&str] = &[
      );
      INSERT INTO playlist_items(list_id, pos, bvid, card) SELECT 1, pos, bvid, card FROM playlist;
      DROP TABLE playlist;",
+    // Pruning by age, and the events read by kind (see HousekeepingRepo, EventRepo).
+    "CREATE INDEX exposures_last ON exposures(last_at);
+     CREATE INDEX watched_at ON watched(at);
+     CREATE INDEX events_kind_at ON events(kind, at);",
 ];
 
 pub fn migrate(conn: &Connection) -> rusqlite::Result<()> {

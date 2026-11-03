@@ -1,11 +1,11 @@
 //! Flat, FFI-friendly records. Each mirrors a core type with only what the UI draws.
 
-use rubi_api::Stream;
+use rubi_core::ScoreBreakdown;
+use rubi_core::Stream;
 use rubi_model::{
     ChatMessage, ChatSession, Comment, Danmaku, JumpMark, Notice, ThreadRow, UnreadCounts, VideoCard, VideoRef,
     without_reply_prefix,
 };
-use rubi_recommend::ScoreBreakdown;
 
 #[derive(Debug, Clone, uniffi::Record)]
 pub struct FfiVideoCard {
@@ -30,8 +30,8 @@ impl FfiVideoCard {
         Self {
             bvid: c.bvid.clone(),
             aid: c.aid,
-            title: rubi_api::plain_letters(&c.title),
-            cover: rubi_api::https_image(&c.cover),
+            title: rubi_core::plain_letters(&c.title),
+            cover: rubi_core::https_image(&c.cover),
             up_name: c.owner.name.clone(),
             up_mid: c.owner.mid,
             zone: c.zone.as_ref().map(|z| z.name.clone()),
@@ -45,8 +45,8 @@ impl FfiVideoCard {
     }
 }
 
-pub fn factor_label(f: rubi_recommend::FactorId) -> &'static str {
-    use rubi_recommend::FactorId::*;
+pub fn factor_label(f: rubi_core::FactorId) -> &'static str {
+    use rubi_core::FactorId::*;
     match f {
         Interest => "兴趣匹配",
         Follow => "关注 UP",
@@ -60,12 +60,7 @@ pub fn factor_label(f: rubi_recommend::FactorId) -> &'static str {
 }
 
 fn reason_label(s: &ScoreBreakdown) -> String {
-    s.parts
-        .iter()
-        .filter(|p| p.contribution > 0.0)
-        .max_by(|a, b| a.contribution.total_cmp(&b.contribution))
-        .map(|p| factor_label(p.factor).to_owned())
-        .unwrap_or_default()
+    s.main_factor().map(factor_label).unwrap_or_default().to_owned()
 }
 
 /// Everything the player page's 视频详情 block shows.
@@ -689,8 +684,8 @@ pub struct FfiTriple {
     pub coins: u32,
 }
 
-impl From<rubi_api::Triple> for FfiTriple {
-    fn from(t: rubi_api::Triple) -> Self {
+impl From<rubi_core::Triple> for FfiTriple {
+    fn from(t: rubi_core::Triple) -> Self {
         Self { liked: t.liked, coined: t.coined, favorited: t.favorited, coins: t.coins }
     }
 }
@@ -777,7 +772,7 @@ pub struct FfiSolvedCaptcha {
     pub seccode: String,
 }
 
-impl From<FfiSolvedCaptcha> for rubi_api::SolvedCaptcha {
+impl From<FfiSolvedCaptcha> for rubi_core::SolvedCaptcha {
     fn from(c: FfiSolvedCaptcha) -> Self {
         Self { token: c.token, challenge: c.challenge, validate: c.validate, seccode: c.seccode }
     }
@@ -827,7 +822,7 @@ pub struct FfiSteinVar {
 }
 
 impl FfiSteinNode {
-    pub fn of(n: &rubi_api::SteinNode, vars: Vec<(String, f64)>) -> Self {
+    pub fn of(n: &rubi_core::SteinNode, vars: Vec<(String, f64)>) -> Self {
         // The first question that has choices; trailing entries are the ending module.
         let question = n.questions.iter().find(|q| !q.choices.is_empty()).map(|q| FfiSteinQuestion {
             kind: q.kind,

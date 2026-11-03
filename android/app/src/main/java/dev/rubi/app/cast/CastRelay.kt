@@ -9,6 +9,8 @@ import java.net.ServerSocket
 import java.net.Socket
 import java.net.URL
 import java.util.UUID
+import java.util.concurrent.Executors
+import java.util.concurrent.RejectedExecutionException
 import kotlin.concurrent.thread
 
 /**
@@ -18,7 +20,9 @@ import kotlin.concurrent.thread
  * only the one current video, under an unguessable path, and stops when 投屏 ends.
  */
 class CastRelay {
-    private var server: ServerSocket? = null
+    @Volatile private var server: ServerSocket? = null
+    /** A TV opens a few connections at once (probe, ranges); more wait, none starve the phone. */
+    private val workers = Executors.newFixedThreadPool(MAX_CLIENTS) { r -> Thread(r, "rubi-cast-client").apply { isDaemon = true } }
     @Volatile private var source: List<String> = emptyList()
     @Volatile private var headers: Map<String, String> = emptyMap()
     @Volatile private var token = UUID.randomUUID().toString()
@@ -34,7 +38,13 @@ class CastRelay {
             thread(name = "rubi-cast-relay", isDaemon = true) {
                 while (!srv.isClosed) {
                     val client = runCatching { srv.accept() }.getOrNull() ?: break
-                    thread(isDaemon = true) { runCatching { handle(client) }; runCatching { client.close() } }
+                    // A client that connects and says nothing is dropped instead of holding a worker.
+                    runCatching { client.soTimeout = CLIENT_TIMEOUT_MS }
+                    try {
+                        workers.execute { runCatching { handle(client) }; runCatching { client.close() } }
+                    } catch (e: RejectedExecutionException) {
+                        runCatching { client.close() }
+                    }
                 }
             }
         }
@@ -49,7 +59,7 @@ class CastRelay {
 
     private fun handle(client: Socket) {
         val input = BufferedInputStream(client.getInputStream())
-        val lines = generateSequence { readLine(input) }.takeWhile { it.isNotEmpty() }.toList()
+        val lines = generateSequence { readLine(input) }.takeWhile { it.isNotEmpty() }.take(MAX_HEADER_LINES).toList()
         val request = lines.firstOrNull() ?: return
         val method = request.substringBefore(' ')
         val path = request.split(' ').getOrNull(1) ?: ""
@@ -118,3 +128,10 @@ class CastRelay {
             ?.hostAddress
     }.getOrNull()
 }
+
+/** Connections served at once. */
+private const val MAX_CLIENTS = 4
+/** A read that waits longer than this ends the connection. */
+private const val CLIENT_TIMEOUT_MS = 30_000
+/** Request header lines read at most. */
+private const val MAX_HEADER_LINES = 100

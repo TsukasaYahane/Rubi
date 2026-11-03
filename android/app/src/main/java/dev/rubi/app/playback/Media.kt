@@ -3,14 +3,13 @@ package dev.rubi.app.playback
 import android.content.Context
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.staticCompositionLocalOf
-import dev.rubi.core.RubiCore
 
 /**
  * Everything about playing media for this process, owned by the application and handed to
  * screens through [LocalMedia] (the playback service reaches it through the application).
  * Nothing here is a global: each part is built once, here, from what it needs.
  */
-class Media(context: Context, core: RubiCore) {
+class Media(context: Context, listenSource: ListenSource) {
     /** Real playback: videos and 听视频. */
     val player = MainPlayer(context)
 
@@ -18,7 +17,7 @@ class Media(context: Context, core: RubiCore) {
     val preview = PreviewPlayer(context)
 
     /** 听视频: what is heard; the core picks what comes next. */
-    val listening = Listening(player, core)
+    val listening = Listening(player, listenSource)
 
     val pip = Pip()
 

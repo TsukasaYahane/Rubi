@@ -73,7 +73,7 @@ impl Discover {
     /// UPs whose name or alias fits, without those the rule table blocks.
     pub async fn search_users(&self, keyword: &str, page: u32) -> Result<UserHits> {
         let mut hits = self.search.users(keyword, page.max(1)).await?;
-        let blocked = self.rules.rules().up_blacklist;
+        let blocked = self.rules.rules().up_blacklist.clone();
         hits.users.retain(|u| !blocked.contains(&u.mid));
         Ok(hits)
     }
