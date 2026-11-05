@@ -8398,6 +8398,14 @@ impl windows_core::RuntimeType for IInline {
 pub struct IInline_Vtbl {
     pub base__: windows_core::IInspectable_Vtbl,
 }
+windows_core::imp::define_interface!(IInputScope, IInputScope_Vtbl, 0x5c0f85f3_f9d8_4220_b666_045d074d9bfa);
+impl windows_core::RuntimeType for IInputScope {
+    const SIGNATURE: windows_core::imp::ConstBuffer = windows_core::imp::ConstBuffer::for_interface::<Self>();
+}
+#[repr(C)]
+pub struct IInputScope_Vtbl {
+    pub base__: windows_core::IInspectable_Vtbl,
+}
 windows_core::imp::define_interface!(IInputStream, IInputStream_Vtbl, 0x905a0fe2_bc53_11df_8c49_001e4fc686da);
 impl windows_core::RuntimeType for IInputStream {
     const SIGNATURE: windows_core::imp::ConstBuffer = windows_core::imp::ConstBuffer::for_interface::<Self>();
@@ -12697,9 +12705,23 @@ windows_core::imp::define_interface!(
 impl windows_core::RuntimeType for IRectangleGeometry {
     const SIGNATURE: windows_core::imp::ConstBuffer = windows_core::imp::ConstBuffer::for_interface::<Self>();
 }
+impl IRectangleGeometry {
+    pub fn Rect(&self) -> windows_core::Result<Rect> {
+        unsafe {
+            let mut result__ = core::mem::zeroed();
+            (windows_core::Interface::vtable(self).Rect)(windows_core::Interface::as_raw(self), &mut result__)
+                .map(|| result__)
+        }
+    }
+    pub fn SetRect(&self, value: Rect) -> windows_core::Result<()> {
+        unsafe { (windows_core::Interface::vtable(self).SetRect)(windows_core::Interface::as_raw(self), value).ok() }
+    }
+}
 #[repr(C)]
 pub struct IRectangleGeometry_Vtbl {
     pub base__: windows_core::IInspectable_Vtbl,
+    pub Rect: unsafe extern "system" fn(*mut core::ffi::c_void, *mut Rect) -> windows_core::HRESULT,
+    pub SetRect: unsafe extern "system" fn(*mut core::ffi::c_void, Rect) -> windows_core::HRESULT,
 }
 windows_core::imp::define_interface!(
     IResourceDictionary,
@@ -13668,6 +13690,348 @@ pub struct ITextBlock_Vtbl {
         *mut core::ffi::c_void,
     ) -> windows_core::HRESULT,
     pub Focus: unsafe extern "system" fn(*mut core::ffi::c_void, FocusState, *mut bool) -> windows_core::HRESULT,
+}
+windows_core::imp::define_interface!(ITextBox, ITextBox_Vtbl, 0xe48f5a8b_1dff_4352_a1f4_e516514ec882);
+impl windows_core::RuntimeType for ITextBox {
+    const SIGNATURE: windows_core::imp::ConstBuffer = windows_core::imp::ConstBuffer::for_interface::<Self>();
+}
+impl ITextBox {
+    pub fn Text(&self) -> windows_core::Result<String> {
+        unsafe {
+            let mut result__ = core::mem::zeroed();
+            (windows_core::Interface::vtable(self).Text)(windows_core::Interface::as_raw(self), &mut result__).map(
+                || {
+                    let hstring: windows_core::HSTRING = core::mem::transmute(result__);
+                    hstring.to_string_lossy()
+                },
+            )
+        }
+    }
+    pub fn SetText(&self, value: &str) -> windows_core::Result<()> {
+        unsafe {
+            (windows_core::Interface::vtable(self).SetText)(
+                windows_core::Interface::as_raw(self),
+                core::mem::transmute_copy(&windows_core::HSTRING::from(value)),
+            )
+            .ok()
+        }
+    }
+    pub fn SelectedText(&self) -> windows_core::Result<String> {
+        unsafe {
+            let mut result__ = core::mem::zeroed();
+            (windows_core::Interface::vtable(self).SelectedText)(windows_core::Interface::as_raw(self), &mut result__)
+                .map(|| {
+                    let hstring: windows_core::HSTRING = core::mem::transmute(result__);
+                    hstring.to_string_lossy()
+                })
+        }
+    }
+    pub fn SetSelectedText(&self, value: &str) -> windows_core::Result<()> {
+        unsafe {
+            (windows_core::Interface::vtable(self).SetSelectedText)(
+                windows_core::Interface::as_raw(self),
+                core::mem::transmute_copy(&windows_core::HSTRING::from(value)),
+            )
+            .ok()
+        }
+    }
+    pub fn SelectionLength(&self) -> windows_core::Result<i32> {
+        unsafe {
+            let mut result__ = core::mem::zeroed();
+            (windows_core::Interface::vtable(self).SelectionLength)(
+                windows_core::Interface::as_raw(self),
+                &mut result__,
+            )
+            .map(|| result__)
+        }
+    }
+    pub fn SetSelectionLength(&self, value: i32) -> windows_core::Result<()> {
+        unsafe {
+            (windows_core::Interface::vtable(self).SetSelectionLength)(windows_core::Interface::as_raw(self), value)
+                .ok()
+        }
+    }
+    pub fn SelectionStart(&self) -> windows_core::Result<i32> {
+        unsafe {
+            let mut result__ = core::mem::zeroed();
+            (windows_core::Interface::vtable(self).SelectionStart)(windows_core::Interface::as_raw(self), &mut result__)
+                .map(|| result__)
+        }
+    }
+    pub fn SetSelectionStart(&self, value: i32) -> windows_core::Result<()> {
+        unsafe {
+            (windows_core::Interface::vtable(self).SetSelectionStart)(windows_core::Interface::as_raw(self), value).ok()
+        }
+    }
+    pub fn MaxLength(&self) -> windows_core::Result<i32> {
+        unsafe {
+            let mut result__ = core::mem::zeroed();
+            (windows_core::Interface::vtable(self).MaxLength)(windows_core::Interface::as_raw(self), &mut result__)
+                .map(|| result__)
+        }
+    }
+    pub fn SetMaxLength(&self, value: i32) -> windows_core::Result<()> {
+        unsafe {
+            (windows_core::Interface::vtable(self).SetMaxLength)(windows_core::Interface::as_raw(self), value).ok()
+        }
+    }
+    pub fn IsReadOnly(&self) -> windows_core::Result<bool> {
+        unsafe {
+            let mut result__ = core::mem::zeroed();
+            (windows_core::Interface::vtable(self).IsReadOnly)(windows_core::Interface::as_raw(self), &mut result__)
+                .map(|| result__)
+        }
+    }
+    pub fn SetIsReadOnly(&self, value: bool) -> windows_core::Result<()> {
+        unsafe {
+            (windows_core::Interface::vtable(self).SetIsReadOnly)(windows_core::Interface::as_raw(self), value).ok()
+        }
+    }
+    pub fn AcceptsReturn(&self) -> windows_core::Result<bool> {
+        unsafe {
+            let mut result__ = core::mem::zeroed();
+            (windows_core::Interface::vtable(self).AcceptsReturn)(windows_core::Interface::as_raw(self), &mut result__)
+                .map(|| result__)
+        }
+    }
+    pub fn SetAcceptsReturn(&self, value: bool) -> windows_core::Result<()> {
+        unsafe {
+            (windows_core::Interface::vtable(self).SetAcceptsReturn)(windows_core::Interface::as_raw(self), value).ok()
+        }
+    }
+    pub fn TextAlignment(&self) -> windows_core::Result<TextAlignment> {
+        unsafe {
+            let mut result__ = core::mem::zeroed();
+            (windows_core::Interface::vtable(self).TextAlignment)(windows_core::Interface::as_raw(self), &mut result__)
+                .map(|| result__)
+        }
+    }
+    pub fn SetTextAlignment(&self, value: TextAlignment) -> windows_core::Result<()> {
+        unsafe {
+            (windows_core::Interface::vtable(self).SetTextAlignment)(windows_core::Interface::as_raw(self), value).ok()
+        }
+    }
+    pub fn TextWrapping(&self) -> windows_core::Result<TextWrapping> {
+        unsafe {
+            let mut result__ = core::mem::zeroed();
+            (windows_core::Interface::vtable(self).TextWrapping)(windows_core::Interface::as_raw(self), &mut result__)
+                .map(|| result__)
+        }
+    }
+    pub fn SetTextWrapping(&self, value: TextWrapping) -> windows_core::Result<()> {
+        unsafe {
+            (windows_core::Interface::vtable(self).SetTextWrapping)(windows_core::Interface::as_raw(self), value).ok()
+        }
+    }
+    pub fn IsSpellCheckEnabled(&self) -> windows_core::Result<bool> {
+        unsafe {
+            let mut result__ = core::mem::zeroed();
+            (windows_core::Interface::vtable(self).IsSpellCheckEnabled)(
+                windows_core::Interface::as_raw(self),
+                &mut result__,
+            )
+            .map(|| result__)
+        }
+    }
+    pub fn SetIsSpellCheckEnabled(&self, value: bool) -> windows_core::Result<()> {
+        unsafe {
+            (windows_core::Interface::vtable(self).SetIsSpellCheckEnabled)(windows_core::Interface::as_raw(self), value)
+                .ok()
+        }
+    }
+    pub fn IsTextPredictionEnabled(&self) -> windows_core::Result<bool> {
+        unsafe {
+            let mut result__ = core::mem::zeroed();
+            (windows_core::Interface::vtable(self).IsTextPredictionEnabled)(
+                windows_core::Interface::as_raw(self),
+                &mut result__,
+            )
+            .map(|| result__)
+        }
+    }
+    pub fn SetIsTextPredictionEnabled(&self, value: bool) -> windows_core::Result<()> {
+        unsafe {
+            (windows_core::Interface::vtable(self).SetIsTextPredictionEnabled)(
+                windows_core::Interface::as_raw(self),
+                value,
+            )
+            .ok()
+        }
+    }
+    pub fn InputScope(&self) -> windows_core::Result<InputScope> {
+        unsafe {
+            let mut result__ = core::mem::zeroed();
+            (windows_core::Interface::vtable(self).InputScope)(windows_core::Interface::as_raw(self), &mut result__)
+                .and_then(|| windows_core::imp::Type::from_abi(result__))
+        }
+    }
+    pub fn SetInputScope<P0>(&self, value: P0) -> windows_core::Result<()>
+    where
+        P0: windows_core::Param<InputScope>,
+    {
+        unsafe {
+            (windows_core::Interface::vtable(self).SetInputScope)(
+                windows_core::Interface::as_raw(self),
+                value.param().abi(),
+            )
+            .ok()
+        }
+    }
+    pub fn TextChanged<F>(&self, handler: F) -> windows_core::Result<windows_core::EventRevoker>
+    where
+        F: Fn(windows_core::Ref<windows_core::IInspectable>, windows_core::Ref<TextChangedEventArgs>) + 'static,
+    {
+        let handler: TextChangedEventHandler = {
+            let com = windows_core::imp::DelegateBox::<TextChangedEventHandler, F>::new(
+                &TextChangedEventHandlerBox::<F>::VTABLE,
+                handler,
+            );
+            unsafe { core::mem::transmute(windows_core::imp::box_new(com)) }
+        };
+        unsafe {
+            let mut result__ = core::mem::zeroed();
+            let token__ = (windows_core::Interface::vtable(self).TextChanged)(
+                windows_core::Interface::as_raw(self),
+                windows_core::Interface::as_raw(&handler),
+                &mut result__,
+            )
+            .map(|| result__)?;
+            Ok(windows_core::EventRevoker::new(
+                self.clone(),
+                token__,
+                windows_core::Interface::vtable(self).RemoveTextChanged,
+            ))
+        }
+    }
+    pub fn SelectionChanged<F>(&self, handler: F) -> windows_core::Result<windows_core::EventRevoker>
+    where
+        F: Fn(windows_core::Ref<windows_core::IInspectable>, windows_core::Ref<RoutedEventArgs>) + 'static,
+    {
+        let handler: RoutedEventHandler = {
+            let com = windows_core::imp::DelegateBox::<RoutedEventHandler, F>::new(
+                &RoutedEventHandlerBox::<F>::VTABLE,
+                handler,
+            );
+            unsafe { core::mem::transmute(windows_core::imp::box_new(com)) }
+        };
+        unsafe {
+            let mut result__ = core::mem::zeroed();
+            let token__ = (windows_core::Interface::vtable(self).SelectionChanged)(
+                windows_core::Interface::as_raw(self),
+                windows_core::Interface::as_raw(&handler),
+                &mut result__,
+            )
+            .map(|| result__)?;
+            Ok(windows_core::EventRevoker::new(
+                self.clone(),
+                token__,
+                windows_core::Interface::vtable(self).RemoveSelectionChanged,
+            ))
+        }
+    }
+    pub fn ContextMenuOpening<F>(&self, handler: F) -> windows_core::Result<windows_core::EventRevoker>
+    where
+        F: Fn(windows_core::Ref<windows_core::IInspectable>, windows_core::Ref<ContextMenuEventArgs>) + 'static,
+    {
+        let handler: ContextMenuOpeningEventHandler = {
+            let com = windows_core::imp::DelegateBox::<ContextMenuOpeningEventHandler, F>::new(
+                &ContextMenuOpeningEventHandlerBox::<F>::VTABLE,
+                handler,
+            );
+            unsafe { core::mem::transmute(windows_core::imp::box_new(com)) }
+        };
+        unsafe {
+            let mut result__ = core::mem::zeroed();
+            let token__ = (windows_core::Interface::vtable(self).ContextMenuOpening)(
+                windows_core::Interface::as_raw(self),
+                windows_core::Interface::as_raw(&handler),
+                &mut result__,
+            )
+            .map(|| result__)?;
+            Ok(windows_core::EventRevoker::new(
+                self.clone(),
+                token__,
+                windows_core::Interface::vtable(self).RemoveContextMenuOpening,
+            ))
+        }
+    }
+    pub fn Select(&self, start: i32, length: i32) -> windows_core::Result<()> {
+        unsafe {
+            (windows_core::Interface::vtable(self).Select)(windows_core::Interface::as_raw(self), start, length).ok()
+        }
+    }
+    pub fn SelectAll(&self) -> windows_core::Result<()> {
+        unsafe { (windows_core::Interface::vtable(self).SelectAll)(windows_core::Interface::as_raw(self)).ok() }
+    }
+    pub fn GetRectFromCharacterIndex(&self, charindex: i32, trailingedge: bool) -> windows_core::Result<Rect> {
+        unsafe {
+            let mut result__ = core::mem::zeroed();
+            (windows_core::Interface::vtable(self).GetRectFromCharacterIndex)(
+                windows_core::Interface::as_raw(self),
+                charindex,
+                trailingedge,
+                &mut result__,
+            )
+            .map(|| result__)
+        }
+    }
+}
+#[repr(C)]
+pub struct ITextBox_Vtbl {
+    pub base__: windows_core::IInspectable_Vtbl,
+    pub Text: unsafe extern "system" fn(*mut core::ffi::c_void, *mut *mut core::ffi::c_void) -> windows_core::HRESULT,
+    pub SetText: unsafe extern "system" fn(*mut core::ffi::c_void, *mut core::ffi::c_void) -> windows_core::HRESULT,
+    pub SelectedText:
+        unsafe extern "system" fn(*mut core::ffi::c_void, *mut *mut core::ffi::c_void) -> windows_core::HRESULT,
+    pub SetSelectedText:
+        unsafe extern "system" fn(*mut core::ffi::c_void, *mut core::ffi::c_void) -> windows_core::HRESULT,
+    pub SelectionLength: unsafe extern "system" fn(*mut core::ffi::c_void, *mut i32) -> windows_core::HRESULT,
+    pub SetSelectionLength: unsafe extern "system" fn(*mut core::ffi::c_void, i32) -> windows_core::HRESULT,
+    pub SelectionStart: unsafe extern "system" fn(*mut core::ffi::c_void, *mut i32) -> windows_core::HRESULT,
+    pub SetSelectionStart: unsafe extern "system" fn(*mut core::ffi::c_void, i32) -> windows_core::HRESULT,
+    pub MaxLength: unsafe extern "system" fn(*mut core::ffi::c_void, *mut i32) -> windows_core::HRESULT,
+    pub SetMaxLength: unsafe extern "system" fn(*mut core::ffi::c_void, i32) -> windows_core::HRESULT,
+    pub IsReadOnly: unsafe extern "system" fn(*mut core::ffi::c_void, *mut bool) -> windows_core::HRESULT,
+    pub SetIsReadOnly: unsafe extern "system" fn(*mut core::ffi::c_void, bool) -> windows_core::HRESULT,
+    pub AcceptsReturn: unsafe extern "system" fn(*mut core::ffi::c_void, *mut bool) -> windows_core::HRESULT,
+    pub SetAcceptsReturn: unsafe extern "system" fn(*mut core::ffi::c_void, bool) -> windows_core::HRESULT,
+    pub TextAlignment: unsafe extern "system" fn(*mut core::ffi::c_void, *mut TextAlignment) -> windows_core::HRESULT,
+    pub SetTextAlignment: unsafe extern "system" fn(*mut core::ffi::c_void, TextAlignment) -> windows_core::HRESULT,
+    pub TextWrapping: unsafe extern "system" fn(*mut core::ffi::c_void, *mut TextWrapping) -> windows_core::HRESULT,
+    pub SetTextWrapping: unsafe extern "system" fn(*mut core::ffi::c_void, TextWrapping) -> windows_core::HRESULT,
+    pub IsSpellCheckEnabled: unsafe extern "system" fn(*mut core::ffi::c_void, *mut bool) -> windows_core::HRESULT,
+    pub SetIsSpellCheckEnabled: unsafe extern "system" fn(*mut core::ffi::c_void, bool) -> windows_core::HRESULT,
+    pub IsTextPredictionEnabled: unsafe extern "system" fn(*mut core::ffi::c_void, *mut bool) -> windows_core::HRESULT,
+    pub SetIsTextPredictionEnabled: unsafe extern "system" fn(*mut core::ffi::c_void, bool) -> windows_core::HRESULT,
+    pub InputScope:
+        unsafe extern "system" fn(*mut core::ffi::c_void, *mut *mut core::ffi::c_void) -> windows_core::HRESULT,
+    pub SetInputScope:
+        unsafe extern "system" fn(*mut core::ffi::c_void, *mut core::ffi::c_void) -> windows_core::HRESULT,
+    pub TextChanged:
+        unsafe extern "system" fn(*mut core::ffi::c_void, *mut core::ffi::c_void, *mut i64) -> windows_core::HRESULT,
+    pub RemoveTextChanged: unsafe extern "system" fn(*mut core::ffi::c_void, i64) -> windows_core::HRESULT,
+    pub SelectionChanged:
+        unsafe extern "system" fn(*mut core::ffi::c_void, *mut core::ffi::c_void, *mut i64) -> windows_core::HRESULT,
+    pub RemoveSelectionChanged: unsafe extern "system" fn(*mut core::ffi::c_void, i64) -> windows_core::HRESULT,
+    pub ContextMenuOpening:
+        unsafe extern "system" fn(*mut core::ffi::c_void, *mut core::ffi::c_void, *mut i64) -> windows_core::HRESULT,
+    pub RemoveContextMenuOpening: unsafe extern "system" fn(*mut core::ffi::c_void, i64) -> windows_core::HRESULT,
+    pub Select: unsafe extern "system" fn(*mut core::ffi::c_void, i32, i32) -> windows_core::HRESULT,
+    pub SelectAll: unsafe extern "system" fn(*mut core::ffi::c_void) -> windows_core::HRESULT,
+    pub GetRectFromCharacterIndex:
+        unsafe extern "system" fn(*mut core::ffi::c_void, i32, bool, *mut Rect) -> windows_core::HRESULT,
+}
+windows_core::imp::define_interface!(
+    ITextChangedEventArgs,
+    ITextChangedEventArgs_Vtbl,
+    0x4dd04f7d_7a11_4b2e_9933_577df39252b6
+);
+impl windows_core::RuntimeType for ITextChangedEventArgs {
+    const SIGNATURE: windows_core::imp::ConstBuffer = windows_core::imp::ConstBuffer::for_interface::<Self>();
+}
+#[repr(C)]
+pub struct ITextChangedEventArgs_Vtbl {
+    pub base__: windows_core::IInspectable_Vtbl,
 }
 windows_core::imp::define_interface!(ITextElement, ITextElement_Vtbl, 0xe83b0062_d776_4f92_baea_40e77d4791d5);
 impl windows_core::RuntimeType for ITextElement {
@@ -15651,6 +16015,29 @@ impl windows_core::RuntimeName for InlineCollection {
 }
 unsafe impl Send for InlineCollection {}
 unsafe impl Sync for InlineCollection {}
+#[repr(transparent)]
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct InputScope(windows_core::IUnknown);
+windows_core::imp::interface_hierarchy!(InputScope, windows_core::IUnknown, windows_core::IInspectable);
+windows_core::imp::required_hierarchy!(InputScope, DependencyObject);
+impl windows_core::RuntimeType for InputScope {
+    const SIGNATURE: windows_core::imp::ConstBuffer = windows_core::imp::ConstBuffer::for_class::<Self, IInputScope>();
+}
+unsafe impl windows_core::Interface for InputScope {
+    type Vtable = <IInputScope as windows_core::Interface>::Vtable;
+    const IID: windows_core::GUID = <IInputScope as windows_core::Interface>::IID;
+}
+impl core::ops::Deref for InputScope {
+    type Target = IInputScope;
+    fn deref(&self) -> &Self::Target {
+        unsafe { core::mem::transmute(self) }
+    }
+}
+impl windows_core::RuntimeName for InputScope {
+    const NAME: &'static str = "Windows.UI.Xaml.Input.InputScope";
+}
+unsafe impl Send for InputScope {}
+unsafe impl Sync for InputScope {}
 #[repr(transparent)]
 #[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
 pub struct InputStreamOptions(pub u32);
@@ -18181,6 +18568,18 @@ impl windows_core::RuntimeType for Rect {
 pub struct RectangleGeometry(windows_core::IUnknown);
 windows_core::imp::interface_hierarchy!(RectangleGeometry, windows_core::IUnknown, windows_core::IInspectable);
 windows_core::imp::required_hierarchy!(RectangleGeometry, Geometry, DependencyObject);
+impl RectangleGeometry {
+    pub fn new() -> windows_core::Result<Self> {
+        Self::IActivationFactory(|f| f.ActivateInstance::<Self>())
+    }
+    fn IActivationFactory<R, F: FnOnce(&windows_core::imp::IGenericFactory) -> windows_core::Result<R>>(
+        callback: F,
+    ) -> windows_core::Result<R> {
+        static SHARED: windows_core::imp::FactoryCache<RectangleGeometry, windows_core::imp::IGenericFactory> =
+            windows_core::imp::FactoryCache::new();
+        SHARED.call(callback)
+    }
+}
 impl windows_core::RuntimeType for RectangleGeometry {
     const SIGNATURE: windows_core::imp::ConstBuffer =
         windows_core::imp::ConstBuffer::for_class::<Self, IRectangleGeometry>();
@@ -19030,6 +19429,97 @@ unsafe impl Send for TextBlock {}
 unsafe impl Sync for TextBlock {}
 #[repr(transparent)]
 #[derive(Clone, Debug, Eq, PartialEq)]
+pub struct TextBox(windows_core::IUnknown);
+windows_core::imp::interface_hierarchy!(TextBox, windows_core::IUnknown, windows_core::IInspectable);
+windows_core::imp::required_hierarchy!(TextBox, Control, FrameworkElement, UIElement, DependencyObject);
+impl windows_core::RuntimeType for TextBox {
+    const SIGNATURE: windows_core::imp::ConstBuffer = windows_core::imp::ConstBuffer::for_class::<Self, ITextBox>();
+}
+unsafe impl windows_core::Interface for TextBox {
+    type Vtable = <ITextBox as windows_core::Interface>::Vtable;
+    const IID: windows_core::GUID = <ITextBox as windows_core::Interface>::IID;
+}
+impl core::ops::Deref for TextBox {
+    type Target = ITextBox;
+    fn deref(&self) -> &Self::Target {
+        unsafe { core::mem::transmute(self) }
+    }
+}
+impl windows_core::RuntimeName for TextBox {
+    const NAME: &'static str = "Windows.UI.Xaml.Controls.TextBox";
+}
+unsafe impl Send for TextBox {}
+unsafe impl Sync for TextBox {}
+#[repr(transparent)]
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct TextChangedEventArgs(windows_core::IUnknown);
+windows_core::imp::interface_hierarchy!(TextChangedEventArgs, windows_core::IUnknown, windows_core::IInspectable);
+windows_core::imp::required_hierarchy!(TextChangedEventArgs, RoutedEventArgs);
+impl windows_core::RuntimeType for TextChangedEventArgs {
+    const SIGNATURE: windows_core::imp::ConstBuffer =
+        windows_core::imp::ConstBuffer::for_class::<Self, ITextChangedEventArgs>();
+}
+unsafe impl windows_core::Interface for TextChangedEventArgs {
+    type Vtable = <ITextChangedEventArgs as windows_core::Interface>::Vtable;
+    const IID: windows_core::GUID = <ITextChangedEventArgs as windows_core::Interface>::IID;
+}
+impl core::ops::Deref for TextChangedEventArgs {
+    type Target = ITextChangedEventArgs;
+    fn deref(&self) -> &Self::Target {
+        unsafe { core::mem::transmute(self) }
+    }
+}
+impl windows_core::RuntimeName for TextChangedEventArgs {
+    const NAME: &'static str = "Windows.UI.Xaml.Controls.TextChangedEventArgs";
+}
+unsafe impl Send for TextChangedEventArgs {}
+unsafe impl Sync for TextChangedEventArgs {}
+windows_core::imp::define_interface!(
+    TextChangedEventHandler,
+    TextChangedEventHandler_Vtbl,
+    0x8eb35b97_ad87_40e8_818b_77db24759566
+);
+impl windows_core::RuntimeType for TextChangedEventHandler {
+    const SIGNATURE: windows_core::imp::ConstBuffer = windows_core::imp::ConstBuffer::for_interface::<Self>();
+}
+#[repr(C)]
+pub struct TextChangedEventHandler_Vtbl {
+    base__: windows_core::IUnknown_Vtbl,
+    Invoke: unsafe extern "system" fn(
+        this: *mut core::ffi::c_void,
+        sender: *mut core::ffi::c_void,
+        e: *mut core::ffi::c_void,
+    ) -> windows_core::HRESULT,
+}
+struct TextChangedEventHandlerBox<
+    F: Fn(windows_core::Ref<windows_core::IInspectable>, windows_core::Ref<TextChangedEventArgs>) + 'static,
+>(core::marker::PhantomData<(fn() -> F,)>);
+impl<F: Fn(windows_core::Ref<windows_core::IInspectable>, windows_core::Ref<TextChangedEventArgs>) + 'static>
+    TextChangedEventHandlerBox<F>
+{
+    const VTABLE: TextChangedEventHandler_Vtbl = TextChangedEventHandler_Vtbl {
+        base__: windows_core::IUnknown_Vtbl {
+            QueryInterface: windows_core::imp::DelegateBox::<TextChangedEventHandler, F>::QueryInterface,
+            AddRef: windows_core::imp::DelegateBox::<TextChangedEventHandler, F>::AddRef,
+            Release: windows_core::imp::DelegateBox::<TextChangedEventHandler, F>::Release,
+        },
+        Invoke: Self::Invoke,
+    };
+    unsafe extern "system" fn Invoke(
+        this: *mut core::ffi::c_void,
+        sender: *mut core::ffi::c_void,
+        e: *mut core::ffi::c_void,
+    ) -> windows_core::HRESULT {
+        unsafe {
+            let this = &mut *(this as *mut *mut core::ffi::c_void
+                as *mut windows_core::imp::DelegateBox<TextChangedEventHandler, F>);
+            (this.invoke)(core::mem::transmute_copy(&sender), core::mem::transmute_copy(&e));
+            windows_core::HRESULT(0)
+        }
+    }
+}
+#[repr(transparent)]
+#[derive(Clone, Debug, Eq, PartialEq)]
 pub struct TextElement(windows_core::IUnknown);
 windows_core::imp::interface_hierarchy!(TextElement, windows_core::IUnknown, windows_core::IInspectable);
 windows_core::imp::required_hierarchy!(TextElement, DependencyObject);
@@ -19253,6 +19743,18 @@ unsafe impl Sync for TransitionCollection {}
 pub struct TranslateTransform(windows_core::IUnknown);
 windows_core::imp::interface_hierarchy!(TranslateTransform, windows_core::IUnknown, windows_core::IInspectable);
 windows_core::imp::required_hierarchy!(TranslateTransform, Transform, GeneralTransform, DependencyObject);
+impl TranslateTransform {
+    pub fn new() -> windows_core::Result<Self> {
+        Self::IActivationFactory(|f| f.ActivateInstance::<Self>())
+    }
+    fn IActivationFactory<R, F: FnOnce(&windows_core::imp::IGenericFactory) -> windows_core::Result<R>>(
+        callback: F,
+    ) -> windows_core::Result<R> {
+        static SHARED: windows_core::imp::FactoryCache<TranslateTransform, windows_core::imp::IGenericFactory> =
+            windows_core::imp::FactoryCache::new();
+        SHARED.call(callback)
+    }
+}
 impl windows_core::RuntimeType for TranslateTransform {
     const SIGNATURE: windows_core::imp::ConstBuffer =
         windows_core::imp::ConstBuffer::for_class::<Self, ITranslateTransform>();

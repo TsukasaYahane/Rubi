@@ -320,6 +320,8 @@
 - 第 4 步（x64，沙盒内）：首页推荐网格、三档窗口切换（520 / 720 / 1200 宽分别 2 / 3 / 4 列，导航为底栏 / 图标栏 / 图标加文字栏）、返回、二维码显示均已验证。播放已验证：系统 `AdaptiveMediaSource` 接受本地生成的 MPD，位置按实时前进。`Stream` 新增 `segment`（`SegmentBase` 字节范围）供 MPD 使用。扫码登录已验证，重启后经 `PasswordVault` 恢复会话。声音已确认（用户收听，系统音频会话电平也有输出）。
 - 第 3 步（x64，已注册为 UWP 包在 AppContainer 内运行）：纯 Rust XAML 成立。`windows` crate 自 0.38 起不含 `Windows.UI.Xaml`，改用 `windows-bindgen` 0.100 从 SDK 元数据生成绑定（`tools/uwp-bindgen`，`--minimal --flat --compose`，输出 `crates/uwp/src/xaml.rs`）。`Application` 经 `compose` 继承；布局和模板用 `XamlReader` 加载；5000 行 `ListView` 只实例化约 95 行，用 `ContainerContentChanging` 填行代替数据绑定；SQLite、TLS、联网和 UI 线程回调都在沙盒内通过。
 
+正式界面进度（2026-11-05）：播放页三档布局、详情、推荐、评论、操作按钮、弹幕显示与开关、发弹幕栏已完成。弹幕用 72 个文字块的固定池，每帧按播放位置移动，核心负责分轨。账号写操作（赞、币、藏、稍后再看、关注、发弹幕）未实际触发；系统全屏下弹幕是否仍覆盖在画面上未验证。
+
 ---
 
 ## 12. 待抓包确认事项

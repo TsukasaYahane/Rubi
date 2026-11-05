@@ -90,6 +90,7 @@ Windows.UI.Xaml.Controls.IMenuFlyoutItem
 Windows.UI.Xaml.Controls.IPanel
 Windows.UI.Xaml.Controls.IRowDefinition
 Windows.UI.Xaml.Controls.ITextBlock
+Windows.UI.Xaml.Controls.ITextBox
 Windows.UI.Xaml.Controls.IToggleMenuFlyoutItem
 Windows.UI.Xaml.Controls.Image
 Windows.UI.Xaml.Controls.ItemClickEventArgs
@@ -108,6 +109,7 @@ Windows.UI.Xaml.Controls.Primitives.IFlyoutBase
 Windows.UI.Xaml.Controls.RowDefinition
 Windows.UI.Xaml.Controls.TextBlock
 Windows.UI.Xaml.Controls.TextBlock::CreateInstance
+Windows.UI.Xaml.Controls.TextBox
 Windows.UI.Xaml.Controls.ToggleMenuFlyoutItem
 Windows.UI.Xaml.Controls.UIElementCollection
 Windows.UI.Xaml.GridLength
@@ -124,13 +126,17 @@ Windows.UI.Xaml.Markup.IXamlReaderStatics
 Windows.UI.Xaml.Markup.XamlReader
 Windows.UI.Xaml.Media.CompositionTarget
 Windows.UI.Xaml.Media.ICompositionTargetStatics
+Windows.UI.Xaml.Media.IRectangleGeometry
 Windows.UI.Xaml.Media.ISolidColorBrushFactory
 Windows.UI.Xaml.Media.ITranslateTransform
 Windows.UI.Xaml.Media.Imaging.BitmapImage
 Windows.UI.Xaml.Media.Imaging.IBitmapImage
 Windows.UI.Xaml.Media.Imaging.IBitmapImageFactory
+Windows.UI.Xaml.Media.RectangleGeometry
+Windows.UI.Xaml.Media.RectangleGeometry::CreateInstance
 Windows.UI.Xaml.Media.SolidColorBrush
 Windows.UI.Xaml.Media.TranslateTransform
+Windows.UI.Xaml.Media.TranslateTransform::CreateInstance
 Windows.UI.Xaml.RoutedEventArgs
 Windows.UI.Xaml.RoutedEventHandler
 Windows.UI.Xaml.TextWrapping

@@ -1,25 +1,26 @@
 //! 播放: one video through the system player. The manifest comes from `state`; the stream
 //! requests carry the headers B站 asks for through the player's own HTTP client.
 
-use std::cell::RefCell;
+use std::cell::{Cell, RefCell};
 use std::rc::Rc;
 use std::sync::atomic::{AtomicU64, Ordering};
 
-use rubi_core::{Playback, pick_streams};
+use rubi_core::{Playback, SendDanmaku, pick_streams};
 use windows_core::{Error, HRESULT, Interface, Ref, Result};
 
 use crate::state::layout::WindowClass;
 use crate::state::manifest::dash_manifest;
+use crate::ui::danmaku::Overlay;
 use crate::ui::player_actions::Actions;
 use crate::ui::player_side::Side;
 use crate::ui::shell::shell;
 use crate::ui::{load, named, on_click, post, set_text};
 use crate::xaml::{
     AdaptiveMediaSource, AdaptiveMediaSourceCreationStatus, DataWriter, FrameworkElement, Grid, GridLength,
-    GridUnitType, HttpClient, IColumnDefinition, IDataWriter, IFrameworkElement, IInputStream, IMediaPlaybackSource,
-    IMediaPlayer, IMediaPlayerElement, IMediaPlayerFailedEventArgs, IMediaPlayerSource2, IOutputStream,
-    IRandomAccessStream, IRowDefinition, InMemoryRandomAccessStream, MediaPlayer, MediaPlayerFailedEventArgs,
-    MediaSource, SizeChangedEventArgs, Uri,
+    GridUnitType, HttpClient, IColumnDefinition, IDataWriter, IFrameworkElement, IInputStream, IMediaPlaybackSession,
+    IMediaPlaybackSource, IMediaPlayer, IMediaPlayer3, IMediaPlayerElement, IMediaPlayerFailedEventArgs,
+    IMediaPlayerSource2, IOutputStream, IRandomAccessStream, IRowDefinition, ITextBox, InMemoryRandomAccessStream,
+    MediaPlaybackSession, MediaPlayer, MediaPlayerFailedEventArgs, MediaSource, SizeChangedEventArgs, Uri,
 };
 
 /// Quality asked for; the core caps it to what the account may play.
@@ -43,6 +44,7 @@ const LAYOUT: &str = r##"
       <RowDefinition x:Name="VideoRow" Height="*" />
       <RowDefinition Height="Auto" />
       <RowDefinition Height="Auto" />
+      <RowDefinition Height="Auto" />
     </Grid.RowDefinitions>
     <Button x:Name="Back" Background="Transparent" BorderThickness="0" Padding="12,8">
       <StackPanel Orientation="Horizontal">
@@ -50,12 +52,25 @@ const LAYOUT: &str = r##"
       </StackPanel>
     </Button>
     <MediaPlayerElement x:Name="Video" Grid.Row="1" AreTransportControlsEnabled="True" Stretch="Uniform" />
-    <StackPanel Grid.Row="2" Margin="16,10,16,6">
+    <Canvas x:Name="Danmaku" Grid.Row="1" IsHitTestVisible="False" />
+    <Grid Grid.Row="2" Background="#111111" Padding="12,6">
+      <Grid.ColumnDefinitions>
+        <ColumnDefinition Width="*" />
+        <ColumnDefinition Width="Auto" />
+      </Grid.ColumnDefinitions>
+      <TextBox x:Name="SendText" PlaceholderText="发个友善的弹幕…" MaxLength="100" BorderThickness="0,0,0,1"
+               Background="Transparent" Foreground="White" />
+      <Button x:Name="SendButton" Grid.Column="1" Background="Transparent" BorderThickness="0" Margin="8,0,0,0"
+              Foreground="White">
+        <FontIcon Glyph="&#xE724;" FontSize="18" />
+      </Button>
+    </Grid>
+    <StackPanel Grid.Row="3" Margin="16,10,16,6">
       <TextBlock x:Name="Title" FontSize="20" FontWeight="Light" TextWrapping="Wrap" MaxLines="2" />
       <TextBlock x:Name="Meta" FontSize="12" Margin="0,4,0,0" TextWrapping="Wrap" MaxLines="3"
                  Foreground="{ThemeResource SystemControlForegroundBaseMediumBrush}" />
     </StackPanel>
-    <ScrollViewer Grid.Row="3" HorizontalScrollMode="Auto" VerticalScrollMode="Disabled"
+    <ScrollViewer Grid.Row="4" HorizontalScrollMode="Auto" VerticalScrollMode="Disabled"
                   HorizontalScrollBarVisibility="Hidden" VerticalScrollBarVisibility="Disabled">
       <StackPanel Orientation="Horizontal" Margin="6,0,6,8">
         <StackPanel.Resources>
@@ -77,6 +92,8 @@ const LAYOUT: &str = r##"
           <FontIcon Glyph="&#xE734;" FontSize="20" /><TextBlock x:Name="FavText" Text="藏" FontSize="12" Margin="0,3,0,0" HorizontalAlignment="Center" /></StackPanel></Button>
         <Button x:Name="ActLater"><StackPanel>
           <FontIcon Glyph="&#xE823;" FontSize="20" /><TextBlock x:Name="LaterText" Text="稍后" FontSize="12" Margin="0,3,0,0" HorizontalAlignment="Center" /></StackPanel></Button>
+        <Button x:Name="ActDanmaku"><StackPanel>
+          <FontIcon Glyph="&#xE8BD;" FontSize="20" /><TextBlock x:Name="DanmakuText" Text="弹幕 开" FontSize="12" Margin="0,3,0,0" HorizontalAlignment="Center" /></StackPanel></Button>
         <Button x:Name="ActFollow"><StackPanel>
           <FontIcon Glyph="&#xE8FA;" FontSize="20" /><TextBlock x:Name="FollowText" Text="关注" FontSize="12" Margin="0,3,0,0" HorizontalAlignment="Center" /></StackPanel></Button>
       </StackPanel>
@@ -158,6 +175,10 @@ struct Page {
     root: IFrameworkElement,
     side: Rc<Side>,
     actions: Rc<Actions>,
+    overlay: Rc<RefCell<Option<Rc<Overlay>>>>,
+    /// What 发弹幕 needs: the video, and its part once known.
+    bvid: String,
+    cid: Rc<Cell<u64>>,
 }
 
 fn page() -> Option<Page> {
@@ -183,6 +204,14 @@ pub fn actions(run: u64) -> Option<Rc<Actions>> {
         return None;
     }
     page().map(|p| p.actions)
+}
+
+/// The danmaku layer, if opening `run` is still on show.
+pub fn overlay(run: u64) -> Option<Rc<Overlay>> {
+    if run != self::run() {
+        return None;
+    }
+    page()?.overlay.borrow().clone()
 }
 
 /// Shows a line under the title.
@@ -237,7 +266,11 @@ pub fn show(bvid: &str, title: &str, uploader: &str) -> Result<()> {
     on_click(&root, "Back", go_back)?;
     let pane = Side::attach(&root)?;
     let actions = Actions::attach(&root, bvid)?;
-    PAGE.with(|p| *p.borrow_mut() = Some(Page { root: root.clone(), side: pane, actions }));
+    let (shown_overlay, cid) = (Rc::new(RefCell::new(None)), Rc::new(Cell::new(0)));
+    let opened = Page { root: root.clone(), side: pane, actions, overlay: shown_overlay, bvid: bvid.to_owned(), cid };
+    PAGE.with(|p| *p.borrow_mut() = Some(opened));
+    on_click(&root, "ActDanmaku", toggle_danmaku)?;
+    on_click(&root, "SendButton", send_danmaku)?;
     let sizing = root.clone();
     let revoker = root.SizeChanged(move |_: Ref<windows_core::IInspectable>, _: Ref<SizeChangedEventArgs>| {
         let _ = apply_layout(&sizing);
@@ -275,7 +308,9 @@ pub fn show(bvid: &str, title: &str, uploader: &str) -> Result<()> {
     });
     backend.spawn(async move {
         let source = match core.services.videos.playback(&bvid, QUALITY).await {
-            Ok(playback) => open_source(&playback).map_err(|e| e.message()),
+            Ok(playback) => open_source(&playback)
+                .map(|source| (source, playback.cid, playback.url.duration_ms as u32))
+                .map_err(|e| e.message()),
             Err(e) => Err(e.to_string()),
         };
         post(&dispatcher, move || {
@@ -293,12 +328,72 @@ fn go_back() {
     }
 }
 
-fn shown(source: std::result::Result<MediaSource, String>, uploader: &str) -> Result<()> {
-    let Some(root) = shell().and_then(|s| s.current_page().ok()) else { return Ok(()) };
+fn shown(source: std::result::Result<(MediaSource, u64, u32), String>, uploader: &str) -> Result<()> {
+    let Some(page) = page() else { return Ok(()) };
     match source {
-        Ok(source) => play(&root, &source),
-        Err(problem) => set_text(&root, "Meta", &format!("{uploader} · 无法播放：{problem}")),
+        Ok((source, cid, duration_ms)) => {
+            let session = play(&page.root, &source)?;
+            page.cid.set(cid);
+            let overlay = Overlay::attach(&page.root, session)?;
+            if let Some(shell) = shell()
+                && let Some(backend) = shell.backend.get().cloned()
+            {
+                overlay.load(backend, shell.dispatcher.clone(), cid, duration_ms);
+            }
+            *page.overlay.borrow_mut() = Some(overlay);
+            Ok(())
+        }
+        Err(problem) => set_text(&page.root, "Meta", &format!("{uploader} · 无法播放：{problem}")),
     }
+}
+
+fn toggle_danmaku() {
+    let Some(page) = page() else { return };
+    if let Some(overlay) = page.overlay.borrow().as_ref() {
+        let on = overlay.toggle();
+        let _ = set_text(&page.root, "DanmakuText", if on { "弹幕 开" } else { "弹幕 关" });
+    }
+}
+
+fn send_danmaku() {
+    let _ = send_typed();
+}
+
+fn send_typed() -> Result<()> {
+    let (Some(page), Some(shell)) = (page(), shell()) else { return Ok(()) };
+    let Some(backend) = shell.backend.get().cloned() else { return Ok(()) };
+    if !backend.services.account.is_logged_in() {
+        crate::ui::shell::show_tab(crate::ui::shell::Tab::Me);
+        return Ok(());
+    }
+    let field = named::<ITextBox>(&page.root, "SendText")?;
+    let text = field.Text()?;
+    let cid = page.cid.get();
+    if text.trim().is_empty() || cid == 0 {
+        return Ok(());
+    }
+    let position = PLAYING.with(|p| {
+        p.borrow().as_ref().and_then(|player| {
+            let session = player.cast::<IMediaPlayer3>().and_then(|m| m.PlaybackSession()).ok()?;
+            session.cast::<IMediaPlaybackSession>().and_then(|s| s.Position()).ok()
+        })
+    });
+    let progress_ms = position.map_or(0, |t| (t.duration / 10_000) as u32);
+    field.SetText("")?;
+    let request = SendDanmaku { bvid: page.bvid.clone(), cid, progress_ms, text, mode: 1, color: 0xFF_FFFF };
+    let (dispatcher, run, core) = (shell.dispatcher.clone(), self::run(), backend.clone());
+    backend.spawn(async move {
+        let sent = core.services.danmaku.send(request).await.map_err(|e| e.to_string());
+        post(&dispatcher, move || match sent {
+            Ok(sent) => {
+                if let Some(overlay) = overlay(run) {
+                    overlay.add(sent);
+                }
+            }
+            Err(problem) => say(&format!("发送失败：{problem}")),
+        });
+    });
+    Ok(())
 }
 
 /// A failure in the player shows on the page.
@@ -327,14 +422,15 @@ fn report_failures(player: &MediaPlayer) -> Result<()> {
     Ok(())
 }
 
-fn play(root: &IFrameworkElement, source: &MediaSource) -> Result<()> {
+fn play(root: &IFrameworkElement, source: &MediaSource) -> Result<MediaPlaybackSession> {
     let player = MediaPlayer::new()?;
     player.cast::<IMediaPlayerSource2>()?.SetSource(&source.cast::<IMediaPlaybackSource>()?)?;
     named::<IMediaPlayerElement>(root, "Video")?.SetMediaPlayer(&player)?;
     report_failures(&player)?;
     player.cast::<IMediaPlayer>()?.Play()?;
+    let session = player.cast::<IMediaPlayer3>()?.PlaybackSession()?;
     PLAYING.with(|p| *p.borrow_mut() = Some(player));
-    Ok(())
+    Ok(session)
 }
 
 /// The media source for `playback`. Blocks on WinRT calls: never on the UI thread.
