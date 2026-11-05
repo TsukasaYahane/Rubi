@@ -308,6 +308,7 @@ mod tests {
             codecs: codecs.into(),
             width: 0,
             height: 0,
+            segment: None,
         }
     }
 

@@ -70,8 +70,8 @@ pub use settings::{DanmakuDisplay, FeedSettings, PlaybackSettings, PreviewSettin
 pub use watch_later::WatchLater;
 // The lower crates' types the app-facing layer converts; it depends on this crate only.
 pub use rubi_api::{
-    ApiError, CommentArea, QrState, SendDanmaku, Session, SolvedCaptcha, SteinNode, Stream, Triple, UpOrder,
-    https_image, plain_letters,
+    ApiError, CommentArea, QrState, SegmentRanges, SendDanmaku, Session, SolvedCaptcha, SteinNode, Stream, Triple,
+    UpOrder, https_image, plain_letters,
 };
 pub use rubi_filter::danmaku::DanmakuOutput;
 pub use rubi_filter::danmaku::layout::{Lane, Placement};

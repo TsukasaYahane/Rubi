@@ -98,6 +98,14 @@ fn season_of(v: &Value) -> Option<Season> {
     (!sections.is_empty()).then(|| Season { id: u64_of(&v["id"]), title: str_of(&v["title"]), sections })
 }
 
+/// Where a stream's header and segment index sit in its file, as HTTP byte ranges (`0-999`).
+/// A DASH manifest needs them; players that read the file from the start do not.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct SegmentRanges {
+    pub init: String,
+    pub index: String,
+}
+
 #[derive(Debug, Clone, PartialEq)]
 pub struct Stream {
     pub id: u32,
@@ -107,6 +115,7 @@ pub struct Stream {
     pub codecs: String,
     pub width: u32,
     pub height: u32,
+    pub segment: Option<SegmentRanges>,
 }
 
 /// A whole video as one file, with the qualities it can come in.
@@ -174,6 +183,14 @@ fn cdn_rank(url: &str) -> u8 {
     }
 }
 
+/// The ranges under either spelling the API uses; `None` unless both are there.
+fn segment_of(v: &Value) -> Option<SegmentRanges> {
+    let (web, app) = (&v["SegmentBase"], &v["segment_base"]);
+    let init = [&web["Initialization"], &app["initialization"]].into_iter().map(str_of).find(|s| !s.is_empty())?;
+    let index = [&web["indexRange"], &app["index_range"]].into_iter().map(str_of).find(|s| !s.is_empty())?;
+    Some(SegmentRanges { init, index })
+}
+
 fn stream_of(v: &Value) -> Stream {
     let base = [&v["baseUrl"], &v["base_url"]].into_iter().map(str_of).find(|s| !s.is_empty());
     let backups = [&v["backupUrl"], &v["backup_url"]]
@@ -191,6 +208,7 @@ fn stream_of(v: &Value) -> Stream {
         backup_urls: urls.collect(),
         bandwidth: u64_of(&v["bandwidth"]),
         codecs: str_of(&v["codecs"]),
+        segment: segment_of(v),
         width: u64_of(&v["width"]) as u32,
         height: u64_of(&v["height"]) as u32,
     }
@@ -329,6 +347,15 @@ impl VideoApi for WebVideo {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn reads_segment_ranges_in_either_spelling() {
+        let web = serde_json::json!({"SegmentBase": {"Initialization": "0-999", "indexRange": "1000-2000"}});
+        let app = serde_json::json!({"segment_base": {"initialization": "0-9", "index_range": "10-20"}});
+        assert_eq!(stream_of(&web).segment, Some(SegmentRanges { init: "0-999".into(), index: "1000-2000".into() }));
+        assert_eq!(stream_of(&app).segment, Some(SegmentRanges { init: "0-9".into(), index: "10-20".into() }));
+        assert_eq!(stream_of(&serde_json::json!({"SegmentBase": {"Initialization": "0-9"}})).segment, None);
+    }
 
     #[test]
     fn reads_a_single_file() {

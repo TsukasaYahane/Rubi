@@ -1388,12 +1388,16 @@ dependencies = [
 name = "rubi-uwp"
 version = "0.1.0"
 dependencies = [
+ "qrcode",
  "rubi-core",
+ "rubi-model",
+ "serde_json",
  "tokio",
  "windows-collections",
  "windows-core",
  "windows-future",
  "windows-link 0.100.0",
+ "windows-reference",
  "windows-time",
 ]
 
@@ -2345,6 +2349,16 @@ name = "windows-link"
 version = "0.100.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "9b39de7c7fe78858b0144c50c3fc000bab3be17d5e9b85b1053871693c7f7415"
+
+[[package]]
+name = "windows-reference"
+version = "0.100.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "bdfaf342eb9cfa3b519410caa05f8ebd3b20b7e077cdf80d013a5bca4f1b194b"
+dependencies = [
+ "windows-core",
+ "windows-time",
+]
 
 [[package]]
 name = "windows-result"

@@ -56,5 +56,6 @@ pub use session::Session;
 pub use space::{SpaceApi, UpArticle, UpArticles, UpOrder, UpVideo, UpVideos, WebSpace};
 pub use stein::{SteinApi, SteinChoice, SteinNode, SteinQuestion, SteinVar, WebStein};
 pub use video::{
-    Page, PlayUrl, Season, SeasonEpisode, SeasonSection, SingleFile, Stream, VideoApi, VideoDetail, WebVideo,
+    Page, PlayUrl, Season, SeasonEpisode, SeasonSection, SegmentRanges, SingleFile, Stream, VideoApi, VideoDetail,
+    WebVideo,
 };
