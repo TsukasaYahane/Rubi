@@ -6,15 +6,20 @@ Windows.Foundation.IPropertyValueStatics
 Windows.Foundation.IUriRuntimeClassFactory
 Windows.Foundation.PropertyValue
 Windows.Foundation.Uri
+Windows.Media.Core.AudioTrack
 Windows.Media.Core.IMediaSourceStatics
 Windows.Media.Core.IMediaSourceStatics2
 Windows.Media.Core.MediaSource
+Windows.Media.Playback.IMediaPlaybackItem
+Windows.Media.Playback.IMediaPlaybackItemFactory
 Windows.Media.Playback.IMediaPlaybackSession
 Windows.Media.Playback.IMediaPlaybackSource
 Windows.Media.Playback.IMediaPlayer
 Windows.Media.Playback.IMediaPlayer3
 Windows.Media.Playback.IMediaPlayerFailedEventArgs
 Windows.Media.Playback.IMediaPlayerSource2
+Windows.Media.Playback.MediaPlaybackAudioTrackList
+Windows.Media.Playback.MediaPlaybackItem
 Windows.Media.Playback.MediaPlaybackSession
 Windows.Media.Playback.MediaPlaybackState
 Windows.Media.Playback.MediaPlayer
@@ -23,7 +28,11 @@ Windows.Media.Playback.MediaPlayerFailedEventArgs
 Windows.Media.Streaming.Adaptive.AdaptiveMediaSource
 Windows.Media.Streaming.Adaptive.AdaptiveMediaSourceCreationResult
 Windows.Media.Streaming.Adaptive.AdaptiveMediaSourceCreationStatus
+Windows.Media.Streaming.Adaptive.AdaptiveMediaSourceDownloadFailedEventArgs
+Windows.Media.Streaming.Adaptive.IAdaptiveMediaSource
+Windows.Media.Streaming.Adaptive.IAdaptiveMediaSource3
 Windows.Media.Streaming.Adaptive.IAdaptiveMediaSourceCreationResult
+Windows.Media.Streaming.Adaptive.IAdaptiveMediaSourceDownloadFailedEventArgs
 Windows.Media.Streaming.Adaptive.IAdaptiveMediaSourceStatics
 Windows.Security.Credentials.ICredentialFactory
 Windows.Security.Credentials.IPasswordCredential
@@ -109,3 +118,4 @@ Windows.Web.Http.Headers.IHttpRequestHeaderCollection
 Windows.Web.Http.HttpClient
 Windows.Web.Http.HttpClient::CreateInstance
 Windows.Web.Http.IHttpClient
+Windows.Web.Http.IHttpResponseMessage

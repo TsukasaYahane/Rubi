@@ -3,11 +3,11 @@
 const MEDIUM_MIN: f64 = 600.0;
 const WIDE_MIN: f64 = 840.0;
 
-/// Space around and between the cards of the video grid.
+/// Space around and between the cards of the video grid; the gap sits inside each cell.
 const GRID_PADDING: f64 = 16.0;
-const GRID_GAP: f64 = 10.0;
-/// Room under a card's 16:9 cover for its title and meta line.
-const CARD_TEXT_HEIGHT: f64 = 68.0;
+const GRID_GAP: f64 = 14.0;
+/// Room under a card's 16:9 cover: two lines of title, the meta line, and the gap to the next row.
+const CARD_TEXT_HEIGHT: f64 = 86.0;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum WindowClass {
@@ -77,7 +77,8 @@ mod tests {
     fn cells_fill_the_row() {
         let cell = grid_cell(1016.0, 4);
         assert_eq!(cell.width, 250.0);
-        assert_eq!(cell.cover_height, 135.0);
+        assert_eq!(cell.cover_height, 132.0);
+        assert_eq!(cell.height, 218.0);
         assert!(grid_cell(0.0, 0).width >= 1.0);
     }
 }

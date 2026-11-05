@@ -53,11 +53,11 @@ const LAYOUT: &str = r##"
     </GridView.ItemsPanel>
     <GridView.ItemTemplate>
       <DataTemplate>
-        <StackPanel Margin="0,0,10,10">
+        <StackPanel Margin="0,0,14,14">
           <Image Stretch="UniformToFill" Height="120" />
           <TextBlock FontSize="13" MaxLines="2" TextWrapping="Wrap" TextTrimming="CharacterEllipsis"
-                     Height="38" Margin="0,5,0,0" />
-          <TextBlock FontSize="11" MaxLines="1" TextTrimming="CharacterEllipsis"
+                     Height="38" Margin="0,6,0,0" />
+          <TextBlock FontSize="12" MaxLines="1" TextTrimming="CharacterEllipsis" Height="18" Margin="0,2,0,0"
                      Foreground="{ThemeResource SystemControlForegroundBaseMediumBrush}" />
         </StackPanel>
       </DataTemplate>
@@ -162,7 +162,8 @@ impl HomePage {
         self.loading.set(false);
         match page {
             Ok(cards) => {
-                self.say("");
+                let nothing = cards.is_empty() && self.cards.borrow().is_empty();
+                self.say(if nothing { "暂时没有内容，稍后再打开" } else { "" });
                 let _ = self.append(cards);
             }
             Err(problem) => self.say(&format!("获取失败：{problem}")),

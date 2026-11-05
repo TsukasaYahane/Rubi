@@ -124,6 +124,33 @@ unsafe impl Send for AdaptiveMediaSource {}
 unsafe impl Sync for AdaptiveMediaSource {}
 #[repr(transparent)]
 #[derive(Clone, Debug, Eq, PartialEq)]
+pub struct AdaptiveMediaSourceCorrelatedTimes(windows_core::IUnknown);
+windows_core::imp::interface_hierarchy!(
+    AdaptiveMediaSourceCorrelatedTimes,
+    windows_core::IUnknown,
+    windows_core::IInspectable
+);
+impl windows_core::RuntimeType for AdaptiveMediaSourceCorrelatedTimes {
+    const SIGNATURE: windows_core::imp::ConstBuffer =
+        windows_core::imp::ConstBuffer::for_class::<Self, IAdaptiveMediaSourceCorrelatedTimes>();
+}
+unsafe impl windows_core::Interface for AdaptiveMediaSourceCorrelatedTimes {
+    type Vtable = <IAdaptiveMediaSourceCorrelatedTimes as windows_core::Interface>::Vtable;
+    const IID: windows_core::GUID = <IAdaptiveMediaSourceCorrelatedTimes as windows_core::Interface>::IID;
+}
+impl core::ops::Deref for AdaptiveMediaSourceCorrelatedTimes {
+    type Target = IAdaptiveMediaSourceCorrelatedTimes;
+    fn deref(&self) -> &Self::Target {
+        unsafe { core::mem::transmute(self) }
+    }
+}
+impl windows_core::RuntimeName for AdaptiveMediaSourceCorrelatedTimes {
+    const NAME: &'static str = "Windows.Media.Streaming.Adaptive.AdaptiveMediaSourceCorrelatedTimes";
+}
+unsafe impl Send for AdaptiveMediaSourceCorrelatedTimes {}
+unsafe impl Sync for AdaptiveMediaSourceCorrelatedTimes {}
+#[repr(transparent)]
+#[derive(Clone, Debug, Eq, PartialEq)]
 pub struct AdaptiveMediaSourceCreationResult(windows_core::IUnknown);
 windows_core::imp::interface_hierarchy!(
     AdaptiveMediaSourceCreationResult,
@@ -167,6 +194,189 @@ impl windows_core::imp::TypeKind for AdaptiveMediaSourceCreationStatus {
 impl windows_core::RuntimeType for AdaptiveMediaSourceCreationStatus {
     const SIGNATURE: windows_core::imp::ConstBuffer = windows_core::imp::ConstBuffer::from_slice(
         b"enum(Windows.Media.Streaming.Adaptive.AdaptiveMediaSourceCreationStatus;i4)",
+    );
+}
+#[repr(transparent)]
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct AdaptiveMediaSourceDiagnostics(windows_core::IUnknown);
+windows_core::imp::interface_hierarchy!(
+    AdaptiveMediaSourceDiagnostics,
+    windows_core::IUnknown,
+    windows_core::IInspectable
+);
+impl windows_core::RuntimeType for AdaptiveMediaSourceDiagnostics {
+    const SIGNATURE: windows_core::imp::ConstBuffer =
+        windows_core::imp::ConstBuffer::for_class::<Self, IAdaptiveMediaSourceDiagnostics>();
+}
+unsafe impl windows_core::Interface for AdaptiveMediaSourceDiagnostics {
+    type Vtable = <IAdaptiveMediaSourceDiagnostics as windows_core::Interface>::Vtable;
+    const IID: windows_core::GUID = <IAdaptiveMediaSourceDiagnostics as windows_core::Interface>::IID;
+}
+impl core::ops::Deref for AdaptiveMediaSourceDiagnostics {
+    type Target = IAdaptiveMediaSourceDiagnostics;
+    fn deref(&self) -> &Self::Target {
+        unsafe { core::mem::transmute(self) }
+    }
+}
+impl windows_core::RuntimeName for AdaptiveMediaSourceDiagnostics {
+    const NAME: &'static str = "Windows.Media.Streaming.Adaptive.AdaptiveMediaSourceDiagnostics";
+}
+unsafe impl Send for AdaptiveMediaSourceDiagnostics {}
+unsafe impl Sync for AdaptiveMediaSourceDiagnostics {}
+#[repr(transparent)]
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct AdaptiveMediaSourceDownloadBitrateChangedEventArgs(windows_core::IUnknown);
+windows_core::imp::interface_hierarchy!(
+    AdaptiveMediaSourceDownloadBitrateChangedEventArgs,
+    windows_core::IUnknown,
+    windows_core::IInspectable
+);
+impl windows_core::RuntimeType for AdaptiveMediaSourceDownloadBitrateChangedEventArgs {
+    const SIGNATURE: windows_core::imp::ConstBuffer =
+        windows_core::imp::ConstBuffer::for_class::<Self, IAdaptiveMediaSourceDownloadBitrateChangedEventArgs>();
+}
+unsafe impl windows_core::Interface for AdaptiveMediaSourceDownloadBitrateChangedEventArgs {
+    type Vtable = <IAdaptiveMediaSourceDownloadBitrateChangedEventArgs as windows_core::Interface>::Vtable;
+    const IID: windows_core::GUID =
+        <IAdaptiveMediaSourceDownloadBitrateChangedEventArgs as windows_core::Interface>::IID;
+}
+impl core::ops::Deref for AdaptiveMediaSourceDownloadBitrateChangedEventArgs {
+    type Target = IAdaptiveMediaSourceDownloadBitrateChangedEventArgs;
+    fn deref(&self) -> &Self::Target {
+        unsafe { core::mem::transmute(self) }
+    }
+}
+impl windows_core::RuntimeName for AdaptiveMediaSourceDownloadBitrateChangedEventArgs {
+    const NAME: &'static str = "Windows.Media.Streaming.Adaptive.AdaptiveMediaSourceDownloadBitrateChangedEventArgs";
+}
+unsafe impl Send for AdaptiveMediaSourceDownloadBitrateChangedEventArgs {}
+unsafe impl Sync for AdaptiveMediaSourceDownloadBitrateChangedEventArgs {}
+#[repr(transparent)]
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct AdaptiveMediaSourceDownloadCompletedEventArgs(windows_core::IUnknown);
+windows_core::imp::interface_hierarchy!(
+    AdaptiveMediaSourceDownloadCompletedEventArgs,
+    windows_core::IUnknown,
+    windows_core::IInspectable
+);
+impl windows_core::RuntimeType for AdaptiveMediaSourceDownloadCompletedEventArgs {
+    const SIGNATURE: windows_core::imp::ConstBuffer =
+        windows_core::imp::ConstBuffer::for_class::<Self, IAdaptiveMediaSourceDownloadCompletedEventArgs>();
+}
+unsafe impl windows_core::Interface for AdaptiveMediaSourceDownloadCompletedEventArgs {
+    type Vtable = <IAdaptiveMediaSourceDownloadCompletedEventArgs as windows_core::Interface>::Vtable;
+    const IID: windows_core::GUID = <IAdaptiveMediaSourceDownloadCompletedEventArgs as windows_core::Interface>::IID;
+}
+impl core::ops::Deref for AdaptiveMediaSourceDownloadCompletedEventArgs {
+    type Target = IAdaptiveMediaSourceDownloadCompletedEventArgs;
+    fn deref(&self) -> &Self::Target {
+        unsafe { core::mem::transmute(self) }
+    }
+}
+impl windows_core::RuntimeName for AdaptiveMediaSourceDownloadCompletedEventArgs {
+    const NAME: &'static str = "Windows.Media.Streaming.Adaptive.AdaptiveMediaSourceDownloadCompletedEventArgs";
+}
+unsafe impl Send for AdaptiveMediaSourceDownloadCompletedEventArgs {}
+unsafe impl Sync for AdaptiveMediaSourceDownloadCompletedEventArgs {}
+#[repr(transparent)]
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct AdaptiveMediaSourceDownloadFailedEventArgs(windows_core::IUnknown);
+windows_core::imp::interface_hierarchy!(
+    AdaptiveMediaSourceDownloadFailedEventArgs,
+    windows_core::IUnknown,
+    windows_core::IInspectable
+);
+impl windows_core::RuntimeType for AdaptiveMediaSourceDownloadFailedEventArgs {
+    const SIGNATURE: windows_core::imp::ConstBuffer =
+        windows_core::imp::ConstBuffer::for_class::<Self, IAdaptiveMediaSourceDownloadFailedEventArgs>();
+}
+unsafe impl windows_core::Interface for AdaptiveMediaSourceDownloadFailedEventArgs {
+    type Vtable = <IAdaptiveMediaSourceDownloadFailedEventArgs as windows_core::Interface>::Vtable;
+    const IID: windows_core::GUID = <IAdaptiveMediaSourceDownloadFailedEventArgs as windows_core::Interface>::IID;
+}
+impl core::ops::Deref for AdaptiveMediaSourceDownloadFailedEventArgs {
+    type Target = IAdaptiveMediaSourceDownloadFailedEventArgs;
+    fn deref(&self) -> &Self::Target {
+        unsafe { core::mem::transmute(self) }
+    }
+}
+impl windows_core::RuntimeName for AdaptiveMediaSourceDownloadFailedEventArgs {
+    const NAME: &'static str = "Windows.Media.Streaming.Adaptive.AdaptiveMediaSourceDownloadFailedEventArgs";
+}
+unsafe impl Send for AdaptiveMediaSourceDownloadFailedEventArgs {}
+unsafe impl Sync for AdaptiveMediaSourceDownloadFailedEventArgs {}
+#[repr(transparent)]
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct AdaptiveMediaSourceDownloadRequestedEventArgs(windows_core::IUnknown);
+windows_core::imp::interface_hierarchy!(
+    AdaptiveMediaSourceDownloadRequestedEventArgs,
+    windows_core::IUnknown,
+    windows_core::IInspectable
+);
+impl windows_core::RuntimeType for AdaptiveMediaSourceDownloadRequestedEventArgs {
+    const SIGNATURE: windows_core::imp::ConstBuffer =
+        windows_core::imp::ConstBuffer::for_class::<Self, IAdaptiveMediaSourceDownloadRequestedEventArgs>();
+}
+unsafe impl windows_core::Interface for AdaptiveMediaSourceDownloadRequestedEventArgs {
+    type Vtable = <IAdaptiveMediaSourceDownloadRequestedEventArgs as windows_core::Interface>::Vtable;
+    const IID: windows_core::GUID = <IAdaptiveMediaSourceDownloadRequestedEventArgs as windows_core::Interface>::IID;
+}
+impl core::ops::Deref for AdaptiveMediaSourceDownloadRequestedEventArgs {
+    type Target = IAdaptiveMediaSourceDownloadRequestedEventArgs;
+    fn deref(&self) -> &Self::Target {
+        unsafe { core::mem::transmute(self) }
+    }
+}
+impl windows_core::RuntimeName for AdaptiveMediaSourceDownloadRequestedEventArgs {
+    const NAME: &'static str = "Windows.Media.Streaming.Adaptive.AdaptiveMediaSourceDownloadRequestedEventArgs";
+}
+unsafe impl Send for AdaptiveMediaSourceDownloadRequestedEventArgs {}
+unsafe impl Sync for AdaptiveMediaSourceDownloadRequestedEventArgs {}
+#[repr(transparent)]
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct AdaptiveMediaSourcePlaybackBitrateChangedEventArgs(windows_core::IUnknown);
+windows_core::imp::interface_hierarchy!(
+    AdaptiveMediaSourcePlaybackBitrateChangedEventArgs,
+    windows_core::IUnknown,
+    windows_core::IInspectable
+);
+impl windows_core::RuntimeType for AdaptiveMediaSourcePlaybackBitrateChangedEventArgs {
+    const SIGNATURE: windows_core::imp::ConstBuffer =
+        windows_core::imp::ConstBuffer::for_class::<Self, IAdaptiveMediaSourcePlaybackBitrateChangedEventArgs>();
+}
+unsafe impl windows_core::Interface for AdaptiveMediaSourcePlaybackBitrateChangedEventArgs {
+    type Vtable = <IAdaptiveMediaSourcePlaybackBitrateChangedEventArgs as windows_core::Interface>::Vtable;
+    const IID: windows_core::GUID =
+        <IAdaptiveMediaSourcePlaybackBitrateChangedEventArgs as windows_core::Interface>::IID;
+}
+impl core::ops::Deref for AdaptiveMediaSourcePlaybackBitrateChangedEventArgs {
+    type Target = IAdaptiveMediaSourcePlaybackBitrateChangedEventArgs;
+    fn deref(&self) -> &Self::Target {
+        unsafe { core::mem::transmute(self) }
+    }
+}
+impl windows_core::RuntimeName for AdaptiveMediaSourcePlaybackBitrateChangedEventArgs {
+    const NAME: &'static str = "Windows.Media.Streaming.Adaptive.AdaptiveMediaSourcePlaybackBitrateChangedEventArgs";
+}
+unsafe impl Send for AdaptiveMediaSourcePlaybackBitrateChangedEventArgs {}
+unsafe impl Sync for AdaptiveMediaSourcePlaybackBitrateChangedEventArgs {}
+#[repr(transparent)]
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
+pub struct AdaptiveMediaSourceResourceType(pub i32);
+impl AdaptiveMediaSourceResourceType {
+    pub const Manifest: Self = Self(0);
+    pub const InitializationSegment: Self = Self(1);
+    pub const MediaSegment: Self = Self(2);
+    pub const Key: Self = Self(3);
+    pub const InitializationVector: Self = Self(4);
+    pub const MediaSegmentIndex: Self = Self(5);
+}
+impl windows_core::imp::TypeKind for AdaptiveMediaSourceResourceType {
+    type TypeKind = windows_core::imp::CopyType;
+}
+impl windows_core::RuntimeType for AdaptiveMediaSourceResourceType {
+    const SIGNATURE: windows_core::imp::ConstBuffer = windows_core::imp::ConstBuffer::from_slice(
+        b"enum(Windows.Media.Streaming.Adaptive.AdaptiveMediaSourceResourceType;i4)",
     );
 }
 #[repr(transparent)]
@@ -471,6 +681,28 @@ impl windows_core::RuntimeName for ApplicationInitializationCallbackParams {
 }
 unsafe impl Send for ApplicationInitializationCallbackParams {}
 unsafe impl Sync for ApplicationInitializationCallbackParams {}
+#[repr(transparent)]
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct AudioTrack(windows_core::IUnknown);
+windows_core::imp::interface_hierarchy!(AudioTrack, windows_core::IUnknown, windows_core::IInspectable, IMediaTrack);
+impl windows_core::RuntimeType for AudioTrack {
+    const SIGNATURE: windows_core::imp::ConstBuffer = windows_core::imp::ConstBuffer::for_class::<Self, IMediaTrack>();
+}
+unsafe impl windows_core::Interface for AudioTrack {
+    type Vtable = <IMediaTrack as windows_core::Interface>::Vtable;
+    const IID: windows_core::GUID = <IMediaTrack as windows_core::Interface>::IID;
+}
+impl core::ops::Deref for AudioTrack {
+    type Target = IMediaTrack;
+    fn deref(&self) -> &Self::Target {
+        unsafe { core::mem::transmute(self) }
+    }
+}
+impl windows_core::RuntimeName for AudioTrack {
+    const NAME: &'static str = "Windows.Media.Core.AudioTrack";
+}
+unsafe impl Send for AudioTrack {}
+unsafe impl Sync for AudioTrack {}
 #[repr(transparent)]
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct BasicProperties(windows_core::IUnknown);
@@ -2673,6 +2905,33 @@ unsafe impl Send for HttpRequestMessage {}
 unsafe impl Sync for HttpRequestMessage {}
 #[repr(transparent)]
 #[derive(Clone, Debug, Eq, PartialEq)]
+pub struct HttpResponseHeaderCollection(windows_core::IUnknown);
+windows_core::imp::interface_hierarchy!(
+    HttpResponseHeaderCollection,
+    windows_core::IUnknown,
+    windows_core::IInspectable
+);
+impl windows_core::RuntimeType for HttpResponseHeaderCollection {
+    const SIGNATURE: windows_core::imp::ConstBuffer =
+        windows_core::imp::ConstBuffer::for_class::<Self, IHttpResponseHeaderCollection>();
+}
+unsafe impl windows_core::Interface for HttpResponseHeaderCollection {
+    type Vtable = <IHttpResponseHeaderCollection as windows_core::Interface>::Vtable;
+    const IID: windows_core::GUID = <IHttpResponseHeaderCollection as windows_core::Interface>::IID;
+}
+impl core::ops::Deref for HttpResponseHeaderCollection {
+    type Target = IHttpResponseHeaderCollection;
+    fn deref(&self) -> &Self::Target {
+        unsafe { core::mem::transmute(self) }
+    }
+}
+impl windows_core::RuntimeName for HttpResponseHeaderCollection {
+    const NAME: &'static str = "Windows.Web.Http.Headers.HttpResponseHeaderCollection";
+}
+unsafe impl Send for HttpResponseHeaderCollection {}
+unsafe impl Sync for HttpResponseHeaderCollection {}
+#[repr(transparent)]
+#[derive(Clone, Debug, Eq, PartialEq)]
 pub struct HttpResponseMessage(windows_core::IUnknown);
 windows_core::imp::interface_hierarchy!(HttpResponseMessage, windows_core::IUnknown, windows_core::IInspectable);
 impl windows_core::RuntimeType for HttpResponseMessage {
@@ -2694,6 +2953,91 @@ impl windows_core::RuntimeName for HttpResponseMessage {
 }
 unsafe impl Send for HttpResponseMessage {}
 unsafe impl Sync for HttpResponseMessage {}
+#[repr(transparent)]
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
+pub struct HttpResponseMessageSource(pub i32);
+impl HttpResponseMessageSource {
+    pub const None: Self = Self(0);
+    pub const Cache: Self = Self(1);
+    pub const Network: Self = Self(2);
+}
+impl windows_core::imp::TypeKind for HttpResponseMessageSource {
+    type TypeKind = windows_core::imp::CopyType;
+}
+impl windows_core::RuntimeType for HttpResponseMessageSource {
+    const SIGNATURE: windows_core::imp::ConstBuffer =
+        windows_core::imp::ConstBuffer::from_slice(b"enum(Windows.Web.Http.HttpResponseMessageSource;i4)");
+}
+#[repr(transparent)]
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
+pub struct HttpStatusCode(pub i32);
+impl HttpStatusCode {
+    pub const None: Self = Self(0);
+    pub const Continue: Self = Self(100);
+    pub const SwitchingProtocols: Self = Self(101);
+    pub const Processing: Self = Self(102);
+    pub const Ok: Self = Self(200);
+    pub const Created: Self = Self(201);
+    pub const Accepted: Self = Self(202);
+    pub const NonAuthoritativeInformation: Self = Self(203);
+    pub const NoContent: Self = Self(204);
+    pub const ResetContent: Self = Self(205);
+    pub const PartialContent: Self = Self(206);
+    pub const MultiStatus: Self = Self(207);
+    pub const AlreadyReported: Self = Self(208);
+    pub const IMUsed: Self = Self(226);
+    pub const MultipleChoices: Self = Self(300);
+    pub const MovedPermanently: Self = Self(301);
+    pub const Found: Self = Self(302);
+    pub const SeeOther: Self = Self(303);
+    pub const NotModified: Self = Self(304);
+    pub const UseProxy: Self = Self(305);
+    pub const TemporaryRedirect: Self = Self(307);
+    pub const PermanentRedirect: Self = Self(308);
+    pub const BadRequest: Self = Self(400);
+    pub const Unauthorized: Self = Self(401);
+    pub const PaymentRequired: Self = Self(402);
+    pub const Forbidden: Self = Self(403);
+    pub const NotFound: Self = Self(404);
+    pub const MethodNotAllowed: Self = Self(405);
+    pub const NotAcceptable: Self = Self(406);
+    pub const ProxyAuthenticationRequired: Self = Self(407);
+    pub const RequestTimeout: Self = Self(408);
+    pub const Conflict: Self = Self(409);
+    pub const Gone: Self = Self(410);
+    pub const LengthRequired: Self = Self(411);
+    pub const PreconditionFailed: Self = Self(412);
+    pub const RequestEntityTooLarge: Self = Self(413);
+    pub const RequestUriTooLong: Self = Self(414);
+    pub const UnsupportedMediaType: Self = Self(415);
+    pub const RequestedRangeNotSatisfiable: Self = Self(416);
+    pub const ExpectationFailed: Self = Self(417);
+    pub const UnprocessableEntity: Self = Self(422);
+    pub const Locked: Self = Self(423);
+    pub const FailedDependency: Self = Self(424);
+    pub const UpgradeRequired: Self = Self(426);
+    pub const PreconditionRequired: Self = Self(428);
+    pub const TooManyRequests: Self = Self(429);
+    pub const RequestHeaderFieldsTooLarge: Self = Self(431);
+    pub const InternalServerError: Self = Self(500);
+    pub const NotImplemented: Self = Self(501);
+    pub const BadGateway: Self = Self(502);
+    pub const ServiceUnavailable: Self = Self(503);
+    pub const GatewayTimeout: Self = Self(504);
+    pub const HttpVersionNotSupported: Self = Self(505);
+    pub const VariantAlsoNegotiates: Self = Self(506);
+    pub const InsufficientStorage: Self = Self(507);
+    pub const LoopDetected: Self = Self(508);
+    pub const NotExtended: Self = Self(510);
+    pub const NetworkAuthenticationRequired: Self = Self(511);
+}
+impl windows_core::imp::TypeKind for HttpStatusCode {
+    type TypeKind = windows_core::imp::CopyType;
+}
+impl windows_core::RuntimeType for HttpStatusCode {
+    const SIGNATURE: windows_core::imp::ConstBuffer =
+        windows_core::imp::ConstBuffer::from_slice(b"enum(Windows.Web.Http.HttpStatusCode;i4)");
+}
 #[repr(transparent)]
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct HttpTransferCodingHeaderValueCollection(windows_core::IUnknown);
@@ -2721,6 +3065,22 @@ impl windows_core::RuntimeName for HttpTransferCodingHeaderValueCollection {
 }
 unsafe impl Send for HttpTransferCodingHeaderValueCollection {}
 unsafe impl Sync for HttpTransferCodingHeaderValueCollection {}
+#[repr(transparent)]
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
+pub struct HttpVersion(pub i32);
+impl HttpVersion {
+    pub const None: Self = Self(0);
+    pub const Http10: Self = Self(1);
+    pub const Http11: Self = Self(2);
+    pub const Http20: Self = Self(3);
+}
+impl windows_core::imp::TypeKind for HttpVersion {
+    type TypeKind = windows_core::imp::CopyType;
+}
+impl windows_core::RuntimeType for HttpVersion {
+    const SIGNATURE: windows_core::imp::ConstBuffer =
+        windows_core::imp::ConstBuffer::from_slice(b"enum(Windows.Web.Http.HttpVersion;i4)");
+}
 windows_core::imp::define_interface!(
     IActivatedEventArgs,
     IActivatedEventArgs_Vtbl,
@@ -2742,8 +3102,433 @@ windows_core::imp::define_interface!(
 impl windows_core::RuntimeType for IAdaptiveMediaSource {
     const SIGNATURE: windows_core::imp::ConstBuffer = windows_core::imp::ConstBuffer::for_interface::<Self>();
 }
+impl IAdaptiveMediaSource {
+    pub fn IsLive(&self) -> windows_core::Result<bool> {
+        unsafe {
+            let mut result__ = core::mem::zeroed();
+            (windows_core::Interface::vtable(self).IsLive)(windows_core::Interface::as_raw(self), &mut result__)
+                .map(|| result__)
+        }
+    }
+    pub fn DesiredLiveOffset(&self) -> windows_core::Result<windows_time::TimeSpan> {
+        unsafe {
+            let mut result__ = core::mem::zeroed();
+            (windows_core::Interface::vtable(self).DesiredLiveOffset)(
+                windows_core::Interface::as_raw(self),
+                &mut result__,
+            )
+            .map(|| result__)
+        }
+    }
+    pub fn SetDesiredLiveOffset(&self, value: windows_time::TimeSpan) -> windows_core::Result<()> {
+        unsafe {
+            (windows_core::Interface::vtable(self).SetDesiredLiveOffset)(windows_core::Interface::as_raw(self), value)
+                .ok()
+        }
+    }
+    pub fn InitialBitrate(&self) -> windows_core::Result<u32> {
+        unsafe {
+            let mut result__ = core::mem::zeroed();
+            (windows_core::Interface::vtable(self).InitialBitrate)(windows_core::Interface::as_raw(self), &mut result__)
+                .map(|| result__)
+        }
+    }
+    pub fn SetInitialBitrate(&self, value: u32) -> windows_core::Result<()> {
+        unsafe {
+            (windows_core::Interface::vtable(self).SetInitialBitrate)(windows_core::Interface::as_raw(self), value).ok()
+        }
+    }
+    pub fn CurrentDownloadBitrate(&self) -> windows_core::Result<u32> {
+        unsafe {
+            let mut result__ = core::mem::zeroed();
+            (windows_core::Interface::vtable(self).CurrentDownloadBitrate)(
+                windows_core::Interface::as_raw(self),
+                &mut result__,
+            )
+            .map(|| result__)
+        }
+    }
+    pub fn CurrentPlaybackBitrate(&self) -> windows_core::Result<u32> {
+        unsafe {
+            let mut result__ = core::mem::zeroed();
+            (windows_core::Interface::vtable(self).CurrentPlaybackBitrate)(
+                windows_core::Interface::as_raw(self),
+                &mut result__,
+            )
+            .map(|| result__)
+        }
+    }
+    pub fn AvailableBitrates(&self) -> windows_core::Result<windows_collections::IVectorView<u32>> {
+        unsafe {
+            let mut result__ = core::mem::zeroed();
+            (windows_core::Interface::vtable(self).AvailableBitrates)(
+                windows_core::Interface::as_raw(self),
+                &mut result__,
+            )
+            .and_then(|| windows_core::imp::Type::from_abi(result__))
+        }
+    }
+    pub fn DesiredMinBitrate(&self) -> windows_core::Result<u32> {
+        unsafe {
+            let mut result__ = core::mem::zeroed();
+            (windows_core::Interface::vtable(self).DesiredMinBitrate)(
+                windows_core::Interface::as_raw(self),
+                &mut result__,
+            )
+            .and_then(|| windows_core::imp::Type::from_abi(result__))
+            .and_then(|r__: windows_reference::IReference<u32>| r__.Value())
+        }
+    }
+    pub fn SetDesiredMinBitrate(&self, value: Option<u32>) -> windows_core::Result<()> {
+        let value__ = value.map(<windows_reference::IReference<u32> as From<_>>::from);
+        unsafe {
+            (windows_core::Interface::vtable(self).SetDesiredMinBitrate)(
+                windows_core::Interface::as_raw(self),
+                windows_core::Param::param(value__.as_ref()).abi(),
+            )
+            .ok()
+        }
+    }
+    pub fn DesiredMaxBitrate(&self) -> windows_core::Result<u32> {
+        unsafe {
+            let mut result__ = core::mem::zeroed();
+            (windows_core::Interface::vtable(self).DesiredMaxBitrate)(
+                windows_core::Interface::as_raw(self),
+                &mut result__,
+            )
+            .and_then(|| windows_core::imp::Type::from_abi(result__))
+            .and_then(|r__: windows_reference::IReference<u32>| r__.Value())
+        }
+    }
+    pub fn SetDesiredMaxBitrate(&self, value: Option<u32>) -> windows_core::Result<()> {
+        let value__ = value.map(<windows_reference::IReference<u32> as From<_>>::from);
+        unsafe {
+            (windows_core::Interface::vtable(self).SetDesiredMaxBitrate)(
+                windows_core::Interface::as_raw(self),
+                windows_core::Param::param(value__.as_ref()).abi(),
+            )
+            .ok()
+        }
+    }
+    pub fn AudioOnlyPlayback(&self) -> windows_core::Result<bool> {
+        unsafe {
+            let mut result__ = core::mem::zeroed();
+            (windows_core::Interface::vtable(self).AudioOnlyPlayback)(
+                windows_core::Interface::as_raw(self),
+                &mut result__,
+            )
+            .map(|| result__)
+        }
+    }
+    pub fn InboundBitsPerSecond(&self) -> windows_core::Result<u64> {
+        unsafe {
+            let mut result__ = core::mem::zeroed();
+            (windows_core::Interface::vtable(self).InboundBitsPerSecond)(
+                windows_core::Interface::as_raw(self),
+                &mut result__,
+            )
+            .map(|| result__)
+        }
+    }
+    pub fn InboundBitsPerSecondWindow(&self) -> windows_core::Result<windows_time::TimeSpan> {
+        unsafe {
+            let mut result__ = core::mem::zeroed();
+            (windows_core::Interface::vtable(self).InboundBitsPerSecondWindow)(
+                windows_core::Interface::as_raw(self),
+                &mut result__,
+            )
+            .map(|| result__)
+        }
+    }
+    pub fn SetInboundBitsPerSecondWindow(&self, value: windows_time::TimeSpan) -> windows_core::Result<()> {
+        unsafe {
+            (windows_core::Interface::vtable(self).SetInboundBitsPerSecondWindow)(
+                windows_core::Interface::as_raw(self),
+                value,
+            )
+            .ok()
+        }
+    }
+    pub fn DownloadBitrateChanged<F>(&self, handler: F) -> windows_core::Result<windows_core::EventRevoker>
+    where
+        F: Fn(
+                windows_core::Ref<AdaptiveMediaSource>,
+                windows_core::Ref<AdaptiveMediaSourceDownloadBitrateChangedEventArgs>,
+            ) + 'static,
+    {
+        let handler: TypedEventHandler<AdaptiveMediaSource, AdaptiveMediaSourceDownloadBitrateChangedEventArgs> = {
+            let com = windows_core::imp::DelegateBox::< TypedEventHandler < AdaptiveMediaSource , AdaptiveMediaSourceDownloadBitrateChangedEventArgs > , F >::new (& TypedEventHandlerBox::< AdaptiveMediaSource , AdaptiveMediaSourceDownloadBitrateChangedEventArgs , F >::VTABLE , handler) ;
+            unsafe { core::mem::transmute(windows_core::imp::box_new(com)) }
+        };
+        unsafe {
+            let mut result__ = core::mem::zeroed();
+            let token__ = (windows_core::Interface::vtable(self).DownloadBitrateChanged)(
+                windows_core::Interface::as_raw(self),
+                windows_core::Interface::as_raw(&handler),
+                &mut result__,
+            )
+            .map(|| result__)?;
+            Ok(windows_core::EventRevoker::new(
+                self.clone(),
+                token__,
+                windows_core::Interface::vtable(self).RemoveDownloadBitrateChanged,
+            ))
+        }
+    }
+    pub fn PlaybackBitrateChanged<F>(&self, handler: F) -> windows_core::Result<windows_core::EventRevoker>
+    where
+        F: Fn(
+                windows_core::Ref<AdaptiveMediaSource>,
+                windows_core::Ref<AdaptiveMediaSourcePlaybackBitrateChangedEventArgs>,
+            ) + 'static,
+    {
+        let handler: TypedEventHandler<AdaptiveMediaSource, AdaptiveMediaSourcePlaybackBitrateChangedEventArgs> = {
+            let com = windows_core::imp::DelegateBox::< TypedEventHandler < AdaptiveMediaSource , AdaptiveMediaSourcePlaybackBitrateChangedEventArgs > , F >::new (& TypedEventHandlerBox::< AdaptiveMediaSource , AdaptiveMediaSourcePlaybackBitrateChangedEventArgs , F >::VTABLE , handler) ;
+            unsafe { core::mem::transmute(windows_core::imp::box_new(com)) }
+        };
+        unsafe {
+            let mut result__ = core::mem::zeroed();
+            let token__ = (windows_core::Interface::vtable(self).PlaybackBitrateChanged)(
+                windows_core::Interface::as_raw(self),
+                windows_core::Interface::as_raw(&handler),
+                &mut result__,
+            )
+            .map(|| result__)?;
+            Ok(windows_core::EventRevoker::new(
+                self.clone(),
+                token__,
+                windows_core::Interface::vtable(self).RemovePlaybackBitrateChanged,
+            ))
+        }
+    }
+    pub fn DownloadRequested<F>(&self, handler: F) -> windows_core::Result<windows_core::EventRevoker>
+    where
+        F: Fn(windows_core::Ref<AdaptiveMediaSource>, windows_core::Ref<AdaptiveMediaSourceDownloadRequestedEventArgs>)
+            + 'static,
+    {
+        let handler: TypedEventHandler<AdaptiveMediaSource, AdaptiveMediaSourceDownloadRequestedEventArgs> = {
+            let com = windows_core::imp::DelegateBox::<
+                TypedEventHandler<AdaptiveMediaSource, AdaptiveMediaSourceDownloadRequestedEventArgs>,
+                F,
+            >::new(
+                &TypedEventHandlerBox::<AdaptiveMediaSource, AdaptiveMediaSourceDownloadRequestedEventArgs, F>::VTABLE,
+                handler,
+            );
+            unsafe { core::mem::transmute(windows_core::imp::box_new(com)) }
+        };
+        unsafe {
+            let mut result__ = core::mem::zeroed();
+            let token__ = (windows_core::Interface::vtable(self).DownloadRequested)(
+                windows_core::Interface::as_raw(self),
+                windows_core::Interface::as_raw(&handler),
+                &mut result__,
+            )
+            .map(|| result__)?;
+            Ok(windows_core::EventRevoker::new(
+                self.clone(),
+                token__,
+                windows_core::Interface::vtable(self).RemoveDownloadRequested,
+            ))
+        }
+    }
+    pub fn DownloadCompleted<F>(&self, handler: F) -> windows_core::Result<windows_core::EventRevoker>
+    where
+        F: Fn(windows_core::Ref<AdaptiveMediaSource>, windows_core::Ref<AdaptiveMediaSourceDownloadCompletedEventArgs>)
+            + 'static,
+    {
+        let handler: TypedEventHandler<AdaptiveMediaSource, AdaptiveMediaSourceDownloadCompletedEventArgs> = {
+            let com = windows_core::imp::DelegateBox::<
+                TypedEventHandler<AdaptiveMediaSource, AdaptiveMediaSourceDownloadCompletedEventArgs>,
+                F,
+            >::new(
+                &TypedEventHandlerBox::<AdaptiveMediaSource, AdaptiveMediaSourceDownloadCompletedEventArgs, F>::VTABLE,
+                handler,
+            );
+            unsafe { core::mem::transmute(windows_core::imp::box_new(com)) }
+        };
+        unsafe {
+            let mut result__ = core::mem::zeroed();
+            let token__ = (windows_core::Interface::vtable(self).DownloadCompleted)(
+                windows_core::Interface::as_raw(self),
+                windows_core::Interface::as_raw(&handler),
+                &mut result__,
+            )
+            .map(|| result__)?;
+            Ok(windows_core::EventRevoker::new(
+                self.clone(),
+                token__,
+                windows_core::Interface::vtable(self).RemoveDownloadCompleted,
+            ))
+        }
+    }
+    pub fn DownloadFailed<F>(&self, handler: F) -> windows_core::Result<windows_core::EventRevoker>
+    where
+        F: Fn(windows_core::Ref<AdaptiveMediaSource>, windows_core::Ref<AdaptiveMediaSourceDownloadFailedEventArgs>)
+            + 'static,
+    {
+        let handler: TypedEventHandler<AdaptiveMediaSource, AdaptiveMediaSourceDownloadFailedEventArgs> = {
+            let com = windows_core::imp::DelegateBox::<
+                TypedEventHandler<AdaptiveMediaSource, AdaptiveMediaSourceDownloadFailedEventArgs>,
+                F,
+            >::new(
+                &TypedEventHandlerBox::<AdaptiveMediaSource, AdaptiveMediaSourceDownloadFailedEventArgs, F>::VTABLE,
+                handler,
+            );
+            unsafe { core::mem::transmute(windows_core::imp::box_new(com)) }
+        };
+        unsafe {
+            let mut result__ = core::mem::zeroed();
+            let token__ = (windows_core::Interface::vtable(self).DownloadFailed)(
+                windows_core::Interface::as_raw(self),
+                windows_core::Interface::as_raw(&handler),
+                &mut result__,
+            )
+            .map(|| result__)?;
+            Ok(windows_core::EventRevoker::new(
+                self.clone(),
+                token__,
+                windows_core::Interface::vtable(self).RemoveDownloadFailed,
+            ))
+        }
+    }
+}
 #[repr(C)]
 pub struct IAdaptiveMediaSource_Vtbl {
+    pub base__: windows_core::IInspectable_Vtbl,
+    pub IsLive: unsafe extern "system" fn(*mut core::ffi::c_void, *mut bool) -> windows_core::HRESULT,
+    pub DesiredLiveOffset:
+        unsafe extern "system" fn(*mut core::ffi::c_void, *mut windows_time::TimeSpan) -> windows_core::HRESULT,
+    pub SetDesiredLiveOffset:
+        unsafe extern "system" fn(*mut core::ffi::c_void, windows_time::TimeSpan) -> windows_core::HRESULT,
+    pub InitialBitrate: unsafe extern "system" fn(*mut core::ffi::c_void, *mut u32) -> windows_core::HRESULT,
+    pub SetInitialBitrate: unsafe extern "system" fn(*mut core::ffi::c_void, u32) -> windows_core::HRESULT,
+    pub CurrentDownloadBitrate: unsafe extern "system" fn(*mut core::ffi::c_void, *mut u32) -> windows_core::HRESULT,
+    pub CurrentPlaybackBitrate: unsafe extern "system" fn(*mut core::ffi::c_void, *mut u32) -> windows_core::HRESULT,
+    pub AvailableBitrates:
+        unsafe extern "system" fn(*mut core::ffi::c_void, *mut *mut core::ffi::c_void) -> windows_core::HRESULT,
+    pub DesiredMinBitrate:
+        unsafe extern "system" fn(*mut core::ffi::c_void, *mut *mut core::ffi::c_void) -> windows_core::HRESULT,
+    pub SetDesiredMinBitrate:
+        unsafe extern "system" fn(*mut core::ffi::c_void, *mut core::ffi::c_void) -> windows_core::HRESULT,
+    pub DesiredMaxBitrate:
+        unsafe extern "system" fn(*mut core::ffi::c_void, *mut *mut core::ffi::c_void) -> windows_core::HRESULT,
+    pub SetDesiredMaxBitrate:
+        unsafe extern "system" fn(*mut core::ffi::c_void, *mut core::ffi::c_void) -> windows_core::HRESULT,
+    pub AudioOnlyPlayback: unsafe extern "system" fn(*mut core::ffi::c_void, *mut bool) -> windows_core::HRESULT,
+    pub InboundBitsPerSecond: unsafe extern "system" fn(*mut core::ffi::c_void, *mut u64) -> windows_core::HRESULT,
+    pub InboundBitsPerSecondWindow:
+        unsafe extern "system" fn(*mut core::ffi::c_void, *mut windows_time::TimeSpan) -> windows_core::HRESULT,
+    pub SetInboundBitsPerSecondWindow:
+        unsafe extern "system" fn(*mut core::ffi::c_void, windows_time::TimeSpan) -> windows_core::HRESULT,
+    pub DownloadBitrateChanged:
+        unsafe extern "system" fn(*mut core::ffi::c_void, *mut core::ffi::c_void, *mut i64) -> windows_core::HRESULT,
+    pub RemoveDownloadBitrateChanged: unsafe extern "system" fn(*mut core::ffi::c_void, i64) -> windows_core::HRESULT,
+    pub PlaybackBitrateChanged:
+        unsafe extern "system" fn(*mut core::ffi::c_void, *mut core::ffi::c_void, *mut i64) -> windows_core::HRESULT,
+    pub RemovePlaybackBitrateChanged: unsafe extern "system" fn(*mut core::ffi::c_void, i64) -> windows_core::HRESULT,
+    pub DownloadRequested:
+        unsafe extern "system" fn(*mut core::ffi::c_void, *mut core::ffi::c_void, *mut i64) -> windows_core::HRESULT,
+    pub RemoveDownloadRequested: unsafe extern "system" fn(*mut core::ffi::c_void, i64) -> windows_core::HRESULT,
+    pub DownloadCompleted:
+        unsafe extern "system" fn(*mut core::ffi::c_void, *mut core::ffi::c_void, *mut i64) -> windows_core::HRESULT,
+    pub RemoveDownloadCompleted: unsafe extern "system" fn(*mut core::ffi::c_void, i64) -> windows_core::HRESULT,
+    pub DownloadFailed:
+        unsafe extern "system" fn(*mut core::ffi::c_void, *mut core::ffi::c_void, *mut i64) -> windows_core::HRESULT,
+    pub RemoveDownloadFailed: unsafe extern "system" fn(*mut core::ffi::c_void, i64) -> windows_core::HRESULT,
+}
+windows_core::imp::define_interface!(
+    IAdaptiveMediaSource3,
+    IAdaptiveMediaSource3_Vtbl,
+    0xba7023fd_c334_461b_a36e_c99f54f7174a
+);
+impl windows_core::RuntimeType for IAdaptiveMediaSource3 {
+    const SIGNATURE: windows_core::imp::ConstBuffer = windows_core::imp::ConstBuffer::for_interface::<Self>();
+}
+impl IAdaptiveMediaSource3 {
+    pub fn MinLiveOffset(&self) -> windows_core::Result<windows_time::TimeSpan> {
+        unsafe {
+            let mut result__ = core::mem::zeroed();
+            (windows_core::Interface::vtable(self).MinLiveOffset)(windows_core::Interface::as_raw(self), &mut result__)
+                .and_then(|| windows_core::imp::Type::from_abi(result__))
+                .and_then(|r__: windows_reference::IReference<windows_time::TimeSpan>| r__.Value())
+        }
+    }
+    pub fn MaxSeekableWindowSize(&self) -> windows_core::Result<windows_time::TimeSpan> {
+        unsafe {
+            let mut result__ = core::mem::zeroed();
+            (windows_core::Interface::vtable(self).MaxSeekableWindowSize)(
+                windows_core::Interface::as_raw(self),
+                &mut result__,
+            )
+            .and_then(|| windows_core::imp::Type::from_abi(result__))
+            .and_then(|r__: windows_reference::IReference<windows_time::TimeSpan>| r__.Value())
+        }
+    }
+    pub fn DesiredSeekableWindowSize(&self) -> windows_core::Result<windows_time::TimeSpan> {
+        unsafe {
+            let mut result__ = core::mem::zeroed();
+            (windows_core::Interface::vtable(self).DesiredSeekableWindowSize)(
+                windows_core::Interface::as_raw(self),
+                &mut result__,
+            )
+            .and_then(|| windows_core::imp::Type::from_abi(result__))
+            .and_then(|r__: windows_reference::IReference<windows_time::TimeSpan>| r__.Value())
+        }
+    }
+    pub fn SetDesiredSeekableWindowSize(&self, value: Option<windows_time::TimeSpan>) -> windows_core::Result<()> {
+        let value__ = value.map(<windows_reference::IReference<windows_time::TimeSpan> as From<_>>::from);
+        unsafe {
+            (windows_core::Interface::vtable(self).SetDesiredSeekableWindowSize)(
+                windows_core::Interface::as_raw(self),
+                windows_core::Param::param(value__.as_ref()).abi(),
+            )
+            .ok()
+        }
+    }
+    pub fn Diagnostics(&self) -> windows_core::Result<AdaptiveMediaSourceDiagnostics> {
+        unsafe {
+            let mut result__ = core::mem::zeroed();
+            (windows_core::Interface::vtable(self).Diagnostics)(windows_core::Interface::as_raw(self), &mut result__)
+                .and_then(|| windows_core::imp::Type::from_abi(result__))
+        }
+    }
+    pub fn GetCorrelatedTimes(&self) -> windows_core::Result<AdaptiveMediaSourceCorrelatedTimes> {
+        unsafe {
+            let mut result__ = core::mem::zeroed();
+            (windows_core::Interface::vtable(self).GetCorrelatedTimes)(
+                windows_core::Interface::as_raw(self),
+                &mut result__,
+            )
+            .and_then(|| windows_core::imp::Type::from_abi(result__))
+        }
+    }
+}
+#[repr(C)]
+pub struct IAdaptiveMediaSource3_Vtbl {
+    pub base__: windows_core::IInspectable_Vtbl,
+    pub MinLiveOffset:
+        unsafe extern "system" fn(*mut core::ffi::c_void, *mut *mut core::ffi::c_void) -> windows_core::HRESULT,
+    pub MaxSeekableWindowSize:
+        unsafe extern "system" fn(*mut core::ffi::c_void, *mut *mut core::ffi::c_void) -> windows_core::HRESULT,
+    pub DesiredSeekableWindowSize:
+        unsafe extern "system" fn(*mut core::ffi::c_void, *mut *mut core::ffi::c_void) -> windows_core::HRESULT,
+    pub SetDesiredSeekableWindowSize:
+        unsafe extern "system" fn(*mut core::ffi::c_void, *mut core::ffi::c_void) -> windows_core::HRESULT,
+    pub Diagnostics:
+        unsafe extern "system" fn(*mut core::ffi::c_void, *mut *mut core::ffi::c_void) -> windows_core::HRESULT,
+    pub GetCorrelatedTimes:
+        unsafe extern "system" fn(*mut core::ffi::c_void, *mut *mut core::ffi::c_void) -> windows_core::HRESULT,
+}
+windows_core::imp::define_interface!(
+    IAdaptiveMediaSourceCorrelatedTimes,
+    IAdaptiveMediaSourceCorrelatedTimes_Vtbl,
+    0x05108787_e032_48e1_ab8d_002b0b3051df
+);
+impl windows_core::RuntimeType for IAdaptiveMediaSourceCorrelatedTimes {
+    const SIGNATURE: windows_core::imp::ConstBuffer = windows_core::imp::ConstBuffer::for_interface::<Self>();
+}
+#[repr(C)]
+pub struct IAdaptiveMediaSourceCorrelatedTimes_Vtbl {
     pub base__: windows_core::IInspectable_Vtbl,
 }
 windows_core::imp::define_interface!(
@@ -2791,6 +3576,138 @@ pub struct IAdaptiveMediaSourceCreationResult_Vtbl {
         unsafe extern "system" fn(*mut core::ffi::c_void, *mut *mut core::ffi::c_void) -> windows_core::HRESULT,
     pub HttpResponseMessage:
         unsafe extern "system" fn(*mut core::ffi::c_void, *mut *mut core::ffi::c_void) -> windows_core::HRESULT,
+}
+windows_core::imp::define_interface!(
+    IAdaptiveMediaSourceDiagnostics,
+    IAdaptiveMediaSourceDiagnostics_Vtbl,
+    0x9b24ee68_962e_448c_aebf_b29b56098e23
+);
+impl windows_core::RuntimeType for IAdaptiveMediaSourceDiagnostics {
+    const SIGNATURE: windows_core::imp::ConstBuffer = windows_core::imp::ConstBuffer::for_interface::<Self>();
+}
+#[repr(C)]
+pub struct IAdaptiveMediaSourceDiagnostics_Vtbl {
+    pub base__: windows_core::IInspectable_Vtbl,
+}
+windows_core::imp::define_interface!(
+    IAdaptiveMediaSourceDownloadBitrateChangedEventArgs,
+    IAdaptiveMediaSourceDownloadBitrateChangedEventArgs_Vtbl,
+    0x670c0a44_e04e_4eff_816a_17399f78f4ba
+);
+impl windows_core::RuntimeType for IAdaptiveMediaSourceDownloadBitrateChangedEventArgs {
+    const SIGNATURE: windows_core::imp::ConstBuffer = windows_core::imp::ConstBuffer::for_interface::<Self>();
+}
+#[repr(C)]
+pub struct IAdaptiveMediaSourceDownloadBitrateChangedEventArgs_Vtbl {
+    pub base__: windows_core::IInspectable_Vtbl,
+}
+windows_core::imp::define_interface!(
+    IAdaptiveMediaSourceDownloadCompletedEventArgs,
+    IAdaptiveMediaSourceDownloadCompletedEventArgs_Vtbl,
+    0x19240dc3_5b37_4a1a_8970_d621cb6ca83b
+);
+impl windows_core::RuntimeType for IAdaptiveMediaSourceDownloadCompletedEventArgs {
+    const SIGNATURE: windows_core::imp::ConstBuffer = windows_core::imp::ConstBuffer::for_interface::<Self>();
+}
+#[repr(C)]
+pub struct IAdaptiveMediaSourceDownloadCompletedEventArgs_Vtbl {
+    pub base__: windows_core::IInspectable_Vtbl,
+}
+windows_core::imp::define_interface!(
+    IAdaptiveMediaSourceDownloadFailedEventArgs,
+    IAdaptiveMediaSourceDownloadFailedEventArgs_Vtbl,
+    0x37739048_f4ab_40a4_b135_c6dfd8bd7ff1
+);
+impl windows_core::RuntimeType for IAdaptiveMediaSourceDownloadFailedEventArgs {
+    const SIGNATURE: windows_core::imp::ConstBuffer = windows_core::imp::ConstBuffer::for_interface::<Self>();
+}
+impl IAdaptiveMediaSourceDownloadFailedEventArgs {
+    pub fn ResourceType(&self) -> windows_core::Result<AdaptiveMediaSourceResourceType> {
+        unsafe {
+            let mut result__ = core::mem::zeroed();
+            (windows_core::Interface::vtable(self).ResourceType)(windows_core::Interface::as_raw(self), &mut result__)
+                .map(|| result__)
+        }
+    }
+    pub fn ResourceUri(&self) -> windows_core::Result<Uri> {
+        unsafe {
+            let mut result__ = core::mem::zeroed();
+            (windows_core::Interface::vtable(self).ResourceUri)(windows_core::Interface::as_raw(self), &mut result__)
+                .and_then(|| windows_core::imp::Type::from_abi(result__))
+        }
+    }
+    pub fn ResourceByteRangeOffset(&self) -> windows_core::Result<u64> {
+        unsafe {
+            let mut result__ = core::mem::zeroed();
+            (windows_core::Interface::vtable(self).ResourceByteRangeOffset)(
+                windows_core::Interface::as_raw(self),
+                &mut result__,
+            )
+            .and_then(|| windows_core::imp::Type::from_abi(result__))
+            .and_then(|r__: windows_reference::IReference<u64>| r__.Value())
+        }
+    }
+    pub fn ResourceByteRangeLength(&self) -> windows_core::Result<u64> {
+        unsafe {
+            let mut result__ = core::mem::zeroed();
+            (windows_core::Interface::vtable(self).ResourceByteRangeLength)(
+                windows_core::Interface::as_raw(self),
+                &mut result__,
+            )
+            .and_then(|| windows_core::imp::Type::from_abi(result__))
+            .and_then(|r__: windows_reference::IReference<u64>| r__.Value())
+        }
+    }
+    pub fn HttpResponseMessage(&self) -> windows_core::Result<HttpResponseMessage> {
+        unsafe {
+            let mut result__ = core::mem::zeroed();
+            (windows_core::Interface::vtable(self).HttpResponseMessage)(
+                windows_core::Interface::as_raw(self),
+                &mut result__,
+            )
+            .and_then(|| windows_core::imp::Type::from_abi(result__))
+        }
+    }
+}
+#[repr(C)]
+pub struct IAdaptiveMediaSourceDownloadFailedEventArgs_Vtbl {
+    pub base__: windows_core::IInspectable_Vtbl,
+    pub ResourceType: unsafe extern "system" fn(
+        *mut core::ffi::c_void,
+        *mut AdaptiveMediaSourceResourceType,
+    ) -> windows_core::HRESULT,
+    pub ResourceUri:
+        unsafe extern "system" fn(*mut core::ffi::c_void, *mut *mut core::ffi::c_void) -> windows_core::HRESULT,
+    pub ResourceByteRangeOffset:
+        unsafe extern "system" fn(*mut core::ffi::c_void, *mut *mut core::ffi::c_void) -> windows_core::HRESULT,
+    pub ResourceByteRangeLength:
+        unsafe extern "system" fn(*mut core::ffi::c_void, *mut *mut core::ffi::c_void) -> windows_core::HRESULT,
+    pub HttpResponseMessage:
+        unsafe extern "system" fn(*mut core::ffi::c_void, *mut *mut core::ffi::c_void) -> windows_core::HRESULT,
+}
+windows_core::imp::define_interface!(
+    IAdaptiveMediaSourceDownloadRequestedEventArgs,
+    IAdaptiveMediaSourceDownloadRequestedEventArgs_Vtbl,
+    0xc83fdffd_44a9_47a2_bf96_03398b4bfaaf
+);
+impl windows_core::RuntimeType for IAdaptiveMediaSourceDownloadRequestedEventArgs {
+    const SIGNATURE: windows_core::imp::ConstBuffer = windows_core::imp::ConstBuffer::for_interface::<Self>();
+}
+#[repr(C)]
+pub struct IAdaptiveMediaSourceDownloadRequestedEventArgs_Vtbl {
+    pub base__: windows_core::IInspectable_Vtbl,
+}
+windows_core::imp::define_interface!(
+    IAdaptiveMediaSourcePlaybackBitrateChangedEventArgs,
+    IAdaptiveMediaSourcePlaybackBitrateChangedEventArgs_Vtbl,
+    0x23a29f6d_7dda_4a51_87a9_6fa8c5b292be
+);
+impl windows_core::RuntimeType for IAdaptiveMediaSourcePlaybackBitrateChangedEventArgs {
+    const SIGNATURE: windows_core::imp::ConstBuffer = windows_core::imp::ConstBuffer::for_interface::<Self>();
+}
+#[repr(C)]
+pub struct IAdaptiveMediaSourcePlaybackBitrateChangedEventArgs_Vtbl {
+    pub base__: windows_core::IInspectable_Vtbl,
 }
 windows_core::imp::define_interface!(
     IAdaptiveMediaSourceStatics,
@@ -6258,6 +7175,18 @@ pub struct IHttpRequestMessage_Vtbl {
     pub base__: windows_core::IInspectable_Vtbl,
 }
 windows_core::imp::define_interface!(
+    IHttpResponseHeaderCollection,
+    IHttpResponseHeaderCollection_Vtbl,
+    0x7a990969_fa3f_41ed_aac6_bf957975c16b
+);
+impl windows_core::RuntimeType for IHttpResponseHeaderCollection {
+    const SIGNATURE: windows_core::imp::ConstBuffer = windows_core::imp::ConstBuffer::for_interface::<Self>();
+}
+#[repr(C)]
+pub struct IHttpResponseHeaderCollection_Vtbl {
+    pub base__: windows_core::IInspectable_Vtbl,
+}
+windows_core::imp::define_interface!(
     IHttpResponseMessage,
     IHttpResponseMessage_Vtbl,
     0xfee200fb_8664_44e0_95d9_42696199bffc
@@ -6265,9 +7194,151 @@ windows_core::imp::define_interface!(
 impl windows_core::RuntimeType for IHttpResponseMessage {
     const SIGNATURE: windows_core::imp::ConstBuffer = windows_core::imp::ConstBuffer::for_interface::<Self>();
 }
+impl IHttpResponseMessage {
+    pub fn Content(&self) -> windows_core::Result<IHttpContent> {
+        unsafe {
+            let mut result__ = core::mem::zeroed();
+            (windows_core::Interface::vtable(self).Content)(windows_core::Interface::as_raw(self), &mut result__)
+                .and_then(|| windows_core::imp::Type::from_abi(result__))
+        }
+    }
+    pub fn SetContent<P0>(&self, value: P0) -> windows_core::Result<()>
+    where
+        P0: windows_core::Param<IHttpContent>,
+    {
+        unsafe {
+            (windows_core::Interface::vtable(self).SetContent)(
+                windows_core::Interface::as_raw(self),
+                value.param().abi(),
+            )
+            .ok()
+        }
+    }
+    pub fn Headers(&self) -> windows_core::Result<HttpResponseHeaderCollection> {
+        unsafe {
+            let mut result__ = core::mem::zeroed();
+            (windows_core::Interface::vtable(self).Headers)(windows_core::Interface::as_raw(self), &mut result__)
+                .and_then(|| windows_core::imp::Type::from_abi(result__))
+        }
+    }
+    pub fn IsSuccessStatusCode(&self) -> windows_core::Result<bool> {
+        unsafe {
+            let mut result__ = core::mem::zeroed();
+            (windows_core::Interface::vtable(self).IsSuccessStatusCode)(
+                windows_core::Interface::as_raw(self),
+                &mut result__,
+            )
+            .map(|| result__)
+        }
+    }
+    pub fn ReasonPhrase(&self) -> windows_core::Result<String> {
+        unsafe {
+            let mut result__ = core::mem::zeroed();
+            (windows_core::Interface::vtable(self).ReasonPhrase)(windows_core::Interface::as_raw(self), &mut result__)
+                .map(|| {
+                    let hstring: windows_core::HSTRING = core::mem::transmute(result__);
+                    hstring.to_string_lossy()
+                })
+        }
+    }
+    pub fn SetReasonPhrase(&self, value: &str) -> windows_core::Result<()> {
+        unsafe {
+            (windows_core::Interface::vtable(self).SetReasonPhrase)(
+                windows_core::Interface::as_raw(self),
+                core::mem::transmute_copy(&windows_core::HSTRING::from(value)),
+            )
+            .ok()
+        }
+    }
+    pub fn RequestMessage(&self) -> windows_core::Result<HttpRequestMessage> {
+        unsafe {
+            let mut result__ = core::mem::zeroed();
+            (windows_core::Interface::vtable(self).RequestMessage)(windows_core::Interface::as_raw(self), &mut result__)
+                .and_then(|| windows_core::imp::Type::from_abi(result__))
+        }
+    }
+    pub fn SetRequestMessage<P0>(&self, value: P0) -> windows_core::Result<()>
+    where
+        P0: windows_core::Param<HttpRequestMessage>,
+    {
+        unsafe {
+            (windows_core::Interface::vtable(self).SetRequestMessage)(
+                windows_core::Interface::as_raw(self),
+                value.param().abi(),
+            )
+            .ok()
+        }
+    }
+    pub fn Source(&self) -> windows_core::Result<HttpResponseMessageSource> {
+        unsafe {
+            let mut result__ = core::mem::zeroed();
+            (windows_core::Interface::vtable(self).Source)(windows_core::Interface::as_raw(self), &mut result__)
+                .map(|| result__)
+        }
+    }
+    pub fn SetSource(&self, value: HttpResponseMessageSource) -> windows_core::Result<()> {
+        unsafe { (windows_core::Interface::vtable(self).SetSource)(windows_core::Interface::as_raw(self), value).ok() }
+    }
+    pub fn StatusCode(&self) -> windows_core::Result<HttpStatusCode> {
+        unsafe {
+            let mut result__ = core::mem::zeroed();
+            (windows_core::Interface::vtable(self).StatusCode)(windows_core::Interface::as_raw(self), &mut result__)
+                .map(|| result__)
+        }
+    }
+    pub fn SetStatusCode(&self, value: HttpStatusCode) -> windows_core::Result<()> {
+        unsafe {
+            (windows_core::Interface::vtable(self).SetStatusCode)(windows_core::Interface::as_raw(self), value).ok()
+        }
+    }
+    pub fn Version(&self) -> windows_core::Result<HttpVersion> {
+        unsafe {
+            let mut result__ = core::mem::zeroed();
+            (windows_core::Interface::vtable(self).Version)(windows_core::Interface::as_raw(self), &mut result__)
+                .map(|| result__)
+        }
+    }
+    pub fn SetVersion(&self, value: HttpVersion) -> windows_core::Result<()> {
+        unsafe { (windows_core::Interface::vtable(self).SetVersion)(windows_core::Interface::as_raw(self), value).ok() }
+    }
+    pub fn EnsureSuccessStatusCode(&self) -> windows_core::Result<HttpResponseMessage> {
+        unsafe {
+            let mut result__ = core::mem::zeroed();
+            (windows_core::Interface::vtable(self).EnsureSuccessStatusCode)(
+                windows_core::Interface::as_raw(self),
+                &mut result__,
+            )
+            .and_then(|| windows_core::imp::Type::from_abi(result__))
+        }
+    }
+}
 #[repr(C)]
 pub struct IHttpResponseMessage_Vtbl {
     pub base__: windows_core::IInspectable_Vtbl,
+    pub Content:
+        unsafe extern "system" fn(*mut core::ffi::c_void, *mut *mut core::ffi::c_void) -> windows_core::HRESULT,
+    pub SetContent: unsafe extern "system" fn(*mut core::ffi::c_void, *mut core::ffi::c_void) -> windows_core::HRESULT,
+    pub Headers:
+        unsafe extern "system" fn(*mut core::ffi::c_void, *mut *mut core::ffi::c_void) -> windows_core::HRESULT,
+    pub IsSuccessStatusCode: unsafe extern "system" fn(*mut core::ffi::c_void, *mut bool) -> windows_core::HRESULT,
+    pub ReasonPhrase:
+        unsafe extern "system" fn(*mut core::ffi::c_void, *mut *mut core::ffi::c_void) -> windows_core::HRESULT,
+    pub SetReasonPhrase:
+        unsafe extern "system" fn(*mut core::ffi::c_void, *mut core::ffi::c_void) -> windows_core::HRESULT,
+    pub RequestMessage:
+        unsafe extern "system" fn(*mut core::ffi::c_void, *mut *mut core::ffi::c_void) -> windows_core::HRESULT,
+    pub SetRequestMessage:
+        unsafe extern "system" fn(*mut core::ffi::c_void, *mut core::ffi::c_void) -> windows_core::HRESULT,
+    pub Source:
+        unsafe extern "system" fn(*mut core::ffi::c_void, *mut HttpResponseMessageSource) -> windows_core::HRESULT,
+    pub SetSource:
+        unsafe extern "system" fn(*mut core::ffi::c_void, HttpResponseMessageSource) -> windows_core::HRESULT,
+    pub StatusCode: unsafe extern "system" fn(*mut core::ffi::c_void, *mut HttpStatusCode) -> windows_core::HRESULT,
+    pub SetStatusCode: unsafe extern "system" fn(*mut core::ffi::c_void, HttpStatusCode) -> windows_core::HRESULT,
+    pub Version: unsafe extern "system" fn(*mut core::ffi::c_void, *mut HttpVersion) -> windows_core::HRESULT,
+    pub SetVersion: unsafe extern "system" fn(*mut core::ffi::c_void, HttpVersion) -> windows_core::HRESULT,
+    pub EnsureSuccessStatusCode:
+        unsafe extern "system" fn(*mut core::ffi::c_void, *mut *mut core::ffi::c_void) -> windows_core::HRESULT,
 }
 windows_core::imp::define_interface!(
     IHttpTransferCodingHeaderValueCollection,
@@ -7627,6 +8698,175 @@ impl windows_core::RuntimeType for IMediaPlaybackCommandManager {
 #[repr(C)]
 pub struct IMediaPlaybackCommandManager_Vtbl {
     pub base__: windows_core::IInspectable_Vtbl,
+}
+windows_core::imp::define_interface!(
+    IMediaPlaybackItem,
+    IMediaPlaybackItem_Vtbl,
+    0x047097d2_e4af_48ab_b283_6929e674ece2
+);
+impl windows_core::RuntimeType for IMediaPlaybackItem {
+    const SIGNATURE: windows_core::imp::ConstBuffer = windows_core::imp::ConstBuffer::for_interface::<Self>();
+}
+impl IMediaPlaybackItem {
+    pub fn AudioTracksChanged<F>(&self, handler: F) -> windows_core::Result<windows_core::EventRevoker>
+    where
+        F: Fn(windows_core::Ref<MediaPlaybackItem>, windows_core::Ref<windows_collections::IVectorChangedEventArgs>)
+            + 'static,
+    {
+        let handler: TypedEventHandler<MediaPlaybackItem, windows_collections::IVectorChangedEventArgs> = {
+            let com = windows_core::imp::DelegateBox::<
+                TypedEventHandler<MediaPlaybackItem, windows_collections::IVectorChangedEventArgs>,
+                F,
+            >::new(
+                &TypedEventHandlerBox::<MediaPlaybackItem, windows_collections::IVectorChangedEventArgs, F>::VTABLE,
+                handler,
+            );
+            unsafe { core::mem::transmute(windows_core::imp::box_new(com)) }
+        };
+        unsafe {
+            let mut result__ = core::mem::zeroed();
+            let token__ = (windows_core::Interface::vtable(self).AudioTracksChanged)(
+                windows_core::Interface::as_raw(self),
+                windows_core::Interface::as_raw(&handler),
+                &mut result__,
+            )
+            .map(|| result__)?;
+            Ok(windows_core::EventRevoker::new(
+                self.clone(),
+                token__,
+                windows_core::Interface::vtable(self).RemoveAudioTracksChanged,
+            ))
+        }
+    }
+    pub fn VideoTracksChanged<F>(&self, handler: F) -> windows_core::Result<windows_core::EventRevoker>
+    where
+        F: Fn(windows_core::Ref<MediaPlaybackItem>, windows_core::Ref<windows_collections::IVectorChangedEventArgs>)
+            + 'static,
+    {
+        let handler: TypedEventHandler<MediaPlaybackItem, windows_collections::IVectorChangedEventArgs> = {
+            let com = windows_core::imp::DelegateBox::<
+                TypedEventHandler<MediaPlaybackItem, windows_collections::IVectorChangedEventArgs>,
+                F,
+            >::new(
+                &TypedEventHandlerBox::<MediaPlaybackItem, windows_collections::IVectorChangedEventArgs, F>::VTABLE,
+                handler,
+            );
+            unsafe { core::mem::transmute(windows_core::imp::box_new(com)) }
+        };
+        unsafe {
+            let mut result__ = core::mem::zeroed();
+            let token__ = (windows_core::Interface::vtable(self).VideoTracksChanged)(
+                windows_core::Interface::as_raw(self),
+                windows_core::Interface::as_raw(&handler),
+                &mut result__,
+            )
+            .map(|| result__)?;
+            Ok(windows_core::EventRevoker::new(
+                self.clone(),
+                token__,
+                windows_core::Interface::vtable(self).RemoveVideoTracksChanged,
+            ))
+        }
+    }
+    pub fn TimedMetadataTracksChanged<F>(&self, handler: F) -> windows_core::Result<windows_core::EventRevoker>
+    where
+        F: Fn(windows_core::Ref<MediaPlaybackItem>, windows_core::Ref<windows_collections::IVectorChangedEventArgs>)
+            + 'static,
+    {
+        let handler: TypedEventHandler<MediaPlaybackItem, windows_collections::IVectorChangedEventArgs> = {
+            let com = windows_core::imp::DelegateBox::<
+                TypedEventHandler<MediaPlaybackItem, windows_collections::IVectorChangedEventArgs>,
+                F,
+            >::new(
+                &TypedEventHandlerBox::<MediaPlaybackItem, windows_collections::IVectorChangedEventArgs, F>::VTABLE,
+                handler,
+            );
+            unsafe { core::mem::transmute(windows_core::imp::box_new(com)) }
+        };
+        unsafe {
+            let mut result__ = core::mem::zeroed();
+            let token__ = (windows_core::Interface::vtable(self).TimedMetadataTracksChanged)(
+                windows_core::Interface::as_raw(self),
+                windows_core::Interface::as_raw(&handler),
+                &mut result__,
+            )
+            .map(|| result__)?;
+            Ok(windows_core::EventRevoker::new(
+                self.clone(),
+                token__,
+                windows_core::Interface::vtable(self).RemoveTimedMetadataTracksChanged,
+            ))
+        }
+    }
+    pub fn Source(&self) -> windows_core::Result<MediaSource> {
+        unsafe {
+            let mut result__ = core::mem::zeroed();
+            (windows_core::Interface::vtable(self).Source)(windows_core::Interface::as_raw(self), &mut result__)
+                .and_then(|| windows_core::imp::Type::from_abi(result__))
+        }
+    }
+    pub fn AudioTracks(&self) -> windows_core::Result<MediaPlaybackAudioTrackList> {
+        unsafe {
+            let mut result__ = core::mem::zeroed();
+            (windows_core::Interface::vtable(self).AudioTracks)(windows_core::Interface::as_raw(self), &mut result__)
+                .and_then(|| windows_core::imp::Type::from_abi(result__))
+        }
+    }
+    pub fn VideoTracks(&self) -> windows_core::Result<MediaPlaybackVideoTrackList> {
+        unsafe {
+            let mut result__ = core::mem::zeroed();
+            (windows_core::Interface::vtable(self).VideoTracks)(windows_core::Interface::as_raw(self), &mut result__)
+                .and_then(|| windows_core::imp::Type::from_abi(result__))
+        }
+    }
+    pub fn TimedMetadataTracks(&self) -> windows_core::Result<MediaPlaybackTimedMetadataTrackList> {
+        unsafe {
+            let mut result__ = core::mem::zeroed();
+            (windows_core::Interface::vtable(self).TimedMetadataTracks)(
+                windows_core::Interface::as_raw(self),
+                &mut result__,
+            )
+            .and_then(|| windows_core::imp::Type::from_abi(result__))
+        }
+    }
+}
+#[repr(C)]
+pub struct IMediaPlaybackItem_Vtbl {
+    pub base__: windows_core::IInspectable_Vtbl,
+    pub AudioTracksChanged:
+        unsafe extern "system" fn(*mut core::ffi::c_void, *mut core::ffi::c_void, *mut i64) -> windows_core::HRESULT,
+    pub RemoveAudioTracksChanged: unsafe extern "system" fn(*mut core::ffi::c_void, i64) -> windows_core::HRESULT,
+    pub VideoTracksChanged:
+        unsafe extern "system" fn(*mut core::ffi::c_void, *mut core::ffi::c_void, *mut i64) -> windows_core::HRESULT,
+    pub RemoveVideoTracksChanged: unsafe extern "system" fn(*mut core::ffi::c_void, i64) -> windows_core::HRESULT,
+    pub TimedMetadataTracksChanged:
+        unsafe extern "system" fn(*mut core::ffi::c_void, *mut core::ffi::c_void, *mut i64) -> windows_core::HRESULT,
+    pub RemoveTimedMetadataTracksChanged:
+        unsafe extern "system" fn(*mut core::ffi::c_void, i64) -> windows_core::HRESULT,
+    pub Source: unsafe extern "system" fn(*mut core::ffi::c_void, *mut *mut core::ffi::c_void) -> windows_core::HRESULT,
+    pub AudioTracks:
+        unsafe extern "system" fn(*mut core::ffi::c_void, *mut *mut core::ffi::c_void) -> windows_core::HRESULT,
+    pub VideoTracks:
+        unsafe extern "system" fn(*mut core::ffi::c_void, *mut *mut core::ffi::c_void) -> windows_core::HRESULT,
+    pub TimedMetadataTracks:
+        unsafe extern "system" fn(*mut core::ffi::c_void, *mut *mut core::ffi::c_void) -> windows_core::HRESULT,
+}
+windows_core::imp::define_interface!(
+    IMediaPlaybackItemFactory,
+    IMediaPlaybackItemFactory_Vtbl,
+    0x7133fce1_1769_4ff9_a7c1_38d2c4d42360
+);
+impl windows_core::RuntimeType for IMediaPlaybackItemFactory {
+    const SIGNATURE: windows_core::imp::ConstBuffer = windows_core::imp::ConstBuffer::for_interface::<Self>();
+}
+#[repr(C)]
+pub struct IMediaPlaybackItemFactory_Vtbl {
+    pub base__: windows_core::IInspectable_Vtbl,
+    pub Create: unsafe extern "system" fn(
+        *mut core::ffi::c_void,
+        *mut core::ffi::c_void,
+        *mut *mut core::ffi::c_void,
+    ) -> windows_core::HRESULT,
 }
 windows_core::imp::define_interface!(
     IMediaPlaybackSession,
@@ -9247,6 +10487,15 @@ impl windows_core::RuntimeType for IMediaTimelineController {
 }
 #[repr(C)]
 pub struct IMediaTimelineController_Vtbl {
+    pub base__: windows_core::IInspectable_Vtbl,
+}
+windows_core::imp::define_interface!(IMediaTrack, IMediaTrack_Vtbl, 0x03e1fafc_c931_491a_b46b_c10ee8c256b7);
+impl windows_core::RuntimeType for IMediaTrack {
+    const SIGNATURE: windows_core::imp::ConstBuffer = windows_core::imp::ConstBuffer::for_interface::<Self>();
+}
+windows_core::imp::interface_hierarchy!(IMediaTrack, windows_core::IUnknown, windows_core::IInspectable);
+#[repr(C)]
+pub struct IMediaTrack_Vtbl {
     pub base__: windows_core::IInspectable_Vtbl,
 }
 windows_core::imp::define_interface!(
@@ -11309,6 +12558,18 @@ impl windows_core::RuntimeType for ITextPointer {
 }
 #[repr(C)]
 pub struct ITextPointer_Vtbl {
+    pub base__: windows_core::IInspectable_Vtbl,
+}
+windows_core::imp::define_interface!(
+    ITimedMetadataTrack,
+    ITimedMetadataTrack_Vtbl,
+    0x9e6aed9e_f67a_49a9_b330_cf03b0e9cf07
+);
+impl windows_core::RuntimeType for ITimedMetadataTrack {
+    const SIGNATURE: windows_core::imp::ConstBuffer = windows_core::imp::ConstBuffer::for_interface::<Self>();
+}
+#[repr(C)]
+pub struct ITimedMetadataTrack_Vtbl {
     pub base__: windows_core::IInspectable_Vtbl,
 }
 windows_core::imp::define_interface!(ITransform, ITransform_Vtbl, 0x4df74078_bfd6_4ed1_9682_d2fd8bf2fe6f);
@@ -14132,6 +15393,34 @@ unsafe impl Send for MediaBreakManager {}
 unsafe impl Sync for MediaBreakManager {}
 #[repr(transparent)]
 #[derive(Clone, Debug, Eq, PartialEq)]
+pub struct MediaPlaybackAudioTrackList(windows_core::IUnknown);
+windows_core::imp::interface_hierarchy!(
+    MediaPlaybackAudioTrackList,
+    windows_core::IUnknown,
+    windows_core::IInspectable,
+    windows_collections::IVectorView<AudioTrack>
+);
+impl windows_core::RuntimeType for MediaPlaybackAudioTrackList {
+    const SIGNATURE: windows_core::imp::ConstBuffer =
+        windows_core::imp::ConstBuffer::for_class::<Self, windows_collections::IVectorView<AudioTrack>>();
+}
+unsafe impl windows_core::Interface for MediaPlaybackAudioTrackList {
+    type Vtable = <windows_collections::IVectorView<AudioTrack> as windows_core::Interface>::Vtable;
+    const IID: windows_core::GUID = <windows_collections::IVectorView<AudioTrack> as windows_core::Interface>::IID;
+}
+impl core::ops::Deref for MediaPlaybackAudioTrackList {
+    type Target = windows_collections::IVectorView<AudioTrack>;
+    fn deref(&self) -> &Self::Target {
+        unsafe { core::mem::transmute(self) }
+    }
+}
+impl windows_core::RuntimeName for MediaPlaybackAudioTrackList {
+    const NAME: &'static str = "Windows.Media.Playback.MediaPlaybackAudioTrackList";
+}
+unsafe impl Send for MediaPlaybackAudioTrackList {}
+unsafe impl Sync for MediaPlaybackAudioTrackList {}
+#[repr(transparent)]
+#[derive(Clone, Debug, Eq, PartialEq)]
 pub struct MediaPlaybackCommandManager(windows_core::IUnknown);
 windows_core::imp::interface_hierarchy!(
     MediaPlaybackCommandManager,
@@ -14157,6 +15446,53 @@ impl windows_core::RuntimeName for MediaPlaybackCommandManager {
 }
 unsafe impl Send for MediaPlaybackCommandManager {}
 unsafe impl Sync for MediaPlaybackCommandManager {}
+#[repr(transparent)]
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct MediaPlaybackItem(windows_core::IUnknown);
+windows_core::imp::interface_hierarchy!(MediaPlaybackItem, windows_core::IUnknown, windows_core::IInspectable);
+windows_core::imp::required_hierarchy!(MediaPlaybackItem, IMediaPlaybackSource);
+impl MediaPlaybackItem {
+    pub fn Create<P0>(source: P0) -> windows_core::Result<Self>
+    where
+        P0: windows_core::Param<MediaSource>,
+    {
+        Self::IMediaPlaybackItemFactory(|this| unsafe {
+            let mut result__ = core::mem::zeroed();
+            (windows_core::Interface::vtable(this).Create)(
+                windows_core::Interface::as_raw(this),
+                source.param().abi(),
+                &mut result__,
+            )
+            .and_then(|| windows_core::imp::Type::from_abi(result__))
+        })
+    }
+    fn IMediaPlaybackItemFactory<R, F: FnOnce(&IMediaPlaybackItemFactory) -> windows_core::Result<R>>(
+        callback: F,
+    ) -> windows_core::Result<R> {
+        static SHARED: windows_core::imp::FactoryCache<MediaPlaybackItem, IMediaPlaybackItemFactory> =
+            windows_core::imp::FactoryCache::new();
+        SHARED.call(callback)
+    }
+}
+impl windows_core::RuntimeType for MediaPlaybackItem {
+    const SIGNATURE: windows_core::imp::ConstBuffer =
+        windows_core::imp::ConstBuffer::for_class::<Self, IMediaPlaybackItem>();
+}
+unsafe impl windows_core::Interface for MediaPlaybackItem {
+    type Vtable = <IMediaPlaybackItem as windows_core::Interface>::Vtable;
+    const IID: windows_core::GUID = <IMediaPlaybackItem as windows_core::Interface>::IID;
+}
+impl core::ops::Deref for MediaPlaybackItem {
+    type Target = IMediaPlaybackItem;
+    fn deref(&self) -> &Self::Target {
+        unsafe { core::mem::transmute(self) }
+    }
+}
+impl windows_core::RuntimeName for MediaPlaybackItem {
+    const NAME: &'static str = "Windows.Media.Playback.MediaPlaybackItem";
+}
+unsafe impl Send for MediaPlaybackItem {}
+unsafe impl Sync for MediaPlaybackItem {}
 #[repr(transparent)]
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct MediaPlaybackSession(windows_core::IUnknown);
@@ -14197,6 +15533,63 @@ impl windows_core::RuntimeType for MediaPlaybackState {
     const SIGNATURE: windows_core::imp::ConstBuffer =
         windows_core::imp::ConstBuffer::from_slice(b"enum(Windows.Media.Playback.MediaPlaybackState;i4)");
 }
+#[repr(transparent)]
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct MediaPlaybackTimedMetadataTrackList(windows_core::IUnknown);
+windows_core::imp::interface_hierarchy!(
+    MediaPlaybackTimedMetadataTrackList,
+    windows_core::IUnknown,
+    windows_core::IInspectable,
+    windows_collections::IVectorView<TimedMetadataTrack>
+);
+impl windows_core::RuntimeType for MediaPlaybackTimedMetadataTrackList {
+    const SIGNATURE: windows_core::imp::ConstBuffer =
+        windows_core::imp::ConstBuffer::for_class::<Self, windows_collections::IVectorView<TimedMetadataTrack>>();
+}
+unsafe impl windows_core::Interface for MediaPlaybackTimedMetadataTrackList {
+    type Vtable = <windows_collections::IVectorView<TimedMetadataTrack> as windows_core::Interface>::Vtable;
+    const IID: windows_core::GUID =
+        <windows_collections::IVectorView<TimedMetadataTrack> as windows_core::Interface>::IID;
+}
+impl core::ops::Deref for MediaPlaybackTimedMetadataTrackList {
+    type Target = windows_collections::IVectorView<TimedMetadataTrack>;
+    fn deref(&self) -> &Self::Target {
+        unsafe { core::mem::transmute(self) }
+    }
+}
+impl windows_core::RuntimeName for MediaPlaybackTimedMetadataTrackList {
+    const NAME: &'static str = "Windows.Media.Playback.MediaPlaybackTimedMetadataTrackList";
+}
+unsafe impl Send for MediaPlaybackTimedMetadataTrackList {}
+unsafe impl Sync for MediaPlaybackTimedMetadataTrackList {}
+#[repr(transparent)]
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct MediaPlaybackVideoTrackList(windows_core::IUnknown);
+windows_core::imp::interface_hierarchy!(
+    MediaPlaybackVideoTrackList,
+    windows_core::IUnknown,
+    windows_core::IInspectable,
+    windows_collections::IVectorView<VideoTrack>
+);
+impl windows_core::RuntimeType for MediaPlaybackVideoTrackList {
+    const SIGNATURE: windows_core::imp::ConstBuffer =
+        windows_core::imp::ConstBuffer::for_class::<Self, windows_collections::IVectorView<VideoTrack>>();
+}
+unsafe impl windows_core::Interface for MediaPlaybackVideoTrackList {
+    type Vtable = <windows_collections::IVectorView<VideoTrack> as windows_core::Interface>::Vtable;
+    const IID: windows_core::GUID = <windows_collections::IVectorView<VideoTrack> as windows_core::Interface>::IID;
+}
+impl core::ops::Deref for MediaPlaybackVideoTrackList {
+    type Target = windows_collections::IVectorView<VideoTrack>;
+    fn deref(&self) -> &Self::Target {
+        unsafe { core::mem::transmute(self) }
+    }
+}
+impl windows_core::RuntimeName for MediaPlaybackVideoTrackList {
+    const NAME: &'static str = "Windows.Media.Playback.MediaPlaybackVideoTrackList";
+}
+unsafe impl Send for MediaPlaybackVideoTrackList {}
+unsafe impl Sync for MediaPlaybackVideoTrackList {}
 #[repr(transparent)]
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct MediaPlayer(windows_core::IUnknown);
@@ -16375,6 +17768,29 @@ impl windows_core::RuntimeType for Thickness {
 }
 #[repr(transparent)]
 #[derive(Clone, Debug, Eq, PartialEq)]
+pub struct TimedMetadataTrack(windows_core::IUnknown);
+windows_core::imp::interface_hierarchy!(TimedMetadataTrack, windows_core::IUnknown, windows_core::IInspectable);
+impl windows_core::RuntimeType for TimedMetadataTrack {
+    const SIGNATURE: windows_core::imp::ConstBuffer =
+        windows_core::imp::ConstBuffer::for_class::<Self, ITimedMetadataTrack>();
+}
+unsafe impl windows_core::Interface for TimedMetadataTrack {
+    type Vtable = <ITimedMetadataTrack as windows_core::Interface>::Vtable;
+    const IID: windows_core::GUID = <ITimedMetadataTrack as windows_core::Interface>::IID;
+}
+impl core::ops::Deref for TimedMetadataTrack {
+    type Target = ITimedMetadataTrack;
+    fn deref(&self) -> &Self::Target {
+        unsafe { core::mem::transmute(self) }
+    }
+}
+impl windows_core::RuntimeName for TimedMetadataTrack {
+    const NAME: &'static str = "Windows.Media.Core.TimedMetadataTrack";
+}
+unsafe impl Send for TimedMetadataTrack {}
+unsafe impl Sync for TimedMetadataTrack {}
+#[repr(transparent)]
+#[derive(Clone, Debug, Eq, PartialEq)]
 pub struct Transform(windows_core::IUnknown);
 windows_core::imp::interface_hierarchy!(Transform, windows_core::IUnknown, windows_core::IInspectable);
 windows_core::imp::required_hierarchy!(Transform, GeneralTransform, DependencyObject);
@@ -16723,6 +18139,28 @@ impl windows_core::RuntimeType for VerticalAlignment {
     const SIGNATURE: windows_core::imp::ConstBuffer =
         windows_core::imp::ConstBuffer::from_slice(b"enum(Windows.UI.Xaml.VerticalAlignment;i4)");
 }
+#[repr(transparent)]
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct VideoTrack(windows_core::IUnknown);
+windows_core::imp::interface_hierarchy!(VideoTrack, windows_core::IUnknown, windows_core::IInspectable, IMediaTrack);
+impl windows_core::RuntimeType for VideoTrack {
+    const SIGNATURE: windows_core::imp::ConstBuffer = windows_core::imp::ConstBuffer::for_class::<Self, IMediaTrack>();
+}
+unsafe impl windows_core::Interface for VideoTrack {
+    type Vtable = <IMediaTrack as windows_core::Interface>::Vtable;
+    const IID: windows_core::GUID = <IMediaTrack as windows_core::Interface>::IID;
+}
+impl core::ops::Deref for VideoTrack {
+    type Target = IMediaTrack;
+    fn deref(&self) -> &Self::Target {
+        unsafe { core::mem::transmute(self) }
+    }
+}
+impl windows_core::RuntimeName for VideoTrack {
+    const NAME: &'static str = "Windows.Media.Core.VideoTrack";
+}
+unsafe impl Send for VideoTrack {}
+unsafe impl Sync for VideoTrack {}
 #[repr(transparent)]
 #[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
 pub struct Visibility(pub i32);
