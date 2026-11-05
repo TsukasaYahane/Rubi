@@ -4,6 +4,8 @@
 use std::cell::{Cell, RefCell};
 use std::rc::Rc;
 use std::sync::Arc;
+use std::sync::atomic::{AtomicU64, Ordering};
+use std::time::Duration;
 
 use rubi_core::Services;
 use rubi_model::Danmaku;
@@ -12,7 +14,8 @@ use windows_core::{EventRevoker, IInspectable, Interface, Ref, Result};
 
 use crate::backend::Backend;
 use crate::state::danmaku::{FONT_SIZE, Item, SCROLL_MS, items, on_screen, tracks};
-use crate::ui::{load, named, player, post};
+use crate::ui::shell::shell;
+use crate::ui::{load, named, player, post, soon};
 use crate::xaml::{
     Color, CompositionTarget, CoreDispatcher, IFrameworkElement, IMediaPlaybackSession, IPanel, IRectangleGeometry,
     ITextBlock, ITranslateTransform, IUIElement, MediaPlaybackSession, RectangleGeometry, SizeChangedEventArgs,
@@ -37,6 +40,8 @@ const SLOT: &str = r##"
 /// Copies of the text in a slot; the last is the coloured one on top.
 const LAYERS: u32 = 5;
 
+/// How long the size must hold still before danmaku are placed again.
+const SETTLE: Duration = Duration::from_millis(200);
 /// Segments loaded together after the first.
 const BATCH: usize = 3;
 
@@ -57,6 +62,9 @@ pub struct Overlay {
     on: Cell<bool>,
     frames: RefCell<Option<EventRevoker>>,
     sizing: RefCell<Option<EventRevoker>>,
+    clip_pending: Rc<Cell<bool>>,
+    /// Bumped by each size change: only the last one places the danmaku again.
+    resizes: Arc<AtomicU64>,
 }
 
 impl Overlay {
@@ -82,6 +90,8 @@ impl Overlay {
             on: Cell::new(true),
             frames: RefCell::new(None),
             sizing: RefCell::new(None),
+            clip_pending: Rc::default(),
+            resizes: Arc::default(),
         });
         let drawing = Rc::downgrade(&overlay);
         let frames = CompositionTarget::Rendering(move |_: Ref<IInspectable>, _: Ref<IInspectable>| {
@@ -92,10 +102,14 @@ impl Overlay {
         *overlay.frames.borrow_mut() = Some(frames);
         let resizing = Rc::downgrade(&overlay);
         let sizing = overlay.canvas.SizeChanged(move |_: Ref<IInspectable>, _: Ref<SizeChangedEventArgs>| {
-            if let Some(overlay) = resizing.upgrade() {
-                let _ = overlay.clip();
-                overlay.place();
-            }
+            let Some(overlay) = resizing.upgrade() else { return };
+            let pane = Rc::downgrade(&overlay);
+            soon(&overlay.clip_pending, move || {
+                if let Some(overlay) = pane.upgrade() {
+                    let _ = overlay.clip();
+                }
+            });
+            overlay.place_when_settled();
         })?;
         *overlay.sizing.borrow_mut() = Some(sizing);
         overlay.clip()?;
@@ -152,9 +166,28 @@ impl Overlay {
         }
     }
 
+    /// Places everything again once the size stops changing: placing is the slow part, and
+    /// danmaku in flight only need the new width, which [`draw`](Self::draw) reads every frame.
+    fn place_when_settled(&self) {
+        let Some(shell) = shell() else { return };
+        let Some(backend) = shell.backend.get().cloned() else { return };
+        let turn = self.resizes.fetch_add(1, Ordering::Relaxed) + 1;
+        let (resizes, dispatcher, run) = (self.resizes.clone(), shell.dispatcher.clone(), player::run());
+        backend.spawn(async move {
+            tokio::time::sleep(SETTLE).await;
+            if resizes.load(Ordering::Relaxed) == turn {
+                post(&dispatcher, move || {
+                    if let Some(overlay) = player::overlay(run) {
+                        overlay.place();
+                    }
+                });
+            }
+        });
+    }
+
     /// Places everything again for the picture's size.
     fn place(&self) {
-        let Some(shell) = crate::ui::shell::shell() else { return };
+        let Some(shell) = shell() else { return };
         let Some(backend) = shell.backend.get().cloned() else { return };
         let (danmaku, size, run) = (self.danmaku.borrow().clone(), self.size(), player::run());
         if danmaku.is_empty() {

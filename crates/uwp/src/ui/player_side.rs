@@ -8,10 +8,10 @@ use rubi_model::{Comment, VideoCard};
 use windows_collections::IVector;
 use windows_core::{IInspectable, Interface, Ref, Result};
 
-use crate::state::panes::side_layout;
+use crate::state::panes::{SideLayout, side_layout};
 use crate::ui::rows::{add_rows, on_row, on_row_click};
 use crate::ui::shell::shell;
-use crate::ui::{load_object, named, on_click, player, post};
+use crate::ui::{load_object, named, on_click, player, post, soon};
 use crate::xaml::{
     BitmapImage, DataTemplate, IBitmapImage, IControl, IFrameworkElement, IImage, IItemsControl, IItemsControl2,
     IItemsWrapGrid, ITextBlock, IUIElement, SizeChangedEventArgs, SolidColorBrush, UIElement, Uri, Visibility,
@@ -64,6 +64,9 @@ pub struct Side {
     large_rows: Cell<Option<bool>>,
     /// The list's panel exists only once it has rows: until then the fit has to be tried again.
     fitted: Cell<bool>,
+    fit_pending: Rc<Cell<bool>>,
+    /// The layout the rows were last set to.
+    layout: Cell<Option<SideLayout>>,
 }
 
 impl Side {
@@ -78,14 +81,20 @@ impl Side {
             loading: Cell::new(false),
             large_rows: Cell::new(None),
             fitted: Cell::new(false),
+            fit_pending: Rc::default(),
+            layout: Cell::new(None),
         });
 
         let related = named::<IFrameworkElement>(root, "Related")?;
         let sizing = Rc::downgrade(&side);
         let revoker = related.SizeChanged(move |_: Ref<IInspectable>, _: Ref<SizeChangedEventArgs>| {
-            if let Some(side) = sizing.upgrade() {
-                let _ = side.fit_rows();
-            }
+            let Some(side) = sizing.upgrade() else { return };
+            let pane = Rc::downgrade(&side);
+            soon(&side.fit_pending, move || {
+                if let Some(side) = pane.upgrade() {
+                    let _ = side.fit_rows();
+                }
+            });
         })?;
         std::mem::forget(revoker);
         let filling = Rc::downgrade(&side);
@@ -137,14 +146,21 @@ impl Side {
     fn fit_rows(&self) -> Result<()> {
         let list = named::<IFrameworkElement>(&self.root, "Related")?;
         let layout = side_layout(list.ActualWidth()?);
+        if self.fitted.get() && self.layout.get() == Some(layout) {
+            return Ok(());
+        }
+        self.fitted.set(false);
         if self.large_rows.replace(Some(layout.large)) != Some(layout.large) {
             let template = load_object(if layout.large { LARGE_ROW } else { SMALL_ROW })?;
             list.cast::<IItemsControl>()?.SetItemTemplate(&template.cast::<DataTemplate>()?)?;
         }
-        let panel = list.cast::<IItemsControl2>()?.ItemsPanelRoot()?.cast::<IItemsWrapGrid>()?;
+        // The panel goes while a new template settles: the next row filled comes back here.
+        let Ok(panel) = list.cast::<IItemsControl2>().and_then(|l| l.ItemsPanelRoot()) else { return Ok(()) };
+        let panel = panel.cast::<IItemsWrapGrid>()?;
         panel.SetMaximumRowsOrColumns(layout.columns as i32)?;
         panel.SetItemWidth(layout.cell_width)?;
         panel.SetItemHeight(layout.cell_height)?;
+        self.layout.set(Some(layout));
         self.fitted.set(true);
         Ok(())
     }

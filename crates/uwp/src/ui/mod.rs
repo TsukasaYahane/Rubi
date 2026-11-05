@@ -11,6 +11,8 @@ pub mod rows;
 pub mod shell;
 pub mod splitter;
 
+use std::cell::Cell;
+use std::rc::Rc;
 use std::sync::Mutex;
 
 use windows_core::{IInspectable, Interface, Ref, Result};
@@ -29,6 +31,21 @@ pub fn post(dispatcher: &CoreDispatcher, job: impl FnOnce() + Send + 'static) {
         }
     });
     let _ = dispatcher.cast::<ICoreDispatcher>().and_then(|d| d.RunAsync(CoreDispatcherPriority::Normal, &handler));
+}
+
+/// Runs `job` once the UI thread has dealt with input and layout, however often this is called
+/// before that: a stream of size changes costs one layout pass per frame, not one per change.
+pub fn soon(pending: &Rc<Cell<bool>>, job: impl Fn() + 'static) {
+    let Some(dispatcher) = shell::shell().map(|s| s.dispatcher.clone()) else { return };
+    if pending.replace(true) {
+        return;
+    }
+    let flag = pending.clone();
+    let handler = DispatchedHandler::new(move || {
+        flag.set(false);
+        job();
+    });
+    let _ = dispatcher.cast::<ICoreDispatcher>().and_then(|d| d.RunAsync(CoreDispatcherPriority::Low, &handler));
 }
 
 /// Loads a XAML string.

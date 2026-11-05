@@ -12,7 +12,7 @@ use windows_core::{IInspectable, Interface, Ref, Result};
 use crate::state::layout::grid_cell;
 use crate::ui::rows::{add_rows, on_row, on_row_click};
 use crate::ui::shell::shell;
-use crate::ui::{load, named, player, post, set_text};
+use crate::ui::{load, named, player, post, set_text, soon};
 use crate::xaml::{
     BitmapImage, IBitmapImage, IFrameworkElement, IImage, IItemsControl, IItemsControl2, IItemsWrapGrid, ITextBlock,
     SizeChangedEventArgs, UIElement, Uri,
@@ -79,6 +79,9 @@ pub struct HomePage {
     started: Cell<bool>,
     /// The cells have been set for the grid's width.
     sized: Cell<bool>,
+    /// The grid width and columns the cells were last set for.
+    fitted: Cell<(f64, u32)>,
+    fit_pending: Rc<Cell<bool>>,
 }
 
 impl HomePage {
@@ -92,6 +95,8 @@ impl HomePage {
             loading: Cell::new(false),
             started: Cell::new(false),
             sized: Cell::new(false),
+            fitted: Cell::new((0.0, 0)),
+            fit_pending: Rc::default(),
         });
 
         let filling = Rc::downgrade(&page);
@@ -186,20 +191,29 @@ impl HomePage {
     }
 
     /// Sets the cells for the grid's width and the window's columns.
-    pub fn resized(&self) {
-        let _ = self.apply_cell();
+    pub fn resized(self: &Rc<Self>) {
+        let page = Rc::downgrade(self);
+        soon(&self.fit_pending, move || {
+            if let Some(page) = page.upgrade() {
+                let _ = page.apply_cell();
+            }
+        });
     }
 
     fn apply_cell(&self) -> Result<()> {
         let Some(shell) = shell() else { return Ok(()) };
         let width = self.grid.ActualWidth()?;
         let columns = shell.class().columns(width);
+        if self.fitted.get() == (width, columns) {
+            return Ok(());
+        }
         let cell = grid_cell(width, columns);
         let panel = self.grid.cast::<IItemsControl2>()?.ItemsPanelRoot()?.cast::<IItemsWrapGrid>()?;
         panel.SetMaximumRowsOrColumns(columns as i32)?;
         panel.SetItemWidth(cell.width)?;
         panel.SetItemHeight(cell.height)?;
         self.sized.set(true);
+        self.fitted.set((width, columns));
         Ok(())
     }
 

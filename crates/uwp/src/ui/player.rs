@@ -16,7 +16,7 @@ use crate::ui::player_actions::Actions;
 use crate::ui::player_side::Side;
 use crate::ui::shell::shell;
 use crate::ui::splitter;
-use crate::ui::{load, named, on_click, post, set_text};
+use crate::ui::{load, named, on_click, post, set_text, soon};
 use crate::xaml::{
     AdaptiveMediaSource, AdaptiveMediaSourceCreationStatus, ApplicationView, DataWriter, FocusState, FrameworkElement,
     Grid, GridLength, GridUnitType, HttpClient, IApplicationView3, IColumnDefinition, IControl, IDataWriter, IFontIcon,
@@ -372,9 +372,12 @@ pub fn show(bvid: &str, title: &str, uploader: &str) -> Result<()> {
     on_click(&root, "ActDanmaku", toggle_danmaku)?;
     on_click(&root, "Full", toggle_full)?;
     on_click(&root, "SendButton", send_danmaku)?;
-    let sizing = root.clone();
+    let (sizing, pending) = (root.clone(), Rc::new(Cell::new(false)));
     let revoker = root.SizeChanged(move |_: Ref<windows_core::IInspectable>, _: Ref<SizeChangedEventArgs>| {
-        let _ = apply_layout(&sizing);
+        let root = sizing.clone();
+        soon(&pending, move || {
+            let _ = apply_layout(&root);
+        });
     })?;
     std::mem::forget(revoker);
     shell.set_page(&root)?;
