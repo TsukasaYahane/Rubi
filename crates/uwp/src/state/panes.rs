@@ -5,8 +5,9 @@ const RAIL_MAX: f64 = 240.0;
 /// From this wide the navigation has room for its labels.
 const RAIL_LABELS_FROM: f64 = 110.0;
 const SIDE_MIN: f64 = 220.0;
-/// The video keeps at least this much beside the side pane.
-const MAIN_MIN: f64 = 320.0;
+/// The video keeps at least this much beside the side pane: the system player's controls will
+/// not get much narrower, and it would spill out of its column.
+const MAIN_MIN: f64 = 480.0;
 /// From this wide the side pane's rows are large, with the cover on top.
 const SIDE_LARGE_FROM: f64 = 320.0;
 /// From this wide the side pane has two columns.
@@ -75,7 +76,7 @@ mod tests {
         assert_eq!(rail_width(10.0), 48.0);
         assert_eq!(rail_width(500.0), 240.0);
         assert!(!rail_has_labels(109.0) && rail_has_labels(110.0));
-        assert_eq!(side_width(900.0, 1000.0), 680.0);
+        assert_eq!(side_width(900.0, 1000.0), 520.0);
         assert_eq!(side_width(100.0, 1000.0), 220.0);
         assert_eq!(side_width(300.0, 400.0), 220.0, "a very small page still shows the pane");
     }

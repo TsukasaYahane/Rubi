@@ -112,7 +112,7 @@ const LAYOUT: &str = r##"
     </ScrollViewer>
   </Grid>
   <Thumb x:Name="SideBar" Grid.Column="1" Width="5" Background="Transparent"><!--bar--></Thumb>
-  <Grid x:Name="Side" Grid.Column="2">
+  <Grid x:Name="Side" Grid.Column="2" Background="{ThemeResource ApplicationPageBackgroundThemeBrush}">
     <Grid.RowDefinitions>
       <RowDefinition Height="Auto" />
       <RowDefinition Height="*" />
@@ -124,6 +124,7 @@ const LAYOUT: &str = r##"
               FontWeight="Light" Padding="12,2" />
     </StackPanel>
     <GridView x:Name="Related" Grid.Row="1" SelectionMode="None" IsItemClickEnabled="True">
+      <GridView.ItemContainerTransitions><TransitionCollection /></GridView.ItemContainerTransitions>
       <GridView.ItemContainerStyle>
         <Style TargetType="GridViewItem">
           <Setter Property="Margin" Value="0" />

@@ -10,12 +10,12 @@ use windows_collections::IVector;
 use windows_core::{IInspectable, Interface, Ref, Result};
 
 use crate::state::layout::grid_cell;
-use crate::ui::rows::{add_rows, on_row, on_row_click};
+use crate::ui::rows::{Covers, add_rows, on_row, on_row_click};
 use crate::ui::shell::shell;
 use crate::ui::{load, named, player, post, set_text, soon};
 use crate::xaml::{
-    BitmapImage, IBitmapImage, IFrameworkElement, IImage, IItemsControl, IItemsControl2, IItemsWrapGrid, ITextBlock,
-    SizeChangedEventArgs, UIElement, Uri,
+    IFrameworkElement, IImage, IItemsControl, IItemsControl2, IItemsWrapGrid, ITextBlock, SizeChangedEventArgs,
+    UIElement,
 };
 
 /// Cards asked for at a time.
@@ -40,6 +40,7 @@ const LAYOUT: &str = r##"
                Foreground="{ThemeResource SystemControlForegroundBaseMediumBrush}" />
   </StackPanel>
   <GridView x:Name="Grid" Grid.Row="1" Padding="9,0,9,12" SelectionMode="None" IsItemClickEnabled="True">
+    <GridView.ItemContainerTransitions><TransitionCollection /></GridView.ItemContainerTransitions>
     <GridView.ItemContainerStyle>
       <Style TargetType="GridViewItem">
         <Setter Property="Margin" Value="0" />
@@ -82,6 +83,7 @@ pub struct HomePage {
     /// The grid width and columns the cells were last set for.
     fitted: Cell<(f64, u32)>,
     fit_pending: Rc<Cell<bool>>,
+    covers: Covers,
 }
 
 impl HomePage {
@@ -97,6 +99,7 @@ impl HomePage {
             sized: Cell::new(false),
             fitted: Cell::new((0.0, 0)),
             fit_pending: Rc::default(),
+            covers: Covers::default(),
         });
 
         let filling = Rc::downgrade(&page);
@@ -225,9 +228,7 @@ impl HomePage {
         let Some(card) = cards.get(at) else { return Ok(()) };
 
         let cover = parts.GetAt(0)?;
-        let bitmap = BitmapImage::CreateInstanceWithUriSource(&Uri::CreateUri(&card.cover)?)?;
-        bitmap.cast::<IBitmapImage>()?.SetDecodePixelWidth(COVER_DECODE_WIDTH)?;
-        cover.cast::<IImage>()?.SetSource(&bitmap)?;
+        cover.cast::<IImage>()?.SetSource(&self.covers.get(&card.cover, COVER_DECODE_WIDTH)?)?;
 
         parts.GetAt(1)?.cast::<ITextBlock>()?.SetText(&card.title)?;
         parts.GetAt(2)?.cast::<ITextBlock>()?.SetText(&format!("{} · {} 播放", card.owner.name, card.stats.view))?;

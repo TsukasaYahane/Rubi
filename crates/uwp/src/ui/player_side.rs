@@ -9,12 +9,12 @@ use windows_collections::IVector;
 use windows_core::{IInspectable, Interface, Ref, Result};
 
 use crate::state::panes::{SideLayout, side_layout};
-use crate::ui::rows::{add_rows, on_row, on_row_click};
+use crate::ui::rows::{Covers, add_rows, on_row, on_row_click};
 use crate::ui::shell::shell;
 use crate::ui::{load_object, named, on_click, player, post, soon};
 use crate::xaml::{
-    BitmapImage, DataTemplate, IBitmapImage, IControl, IFrameworkElement, IImage, IItemsControl, IItemsControl2,
-    IItemsWrapGrid, ITextBlock, IUIElement, SizeChangedEventArgs, SolidColorBrush, UIElement, Uri, Visibility,
+    DataTemplate, IControl, IFrameworkElement, IImage, IItemsControl, IItemsControl2, IItemsWrapGrid, ITextBlock,
+    IUIElement, SizeChangedEventArgs, SolidColorBrush, UIElement, Visibility,
 };
 
 const COVER_DECODE_WIDTH: i32 = 320;
@@ -65,6 +65,7 @@ pub struct Side {
     /// The list's panel exists only once it has rows: until then the fit has to be tried again.
     fitted: Cell<bool>,
     fit_pending: Rc<Cell<bool>>,
+    covers: Covers,
     /// The layout the rows were last set to.
     layout: Cell<Option<SideLayout>>,
 }
@@ -82,6 +83,7 @@ impl Side {
             large_rows: Cell::new(None),
             fitted: Cell::new(false),
             fit_pending: Rc::default(),
+            covers: Covers::default(),
             layout: Cell::new(None),
         });
 
@@ -237,9 +239,7 @@ impl Side {
         }
         let cards = self.related.borrow();
         let Some(card) = cards.get(at) else { return Ok(()) };
-        let bitmap = BitmapImage::CreateInstanceWithUriSource(&Uri::CreateUri(&card.cover)?)?;
-        bitmap.cast::<IBitmapImage>()?.SetDecodePixelWidth(COVER_DECODE_WIDTH)?;
-        parts.GetAt(0)?.cast::<IImage>()?.SetSource(&bitmap)?;
+        parts.GetAt(0)?.cast::<IImage>()?.SetSource(&self.covers.get(&card.cover, COVER_DECODE_WIDTH)?)?;
         parts.GetAt(1)?.cast::<ITextBlock>()?.SetText(&card.title)?;
         parts.GetAt(2)?.cast::<ITextBlock>()?.SetText(&card.owner.name)
     }

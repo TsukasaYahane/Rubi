@@ -1,13 +1,41 @@
 //! Virtualized lists: a row's content is filled in as it comes on screen, which also stands in
 //! for data binding. A row's template is one panel whose children are the parts to fill.
 
+use std::cell::RefCell;
+use std::collections::HashMap;
+
 use windows_collections::IVector;
 use windows_core::{IInspectable, Interface, Ref, Result};
 
 use crate::xaml::{
-    ContainerContentChangingEventArgs, IContentControl2, IFrameworkElement, IItemClickEventArgs, IItemsControl,
-    IListViewBase, IListViewBase2, IPanel, IPropertyValue, ItemClickEventArgs, ListViewBase, PropertyValue, UIElement,
+    BitmapImage, ContainerContentChangingEventArgs, IBitmapImage, IContentControl2, IFrameworkElement,
+    IItemClickEventArgs, IItemsControl, IListViewBase, IListViewBase2, IPanel, IPropertyValue, ItemClickEventArgs,
+    ListViewBase, PropertyValue, UIElement, Uri,
 };
+
+/// Most covers held.
+const COVERS_HELD: usize = 240;
+
+/// Covers already asked for. A row that comes back takes its picture from here at once, instead
+/// of starting a new load and showing nothing for a moment.
+#[derive(Default)]
+pub struct Covers(RefCell<HashMap<String, BitmapImage>>);
+
+impl Covers {
+    pub fn get(&self, url: &str, decode_width: i32) -> Result<BitmapImage> {
+        let mut held = self.0.borrow_mut();
+        if let Some(bitmap) = held.get(url) {
+            return Ok(bitmap.clone());
+        }
+        if held.len() >= COVERS_HELD {
+            held.clear();
+        }
+        let bitmap = BitmapImage::CreateInstanceWithUriSource(&Uri::CreateUri(url)?)?;
+        bitmap.cast::<IBitmapImage>()?.SetDecodePixelWidth(decode_width)?;
+        held.insert(url.to_owned(), bitmap.clone());
+        Ok(bitmap)
+    }
+}
 
 /// Calls `fill` with a row's index and parts when it comes on screen.
 pub fn on_row(
