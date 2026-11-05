@@ -8,6 +8,8 @@ const GRID_PADDING: f64 = 16.0;
 const GRID_GAP: f64 = 14.0;
 /// Room under a card's 16:9 cover: two lines of title, the meta line, and the gap to the next row.
 const CARD_TEXT_HEIGHT: f64 = 86.0;
+/// Width a wide window's cards keep to.
+const WIDE_CARD_WIDTH: f64 = 280.0;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum WindowClass {
@@ -27,12 +29,13 @@ impl WindowClass {
         }
     }
 
-    /// Columns of the video grid.
-    pub fn columns(self) -> u32 {
+    /// Columns of the video grid `list_width` wide: more on a big window, so cards stay the
+    /// size they are meant to be instead of growing with it.
+    pub fn columns(self, list_width: f64) -> u32 {
         match self {
             Self::Narrow => 2,
             Self::Medium => 3,
-            Self::Wide => 4,
+            Self::Wide => ((list_width / WIDE_CARD_WIDTH) as u32).clamp(4, 8),
         }
     }
 
@@ -71,6 +74,14 @@ mod tests {
         assert_eq!(WindowClass::of(600.0), WindowClass::Medium);
         assert_eq!(WindowClass::of(839.0), WindowClass::Medium);
         assert_eq!(WindowClass::of(840.0), WindowClass::Wide);
+    }
+
+    #[test]
+    fn big_windows_get_more_columns() {
+        assert_eq!(WindowClass::Wide.columns(996.0), 4);
+        assert_eq!(WindowClass::Wide.columns(1728.0), 6);
+        assert_eq!(WindowClass::Wide.columns(4000.0), 8);
+        assert_eq!(WindowClass::Narrow.columns(500.0), 2);
     }
 
     #[test]

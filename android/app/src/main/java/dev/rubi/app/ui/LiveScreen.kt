@@ -101,6 +101,12 @@ class LiveState(private val live: LiveService, private val esports: EsportsServi
         }
     }
 
+    /** Starts over, after someone signs in or out. */
+    fun reload() {
+        rooms.reset()
+        matches.reset()
+    }
+
     suspend fun loadAreas() {
         if (areas.isEmpty()) areas = runCatching { withContext(Dispatchers.IO) { live.liveAreas() } }.getOrDefault(emptyList())
     }

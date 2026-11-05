@@ -20,6 +20,9 @@ class Signin(
     /** The signed-in account; seeded from the last known one when a session is stored. */
     val current = mutableStateOf<FfiAccount?>(null)
 
+    /** Bumped whenever someone signs in or out: pages that show the account's content reload. */
+    val changes = mutableStateOf(0)
+
     init {
         if (sessionStored) {
             ui.lastAccount?.let { (name, mid) -> current.value = FfiAccount(true, mid.toULong(), name) }
@@ -37,12 +40,16 @@ class Signin(
     fun saveCurrent() = sessions.save(account().sessionJson())
 
     /** Persists a session a login returned. */
-    fun save(sessionJson: String) = sessions.save(sessionJson)
+    fun save(sessionJson: String) {
+        sessions.save(sessionJson)
+        changes.value++
+    }
 
     fun logout() {
         account().logout()
         sessions.clear()
         current.value = null
         ui.lastAccount = null
+        changes.value++
     }
 }

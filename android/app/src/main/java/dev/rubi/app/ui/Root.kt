@@ -249,6 +249,14 @@ fun RubiRoot(app: RubiApp) {
     var unread by remember { mutableStateOf(0u) }
     var emotes by remember { mutableStateOf(emptyMap<String, String>()) }
 
+    // Someone signed in or out: what the tabs show was for the account before.
+    LaunchedEffect(app.signin.changes.value) {
+        if (app.signin.changes.value > 0) {
+            home.reloads++
+            follow.reload()
+            live.reload()
+        }
+    }
     LaunchedEffect(Unit) {
         runCatching { app.core.account().ensureDeviceIds(); app.signin.saveCurrent() }
         emotes = runCatching { app.core.emotes().emotes().associate { it.text to it.url } }.getOrDefault(emptyMap())

@@ -95,6 +95,13 @@ class FollowState(private val following: FollowingService, private val scope: Co
         }
     }
 
+    /** Starts over, after someone signs in or out. */
+    fun reload() {
+        ups.clear()
+        videos.reset()
+        loadUps()
+    }
+
     fun loadUps() {
         if (ups.isNotEmpty()) return
         scope.launch { runCatching { following.followedUps() }.onSuccess { ups.addAll(it) } }

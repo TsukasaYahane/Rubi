@@ -119,7 +119,11 @@ fun ShareCardSheet(videos: VideosService, appearance: Appearance, d: FfiVideoDet
                                 .also { it.clipData = ClipData.newRawUri("", uri) }
                                 .putExtra(Intent.EXTRA_TEXT, "【${d.title}】 https://www.bilibili.com/video/${d.bvid}\nRubi 客户端打开：${rubiLink(d.bvid)}")
                                 .addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
-                            runCatching { ctx.startActivity(Intent.createChooser(send, "分享卡片")) }
+                            val chooser = Intent.createChooser(send, "分享卡片").addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+                            // The sheet goes first: some systems stall drawing a chooser over one.
+                            runCatching { ctx.startActivity(chooser) }
+                                .onSuccess { onDismiss() }
+                                .onFailure { note = "分享失败：${it.message}" }
                         }
                     }
                 }
@@ -200,9 +204,10 @@ private suspend fun loadBitmap(ctx: Context, url: String): Bitmap? {
  * folder is emptied again at the next start ([clearSharedCards]).
  */
 private fun shareFile(ctx: Context, bmp: Bitmap, bvid: String): Uri {
-    val dir = File(ctx.cacheDir, SHARED_DIR).apply { deleteRecursively(); mkdirs() }
+    val dir = File(ctx.cacheDir, SHARED_DIR).apply { mkdirs() }
     val file = File(dir, "rubi_$bvid.png")
-    file.outputStream().use { bmp.compress(Bitmap.CompressFormat.PNG, 100, it) }
+    // The same card again keeps its file: an app may still be reading it from the last share.
+    if (file.length() == 0L) file.outputStream().use { bmp.compress(Bitmap.CompressFormat.PNG, 100, it) }
     return FileProvider.getUriForFile(ctx, "${ctx.packageName}.share", file)
 }
 

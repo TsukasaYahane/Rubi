@@ -16,11 +16,12 @@ use crate::ui::player_side::Side;
 use crate::ui::shell::shell;
 use crate::ui::{load, named, on_click, post, set_text};
 use crate::xaml::{
-    AdaptiveMediaSource, AdaptiveMediaSourceCreationStatus, DataWriter, FrameworkElement, Grid, GridLength,
-    GridUnitType, HttpClient, IColumnDefinition, IDataWriter, IFrameworkElement, IInputStream, IMediaPlaybackSession,
-    IMediaPlaybackSource, IMediaPlayer, IMediaPlayer3, IMediaPlayerElement, IMediaPlayerFailedEventArgs,
-    IMediaPlayerSource2, IOutputStream, IRandomAccessStream, IRowDefinition, ITextBox, InMemoryRandomAccessStream,
-    MediaPlaybackSession, MediaPlayer, MediaPlayerFailedEventArgs, MediaSource, SizeChangedEventArgs, Uri,
+    AdaptiveMediaSource, AdaptiveMediaSourceCreationStatus, ApplicationView, DataWriter, FocusState, FrameworkElement,
+    Grid, GridLength, GridUnitType, HttpClient, IApplicationView3, IColumnDefinition, IControl, IDataWriter, IFontIcon,
+    IFrameworkElement, IInputStream, IMediaPlaybackSession, IMediaPlaybackSource, IMediaPlayer, IMediaPlayer3,
+    IMediaPlayerElement, IMediaPlayerFailedEventArgs, IMediaPlayerSource2, IOutputStream, IRandomAccessStream,
+    IRowDefinition, ITextBox, IUIElement, InMemoryRandomAccessStream, MediaPlaybackSession, MediaPlayer,
+    MediaPlayerFailedEventArgs, MediaSource, SizeChangedEventArgs, Uri, VirtualKey, Visibility,
 };
 
 /// Quality asked for; the core caps it to what the account may play.
@@ -46,14 +47,22 @@ const LAYOUT: &str = r##"
       <RowDefinition Height="Auto" />
       <RowDefinition Height="Auto" />
     </Grid.RowDefinitions>
-    <Button x:Name="Back" Background="Transparent" BorderThickness="0" Padding="12,8">
+    <Button x:Name="Back" Grid.Row="0" Background="Transparent" BorderThickness="0" Padding="12,8">
       <StackPanel Orientation="Horizontal">
         <FontIcon Glyph="&#xE72B;" FontSize="16" /><TextBlock Text="返回" Margin="10,0,0,0" />
       </StackPanel>
     </Button>
-    <MediaPlayerElement x:Name="Video" Grid.Row="1" AreTransportControlsEnabled="True" Stretch="Uniform" />
+    <MediaPlayerElement x:Name="Video" Grid.Row="1" AreTransportControlsEnabled="True" Stretch="Uniform">
+      <MediaPlayerElement.TransportControls>
+        <MediaTransportControls IsFullWindowButtonVisible="False" IsZoomButtonVisible="False" />
+      </MediaPlayerElement.TransportControls>
+    </MediaPlayerElement>
     <Canvas x:Name="Danmaku" Grid.Row="1" IsHitTestVisible="False" />
-    <Grid Grid.Row="2" Background="#111111" Padding="12,6">
+    <Button x:Name="Full" Grid.Row="1" HorizontalAlignment="Right" VerticalAlignment="Top" Margin="8"
+            Background="#66000000" Foreground="White" BorderThickness="0" Padding="10,6">
+      <FontIcon x:Name="FullIcon" Glyph="&#xE740;" FontSize="16" />
+    </Button>
+    <Grid x:Name="SendBar" Grid.Row="2" Background="#111111" Padding="12,6">
       <Grid.ColumnDefinitions>
         <ColumnDefinition Width="*" />
         <ColumnDefinition Width="Auto" />
@@ -65,12 +74,12 @@ const LAYOUT: &str = r##"
         <FontIcon Glyph="&#xE724;" FontSize="18" />
       </Button>
     </Grid>
-    <StackPanel Grid.Row="3" Margin="16,10,16,6">
+    <StackPanel x:Name="Info" Grid.Row="3" Margin="16,10,16,6">
       <TextBlock x:Name="Title" FontSize="20" FontWeight="Light" TextWrapping="Wrap" MaxLines="2" />
       <TextBlock x:Name="Meta" FontSize="12" Margin="0,4,0,0" TextWrapping="Wrap" MaxLines="3"
                  Foreground="{ThemeResource SystemControlForegroundBaseMediumBrush}" />
     </StackPanel>
-    <ScrollViewer Grid.Row="4" HorizontalScrollMode="Auto" VerticalScrollMode="Disabled"
+    <ScrollViewer x:Name="ActionRow" Grid.Row="4" HorizontalScrollMode="Auto" VerticalScrollMode="Disabled"
                   HorizontalScrollBarVisibility="Hidden" VerticalScrollBarVisibility="Disabled">
       <StackPanel Orientation="Horizontal" Margin="6,0,6,8">
         <StackPanel.Resources>
@@ -179,6 +188,8 @@ struct Page {
     /// What 发弹幕 needs: the video, and its part once known.
     bvid: String,
     cid: Rc<Cell<u64>>,
+    /// Filling the screen.
+    full: Rc<Cell<bool>>,
 }
 
 fn page() -> Option<Page> {
@@ -214,6 +225,64 @@ pub fn overlay(run: u64) -> Option<Rc<Overlay>> {
     page()?.overlay.borrow().clone()
 }
 
+/// Enters or leaves fullscreen. The video element stays where it is and only the page around
+/// it folds away, so the picture does not restart its swap chain and the danmaku stay over it.
+pub fn toggle_full() {
+    let _ = set_full(!page().is_some_and(|p| p.full.get()));
+}
+
+fn set_full(on: bool) -> Result<()> {
+    let (Some(page), Some(shell)) = (page(), shell()) else { return Ok(()) };
+    if page.full.replace(on) == on {
+        return Ok(());
+    }
+    let view = ApplicationView::GetForCurrentView()?.cast::<IApplicationView3>()?;
+    if on {
+        view.TryEnterFullScreenMode()?;
+    } else {
+        view.ExitFullScreenMode()?;
+    }
+    shell.immersive(on)?;
+    set_glyph(&page.root, if on { "\u{E73F}" } else { "\u{E740}" })?;
+    apply_layout(&page.root)
+}
+
+fn set_glyph(root: &IFrameworkElement, glyph: &str) -> Result<()> {
+    named::<IFontIcon>(root, "FullIcon")?.SetGlyph(glyph)
+}
+
+/// The window left fullscreen by itself (the system's own control): the page follows.
+pub fn window_changed() {
+    let left = page().is_some_and(|p| p.full.get())
+        && ApplicationView::GetForCurrentView()
+            .and_then(|v| v.cast::<IApplicationView3>())
+            .and_then(|v| v.IsFullScreenMode())
+            .is_ok_and(|on| !on);
+    if left {
+        let _ = set_full(false);
+    }
+}
+
+/// Keys of the video page; false when the key is not one of them.
+pub fn key(key: VirtualKey) -> bool {
+    let Some(page) = page() else { return false };
+    let typing = named::<IControl>(&page.root, "SendText")
+        .and_then(|c| c.FocusState())
+        .is_ok_and(|f| f != FocusState::Unfocused);
+    if typing {
+        return false;
+    }
+    match key {
+        VirtualKey::F => toggle_full(),
+        VirtualKey::D => toggle_danmaku(),
+        VirtualKey::Escape if page.full.get() => {
+            let _ = set_full(false);
+        }
+        _ => return false,
+    }
+    true
+}
+
 /// Shows a line under the title.
 pub fn say(text: &str) {
     if let Some(page) = page() {
@@ -231,12 +300,23 @@ pub fn resized() {
 /// Beside the video on a wide window; under it otherwise, the video keeping 16:9.
 fn apply_layout(root: &IFrameworkElement) -> Result<()> {
     let Some(shell) = shell() else { return Ok(()) };
-    let wide = shell.class() == WindowClass::Wide;
+    let full = page().is_some_and(|p| p.full.get());
+    let wide = shell.class() == WindowClass::Wide || full;
     let star = |value| GridLength { value, grid_unit_type: GridUnitType::Star };
     let pixels = |value| GridLength { value, grid_unit_type: GridUnitType::Pixel };
     let auto = GridLength { value: 1.0, grid_unit_type: GridUnitType::Auto };
     named::<IColumnDefinition>(root, "MainColumn")?.SetWidth(if wide { star(62.0) } else { star(1.0) })?;
-    named::<IColumnDefinition>(root, "SideColumn")?.SetWidth(if wide { star(38.0) } else { pixels(0.0) })?;
+    named::<IColumnDefinition>(root, "SideColumn")?.SetWidth(if full {
+        pixels(0.0)
+    } else if wide {
+        star(38.0)
+    } else {
+        pixels(0.0)
+    })?;
+    for part in ["Back", "SendBar", "Info", "ActionRow", "Side"] {
+        let shown = if full { Visibility::Collapsed } else { Visibility::Visible };
+        named::<IUIElement>(root, part)?.SetVisibility(shown)?;
+    }
     named::<IRowDefinition>(root, "MainRow")?.SetHeight(if wide { star(1.0) } else { auto })?;
     named::<IRowDefinition>(root, "SideRow")?.SetHeight(if wide { pixels(0.0) } else { star(1.0) })?;
     let side = named::<FrameworkElement>(root, "Side")?;
@@ -248,6 +328,7 @@ fn apply_layout(root: &IFrameworkElement) -> Result<()> {
 
 /// Stops the video and lets its player go.
 pub fn leave() {
+    let _ = set_full(false);
     RUN.fetch_add(1, Ordering::Relaxed);
     PAGE.with(|p| *p.borrow_mut() = None);
     if let Some(player) = PLAYING.with(|p| p.borrow_mut().take()) {
@@ -267,9 +348,18 @@ pub fn show(bvid: &str, title: &str, uploader: &str) -> Result<()> {
     let pane = Side::attach(&root)?;
     let actions = Actions::attach(&root, bvid)?;
     let (shown_overlay, cid) = (Rc::new(RefCell::new(None)), Rc::new(Cell::new(0)));
-    let opened = Page { root: root.clone(), side: pane, actions, overlay: shown_overlay, bvid: bvid.to_owned(), cid };
+    let opened = Page {
+        root: root.clone(),
+        side: pane,
+        actions,
+        overlay: shown_overlay,
+        bvid: bvid.to_owned(),
+        cid,
+        full: Rc::new(Cell::new(false)),
+    };
     PAGE.with(|p| *p.borrow_mut() = Some(opened));
     on_click(&root, "ActDanmaku", toggle_danmaku)?;
+    on_click(&root, "Full", toggle_full)?;
     on_click(&root, "SendButton", send_danmaku)?;
     let sizing = root.clone();
     let revoker = root.SizeChanged(move |_: Ref<windows_core::IInspectable>, _: Ref<SizeChangedEventArgs>| {

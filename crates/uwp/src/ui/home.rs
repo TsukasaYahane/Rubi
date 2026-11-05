@@ -14,7 +14,7 @@ use crate::ui::rows::{add_rows, on_row, on_row_click};
 use crate::ui::shell::shell;
 use crate::ui::{load, named, player, post, set_text};
 use crate::xaml::{
-    BitmapImage, IBitmapImage, IFrameworkElement, IImage, IItemsControl2, IItemsWrapGrid, ITextBlock,
+    BitmapImage, IBitmapImage, IFrameworkElement, IImage, IItemsControl, IItemsControl2, IItemsWrapGrid, ITextBlock,
     SizeChangedEventArgs, UIElement, Uri,
 };
 
@@ -53,13 +53,18 @@ const LAYOUT: &str = r##"
     </GridView.ItemsPanel>
     <GridView.ItemTemplate>
       <DataTemplate>
-        <StackPanel Margin="0,0,14,14">
-          <Image Stretch="UniformToFill" Height="120" />
-          <TextBlock FontSize="13" MaxLines="2" TextWrapping="Wrap" TextTrimming="CharacterEllipsis"
+        <Grid Margin="0,0,14,14">
+          <Grid.RowDefinitions>
+            <RowDefinition Height="*" />
+            <RowDefinition Height="Auto" />
+            <RowDefinition Height="Auto" />
+          </Grid.RowDefinitions>
+          <Image Stretch="UniformToFill" />
+          <TextBlock Grid.Row="1" FontSize="13" MaxLines="2" TextWrapping="Wrap" TextTrimming="CharacterEllipsis"
                      Height="38" Margin="0,6,0,0" />
-          <TextBlock FontSize="12" MaxLines="1" TextTrimming="CharacterEllipsis" Height="18" Margin="0,2,0,0"
-                     Foreground="{ThemeResource SystemControlForegroundBaseMediumBrush}" />
-        </StackPanel>
+          <TextBlock Grid.Row="2" FontSize="12" MaxLines="1" TextTrimming="CharacterEllipsis" Height="18"
+                     Margin="0,2,0,0" Foreground="{ThemeResource SystemControlForegroundBaseMediumBrush}" />
+        </Grid>
       </DataTemplate>
     </GridView.ItemTemplate>
   </GridView>
@@ -72,7 +77,8 @@ pub struct HomePage {
     loading: Cell<bool>,
     /// The feed has been filled from the network.
     started: Cell<bool>,
-    cover_height: Cell<f64>,
+    /// The cells have been set for the grid's width.
+    sized: Cell<bool>,
 }
 
 impl HomePage {
@@ -85,7 +91,7 @@ impl HomePage {
             cards: RefCell::default(),
             loading: Cell::new(false),
             started: Cell::new(false),
-            cover_height: Cell::new(0.0),
+            sized: Cell::new(false),
         });
 
         let filling = Rc::downgrade(&page);
@@ -121,6 +127,19 @@ impl HomePage {
             self.say("正在获取推荐…");
             self.load_page(true);
         }
+    }
+
+    /// Starts over with what the account now sees, after signing in.
+    pub fn reload(&self) {
+        let Some(backend) = shell().and_then(|s| s.backend.get().cloned()) else { return };
+        backend.services.home.new_session();
+        self.cards.borrow_mut().clear();
+        if let Ok(items) = self.grid.cast::<IItemsControl>().and_then(|l| l.Items()) {
+            let _ = items.cast::<IVector<IInspectable>>().and_then(|v| v.Clear());
+        }
+        self.started.set(true);
+        self.say("正在获取推荐…");
+        self.load_page(true);
     }
 
     fn load_page(&self, fill: bool) {
@@ -173,24 +192,25 @@ impl HomePage {
 
     fn apply_cell(&self) -> Result<()> {
         let Some(shell) = shell() else { return Ok(()) };
-        let cell = grid_cell(self.grid.ActualWidth()?, shell.class().columns());
+        let width = self.grid.ActualWidth()?;
+        let columns = shell.class().columns(width);
+        let cell = grid_cell(width, columns);
         let panel = self.grid.cast::<IItemsControl2>()?.ItemsPanelRoot()?.cast::<IItemsWrapGrid>()?;
-        panel.SetMaximumRowsOrColumns(shell.class().columns() as i32)?;
+        panel.SetMaximumRowsOrColumns(columns as i32)?;
         panel.SetItemWidth(cell.width)?;
         panel.SetItemHeight(cell.height)?;
-        self.cover_height.set(cell.cover_height);
+        self.sized.set(true);
         Ok(())
     }
 
     fn fill_row(&self, at: usize, parts: &IVector<UIElement>) -> Result<()> {
-        if self.cover_height.get() == 0.0 {
+        if !self.sized.get() {
             self.apply_cell()?;
         }
         let cards = self.cards.borrow();
         let Some(card) = cards.get(at) else { return Ok(()) };
 
         let cover = parts.GetAt(0)?;
-        cover.cast::<IFrameworkElement>()?.SetHeight(self.cover_height.get())?;
         let bitmap = BitmapImage::CreateInstanceWithUriSource(&Uri::CreateUri(&card.cover)?)?;
         bitmap.cast::<IBitmapImage>()?.SetDecodePixelWidth(COVER_DECODE_WIDTH)?;
         cover.cast::<IImage>()?.SetSource(&bitmap)?;

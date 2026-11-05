@@ -95,6 +95,9 @@ impl Update {
             Self::SignedIn(name) => signed_in(&root, &name),
             Self::Saved(session, name) => {
                 let stored = session::save(&session);
+                if let Some(home) = shell().and_then(|s| s.home_page()) {
+                    home.reload();
+                }
                 signed_in(&root, &name)?;
                 if stored.is_err() {
                     set_text(&root, "Status", "已登录，但保存失败：下次启动要重新登录")?;

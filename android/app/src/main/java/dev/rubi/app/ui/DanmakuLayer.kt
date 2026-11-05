@@ -19,7 +19,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.ImageBitmap
-import androidx.compose.ui.graphics.Shadow
+import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.graphics.drawscope.DrawScope
 import androidx.compose.ui.platform.LocalContext
@@ -139,11 +139,13 @@ fun DanmakuLayer(
         LaunchedEffect(player, frozen) { if (!frozen) while (true) withFrameMillis { pos = player.currentPosition } }
 
         val measurer = rememberTextMeasurer(cacheSize = 256)
-        val base = remember(fontSp) { TextStyle(fontSize = fontSp.sp, shadow = Shadow(Color.Black, blurRadius = 3f)) }
+        val base = remember(fontSp) { TextStyle(fontSize = fontSp.sp) }
 
         Canvas(Modifier.fillMaxSize()) {
             val lineH = lineDp * density
             val now = pos
+            // Centred on the glyph edge, under the fill: 1pt shows outside the letters.
+            val outline = Stroke(width = 2 * density)
             var i = firstStartingAfter(placements, now - scrollMs)
             while (i < placements.size) {
                 val p = placements[i++]
@@ -157,7 +159,9 @@ fun DanmakuLayer(
                 val parts = segs[d.id]
                 if (parts == null) {
                     val layout = measurer.measure(d.content, style)
-                    drawText(layout, topLeft = origin(p, age, scrollMs, layout.size.width.toFloat(), lineH), alpha = display.opacity)
+                    val at = origin(p, age, scrollMs, layout.size.width.toFloat(), lineH)
+                    drawText(layout, color = Color.Black, topLeft = at, alpha = display.opacity, drawStyle = outline)
+                    drawText(layout, topLeft = at, alpha = display.opacity)
                     continue
                 }
                 // Mixed text and emotes: text runs measured here, emotes as fixed squares.
@@ -167,6 +171,7 @@ fun DanmakuLayer(
                 var x = o.x
                 for ((s, l) in runs) {
                     if (l != null) {
+                        drawText(l, color = Color.Black, topLeft = Offset(x, o.y), alpha = display.opacity, drawStyle = outline)
                         drawText(l, topLeft = Offset(x, o.y), alpha = display.opacity)
                         x += l.size.width
                         continue

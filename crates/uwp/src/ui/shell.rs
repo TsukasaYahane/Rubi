@@ -12,11 +12,15 @@ use crate::state::layout::WindowClass;
 use crate::ui::home::HomePage;
 use crate::ui::{load, me, named, on_click, player, post};
 use crate::xaml::{
-    ApplicationData, Color, CoreDispatcher, IApplicationData, IContentControl, IControl, IFrameworkElement,
-    IStorageItem, IUIElement, IWindow, SolidColorBrush, UIElement, Visibility, Window, WindowSizeChangedEventArgs,
+    ApplicationData, ApplicationView, Color, CoreApplication, CoreDispatcher, CoreWindow, GridLength, GridUnitType,
+    IApplicationData, IApplicationView3, IContentControl, IControl, ICoreApplicationView3, ICoreWindow,
+    IFrameworkElement, IRowDefinition, IStorageItem, IUIElement, IUISettings3, IWindow, IWindow2, KeyEventArgs,
+    SolidColorBrush, UIColorType, UIElement, UISettings, Visibility, Window, WindowSizeChangedEventArgs,
 };
 
 const COBALT: Color = Color { a: 255, r: 0x00, g: 0x50, b: 0xEF };
+/// Height of the strip that replaces the title bar.
+const TITLE_HEIGHT: f64 = 32.0;
 const DIM: Color = Color { a: 255, r: 0x76, g: 0x76, b: 0x76 };
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -53,10 +57,15 @@ const LAYOUT: &str = r##"
     <ColumnDefinition Width="*" />
   </Grid.ColumnDefinitions>
   <Grid.RowDefinitions>
+    <RowDefinition x:Name="TitleRow" Height="32" />
     <RowDefinition Height="*" />
     <RowDefinition Height="Auto" />
   </Grid.RowDefinitions>
-  <StackPanel x:Name="Rail" Grid.RowSpan="2" Padding="0,6,0,0"
+  <Grid x:Name="DragBar" Grid.Column="1" Background="Transparent">
+    <TextBlock Text="Rubi" FontSize="12" Margin="12,0,0,0" VerticalAlignment="Center"
+               Foreground="{ThemeResource SystemControlForegroundBaseMediumBrush}" />
+  </Grid>
+  <StackPanel x:Name="Rail" Grid.RowSpan="3" Padding="0,6,0,0"
               Background="{ThemeResource SystemControlBackgroundChromeMediumLowBrush}">
     <Button x:Name="RailHome" Style="{StaticResource Nav}"><StackPanel Orientation="Horizontal">
       <FontIcon Glyph="&#xE80F;" FontSize="20" /><TextBlock x:Name="LabelHome" Margin="12,0,0,0" Text="首页" /></StackPanel></Button>
@@ -67,9 +76,9 @@ const LAYOUT: &str = r##"
     <Button x:Name="RailMe" Style="{StaticResource Nav}"><StackPanel Orientation="Horizontal">
       <FontIcon Glyph="&#xE77B;" FontSize="20" /><TextBlock x:Name="LabelMe" Margin="12,0,0,0" Text="我的" /></StackPanel></Button>
   </StackPanel>
-  <ContentControl x:Name="Page" Grid.Column="1" HorizontalContentAlignment="Stretch"
+  <ContentControl x:Name="Page" Grid.Column="1" Grid.Row="1" HorizontalContentAlignment="Stretch"
                   VerticalContentAlignment="Stretch" IsTabStop="False" />
-  <Grid x:Name="Bottom" Grid.Column="1" Grid.Row="1" BorderThickness="0,1,0,0"
+  <Grid x:Name="Bottom" Grid.Column="1" Grid.Row="2" BorderThickness="0,1,0,0"
         BorderBrush="{ThemeResource SystemControlForegroundBaseLowBrush}">
     <Grid.ColumnDefinitions>
       <ColumnDefinition /><ColumnDefinition /><ColumnDefinition /><ColumnDefinition />
@@ -96,6 +105,7 @@ pub struct Shell {
     page: IContentControl,
     class: Cell<WindowClass>,
     tab: Cell<Tab>,
+    immersive: Cell<bool>,
     home: RefCell<Option<Rc<HomePage>>>,
 }
 
@@ -121,6 +131,7 @@ pub fn start() -> Result<()> {
         page,
         class: Cell::new(WindowClass::of(window.Bounds()?.width as f64)),
         tab: Cell::new(Tab::Home),
+        immersive: Cell::new(false),
         home: RefCell::new(None),
     });
     SHELL.with(|s| *s.borrow_mut() = Some(shell.clone()));
@@ -134,9 +145,20 @@ pub fn start() -> Result<()> {
         let _ = window_resized();
     })?;
     std::mem::forget(revoker);
+    let revoker = CoreWindow::GetForCurrentThread()?.cast::<ICoreWindow>()?.KeyDown(
+        |_: Ref<CoreWindow>, args: Ref<KeyEventArgs>| {
+            if let Ok(args) = args.ok()
+                && let Ok(key) = args.VirtualKey()
+            {
+                player::key(key);
+            }
+        },
+    )?;
+    std::mem::forget(revoker);
 
     shell.apply_class()?;
     window.SetContent(&root.cast::<UIElement>()?)?;
+    extend_into_title_bar(&window, &root)?;
     window.Activate()?;
     shell.show_home()?;
 
@@ -147,6 +169,20 @@ pub fn start() -> Result<()> {
         post(&dispatcher, move || core_opened(opened));
     });
     Ok(())
+}
+
+/// No system bar: the content reaches the top of the window, the caption buttons sit on it and
+/// `DragBar` moves the window.
+fn extend_into_title_bar(window: &IWindow, root: &IFrameworkElement) -> Result<()> {
+    CoreApplication::GetCurrentView()?.cast::<ICoreApplicationView3>()?.TitleBar()?.SetExtendViewIntoTitleBar(true)?;
+    window.cast::<IWindow2>()?.SetTitleBar(&named::<UIElement>(root, "DragBar")?)?;
+    let clear = Color { a: 0, r: 0, g: 0, b: 0 };
+    let bar = ApplicationView::GetForCurrentView()?.cast::<IApplicationView3>()?.TitleBar()?;
+    bar.SetButtonBackgroundColor(Some(clear))?;
+    bar.SetButtonInactiveBackgroundColor(Some(clear))?;
+    // Clear buttons take no theme of their own: their glyphs follow the system's text colour.
+    let text = UISettings::new()?.cast::<IUISettings3>()?.GetColorValue(UIColorType::Foreground)?;
+    bar.SetButtonForegroundColor(Some(text))
 }
 
 fn core_opened(opened: std::result::Result<Arc<Backend>, String>) {
@@ -168,6 +204,7 @@ fn core_opened(opened: std::result::Result<Arc<Backend>, String>) {
 
 fn window_resized() -> Result<()> {
     let Some(shell) = shell() else { return Ok(()) };
+    player::window_changed();
     let class = WindowClass::of(Window::Current()?.cast::<IWindow>()?.Bounds()?.width as f64);
     if class != shell.class.replace(class) {
         shell.apply_class()?;
@@ -192,6 +229,12 @@ pub fn show_tab(tab: Tab) {
 impl Shell {
     pub fn class(&self) -> WindowClass {
         self.class.get()
+    }
+
+    /// Folds the navigation away while a page fills the screen.
+    pub fn immersive(&self, on: bool) -> Result<()> {
+        self.immersive.set(on);
+        self.apply_class()
     }
 
     pub fn set_page(&self, page: &IFrameworkElement) -> Result<()> {
@@ -227,8 +270,11 @@ impl Shell {
         let class = self.class.get();
         let rail = named::<IFrameworkElement>(&self.root, "Rail")?;
         rail.SetWidth(class.rail_width())?;
-        visible(&self.root, "Rail", class != WindowClass::Narrow)?;
-        visible(&self.root, "Bottom", class == WindowClass::Narrow)?;
+        let bare = self.immersive.get();
+        let title = GridLength { value: if bare { 0.0 } else { TITLE_HEIGHT }, grid_unit_type: GridUnitType::Pixel };
+        named::<IRowDefinition>(&self.root, "TitleRow")?.SetHeight(title)?;
+        visible(&self.root, "Rail", class != WindowClass::Narrow && !bare)?;
+        visible(&self.root, "Bottom", class == WindowClass::Narrow && !bare)?;
         for (_, name) in TABS {
             visible(&self.root, &format!("Label{name}"), class == WindowClass::Wide)?;
         }

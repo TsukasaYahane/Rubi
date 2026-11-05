@@ -92,6 +92,11 @@ class FeedList {
  * and coming back, so the feed only changes when the user pulls to refresh.
  */
 class HomeState(private val ui: UiPrefs) {
+    /** Asks the page to fetch afresh, as when someone signs in. */
+    var reloads by mutableStateOf(0)
+    /** The last of [reloads] acted on: the page may only come on screen later, and only once. */
+    var reloaded = 0
+
     val recommend = FeedList()
     val hot = FeedList()
     val rank = FeedList()
@@ -174,6 +179,12 @@ fun HomeScreen(homeService: HomeService, videos: VideosService, danmaku: Danmaku
 
     // First visit only: an existing list is kept as is when returning to this screen.
     LaunchedEffect(Unit) { if (cards.isEmpty()) load(reset = false) }
+    LaunchedEffect(home.reloads) {
+        if (home.reloads > home.reloaded) {
+            home.reloaded = home.reloads
+            load(reset = true)
+        }
+    }
     val nearEnd by remember { derivedStateOf { (grid.layoutInfo.visibleItemsInfo.lastOrNull()?.index ?: 0) >= cards.size - 4 } }
     // One long-lived collector: it fires again whenever a page lands and the end is still in
     // view, and nothing restarts (and so cancels) it while scrolling.

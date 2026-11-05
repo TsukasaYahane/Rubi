@@ -12,20 +12,36 @@ use windows_core::{EventRevoker, IInspectable, Interface, Ref, Result};
 
 use crate::backend::Backend;
 use crate::state::danmaku::{FONT_SIZE, Item, SCROLL_MS, items, on_screen, tracks};
-use crate::ui::{named, player, post};
+use crate::ui::{load, named, player, post};
 use crate::xaml::{
     Color, CompositionTarget, CoreDispatcher, IFrameworkElement, IMediaPlaybackSession, IPanel, IRectangleGeometry,
     ITextBlock, ITranslateTransform, IUIElement, MediaPlaybackSession, RectangleGeometry, SizeChangedEventArgs,
-    SolidColorBrush, TextBlock, TranslateTransform, UIElement, Visibility,
+    SolidColorBrush, UIElement, Visibility,
 };
 
 /// Most danmaku on screen at once.
 const POOL: usize = 72;
+/// One danmaku: four black copies around the text make a 1pt outline, moved as one.
+const SLOT: &str = r##"
+<Grid xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation" Visibility="Collapsed">
+  <Grid.RenderTransform><TranslateTransform /></Grid.RenderTransform>
+  <Grid.Resources>
+    <Style TargetType="TextBlock"><Setter Property="FontSize" Value="22" /></Style>
+  </Grid.Resources>
+  <TextBlock Foreground="Black" Margin="-1,-1,1,1" />
+  <TextBlock Foreground="Black" Margin="1,-1,-1,1" />
+  <TextBlock Foreground="Black" Margin="-1,1,1,-1" />
+  <TextBlock Foreground="Black" Margin="1,1,-1,-1" />
+  <TextBlock Foreground="White" />
+</Grid>"##;
+/// Copies of the text in a slot; the last is the coloured one on top.
+const LAYERS: u32 = 5;
+
 /// Segments loaded together after the first.
 const BATCH: usize = 3;
 
 struct Slot {
-    view: ITextBlock,
+    layers: Vec<ITextBlock>,
     element: IUIElement,
     shift: ITranslateTransform,
     /// The item it shows, so text and colour change only when that does.
@@ -49,15 +65,13 @@ impl Overlay {
         let children = canvas.cast::<IPanel>()?.Children()?.cast::<IVector<UIElement>>()?;
         let mut slots = Vec::with_capacity(POOL);
         for _ in 0..POOL {
-            let block = TextBlock::new()?;
-            let view = block.cast::<ITextBlock>()?;
-            view.SetFontSize(FONT_SIZE)?;
-            let shift = TranslateTransform::new()?;
-            let element = block.cast::<IUIElement>()?;
-            element.SetRenderTransform(&shift)?;
-            element.SetVisibility(Visibility::Collapsed)?;
-            children.Append(&block.cast::<UIElement>()?)?;
-            slots.push(Slot { view, element, shift: shift.cast()?, shows: Cell::new(None) });
+            let slot = load(SLOT)?;
+            let parts = slot.cast::<IPanel>()?.Children()?.cast::<IVector<UIElement>>()?;
+            let layers = (0..LAYERS).map(|at| parts.GetAt(at)?.cast()).collect::<Result<Vec<ITextBlock>>>()?;
+            let element = slot.cast::<IUIElement>()?;
+            let shift = element.RenderTransform()?.cast::<ITranslateTransform>()?;
+            children.Append(&slot.cast::<UIElement>()?)?;
+            slots.push(Slot { layers, element, shift, shows: Cell::new(None) });
         }
         let overlay = Rc::new(Self {
             canvas,
@@ -187,8 +201,12 @@ impl Overlay {
                 used += 1;
                 if slot.shows.replace(Some(at)) != Some(at) {
                     let item = &items[at];
-                    slot.view.SetText(&item.text)?;
-                    slot.view.SetForeground(&brush(item.color)?)?;
+                    for layer in &slot.layers {
+                        layer.SetText(&item.text)?;
+                    }
+                    if let Some(top) = slot.layers.last() {
+                        top.SetForeground(&brush(item.color)?)?;
+                    }
                     slot.element.SetVisibility(Visibility::Visible)?;
                 }
                 slot.shift.SetX(x)?;
