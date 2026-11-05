@@ -10,10 +10,12 @@ use windows_core::{Error, HRESULT, Interface, Ref, Result};
 
 use crate::state::layout::WindowClass;
 use crate::state::manifest::dash_manifest;
+use crate::state::panes;
 use crate::ui::danmaku::Overlay;
 use crate::ui::player_actions::Actions;
 use crate::ui::player_side::Side;
 use crate::ui::shell::shell;
+use crate::ui::splitter;
 use crate::ui::{load, named, on_click, post, set_text};
 use crate::xaml::{
     AdaptiveMediaSource, AdaptiveMediaSourceCreationStatus, ApplicationView, DataWriter, FocusState, FrameworkElement,
@@ -33,6 +35,7 @@ const LAYOUT: &str = r##"
       xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml">
   <Grid.ColumnDefinitions>
     <ColumnDefinition x:Name="MainColumn" Width="62*" />
+    <ColumnDefinition Width="Auto" />
     <ColumnDefinition x:Name="SideColumn" Width="38*" />
   </Grid.ColumnDefinitions>
   <Grid.RowDefinitions>
@@ -108,8 +111,8 @@ const LAYOUT: &str = r##"
       </StackPanel>
     </ScrollViewer>
   </Grid>
-  <Grid x:Name="Side" Grid.Column="1" BorderThickness="1,0,0,0"
-        BorderBrush="{ThemeResource SystemControlForegroundBaseLowBrush}">
+  <Thumb x:Name="SideBar" Grid.Column="1" Width="5" Background="Transparent"><!--bar--></Thumb>
+  <Grid x:Name="Side" Grid.Column="2">
     <Grid.RowDefinitions>
       <RowDefinition Height="Auto" />
       <RowDefinition Height="*" />
@@ -120,33 +123,19 @@ const LAYOUT: &str = r##"
       <Button x:Name="TabComments" Content="评论" Background="Transparent" BorderThickness="0" FontSize="20"
               FontWeight="Light" Padding="12,2" />
     </StackPanel>
-    <ListView x:Name="Related" Grid.Row="1" SelectionMode="None" IsItemClickEnabled="True">
-      <ListView.ItemContainerStyle>
-        <Style TargetType="ListViewItem">
-          <Setter Property="HorizontalContentAlignment" Value="Stretch" />
+    <GridView x:Name="Related" Grid.Row="1" SelectionMode="None" IsItemClickEnabled="True">
+      <GridView.ItemContainerStyle>
+        <Style TargetType="GridViewItem">
+          <Setter Property="Margin" Value="0" />
           <Setter Property="Padding" Value="12,6" />
+          <Setter Property="HorizontalContentAlignment" Value="Stretch" />
+          <Setter Property="VerticalContentAlignment" Value="Top" />
         </Style>
-      </ListView.ItemContainerStyle>
-      <ListView.ItemTemplate>
-        <DataTemplate>
-          <Grid>
-            <Grid.ColumnDefinitions>
-              <ColumnDefinition Width="128" />
-              <ColumnDefinition Width="*" />
-            </Grid.ColumnDefinitions>
-            <Grid.RowDefinitions>
-              <RowDefinition Height="*" />
-              <RowDefinition Height="Auto" />
-            </Grid.RowDefinitions>
-            <Image Grid.RowSpan="2" Stretch="UniformToFill" Height="72" />
-            <TextBlock Grid.Column="1" Margin="10,0,0,0" FontSize="13" TextWrapping="Wrap" MaxLines="2"
-                       TextTrimming="CharacterEllipsis" />
-            <TextBlock Grid.Column="1" Grid.Row="1" Margin="10,0,0,0" FontSize="12" TextTrimming="CharacterEllipsis"
-                       Foreground="{ThemeResource SystemControlForegroundBaseMediumBrush}" />
-          </Grid>
-        </DataTemplate>
-      </ListView.ItemTemplate>
-    </ListView>
+      </GridView.ItemContainerStyle>
+      <GridView.ItemsPanel>
+        <ItemsPanelTemplate><ItemsWrapGrid Orientation="Horizontal" /></ItemsPanelTemplate>
+      </GridView.ItemsPanel>
+    </GridView>
     <ListView x:Name="Comments" Grid.Row="1" SelectionMode="None" Visibility="Collapsed">
       <ListView.ItemContainerStyle>
         <Style TargetType="ListViewItem">
@@ -223,6 +212,21 @@ pub fn overlay(run: u64) -> Option<Rc<Overlay>> {
         return None;
     }
     page()?.overlay.borrow().clone()
+}
+
+fn drag_side(change: f64) {
+    let (Some(page), Some(shell)) = (page(), shell()) else { return };
+    let Ok(side) = named::<IFrameworkElement>(&page.root, "Side") else { return };
+    let (now, whole) = (side.ActualWidth().unwrap_or(0.0), page.root.ActualWidth().unwrap_or(0.0));
+    shell.set_side_width(Some(panes::side_width(now - change, whole)));
+    let _ = apply_layout(&page.root);
+}
+
+fn reset_side() {
+    let (Some(page), Some(shell)) = (page(), shell()) else { return };
+    shell.set_side_width(None);
+    let _ = apply_layout(&page.root);
+    crate::ui::shell::save_widths();
 }
 
 /// Enters or leaves fullscreen. The video element stays where it is and only the page around
@@ -305,11 +309,15 @@ fn apply_layout(root: &IFrameworkElement) -> Result<()> {
     let star = |value| GridLength { value, grid_unit_type: GridUnitType::Star };
     let pixels = |value| GridLength { value, grid_unit_type: GridUnitType::Pixel };
     let auto = GridLength { value: 1.0, grid_unit_type: GridUnitType::Auto };
-    named::<IColumnDefinition>(root, "MainColumn")?.SetWidth(if wide { star(62.0) } else { star(1.0) })?;
+    let dragged = shell.side_width().map(|w| panes::side_width(w, root.ActualWidth().unwrap_or(0.0)));
+    named::<IColumnDefinition>(root, "MainColumn")?.SetWidth(match (wide, dragged) {
+        (true, None) => star(62.0),
+        _ => star(1.0),
+    })?;
     named::<IColumnDefinition>(root, "SideColumn")?.SetWidth(if full {
         pixels(0.0)
     } else if wide {
-        star(38.0)
+        dragged.map_or(star(38.0), pixels)
     } else {
         pixels(0.0)
     })?;
@@ -317,10 +325,12 @@ fn apply_layout(root: &IFrameworkElement) -> Result<()> {
         let shown = if full { Visibility::Collapsed } else { Visibility::Visible };
         named::<IUIElement>(root, part)?.SetVisibility(shown)?;
     }
+    let bar = if wide && !full { Visibility::Visible } else { Visibility::Collapsed };
+    named::<IUIElement>(root, "SideBar")?.SetVisibility(bar)?;
     named::<IRowDefinition>(root, "MainRow")?.SetHeight(if wide { star(1.0) } else { auto })?;
     named::<IRowDefinition>(root, "SideRow")?.SetHeight(if wide { pixels(0.0) } else { star(1.0) })?;
     let side = named::<FrameworkElement>(root, "Side")?;
-    Grid::SetColumn(&side, if wide { 1 } else { 0 })?;
+    Grid::SetColumn(&side, if wide { 2 } else { 0 })?;
     Grid::SetRow(&side, if wide { 0 } else { 1 })?;
     let video = if wide { star(1.0) } else { pixels((root.ActualWidth()? * 9.0 / 16.0).floor().max(1.0)) };
     named::<IRowDefinition>(root, "VideoRow")?.SetHeight(video)
@@ -341,10 +351,11 @@ pub fn leave() {
 pub fn show(bvid: &str, title: &str, uploader: &str) -> Result<()> {
     let Some(shell) = shell() else { return Ok(()) };
     leave();
-    let root = load(LAYOUT)?;
+    let root = load(&LAYOUT.replace("<!--bar-->", splitter::BAR_TEMPLATE))?;
     set_text(&root, "Title", title)?;
     set_text(&root, "Meta", &format!("{uploader} · 正在打开…"))?;
     on_click(&root, "Back", go_back)?;
+    splitter::attach(&root, "SideBar", drag_side, crate::ui::shell::save_widths, reset_side)?;
     let pane = Side::attach(&root)?;
     let actions = Actions::attach(&root, bvid)?;
     let (shown_overlay, cid) = (Rc::new(RefCell::new(None)), Rc::new(Cell::new(0)));

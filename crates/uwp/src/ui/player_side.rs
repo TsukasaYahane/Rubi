@@ -6,19 +6,45 @@ use std::rc::Rc;
 use rubi_core::CommentArea;
 use rubi_model::{Comment, VideoCard};
 use windows_collections::IVector;
-use windows_core::{Interface, Result};
+use windows_core::{IInspectable, Interface, Ref, Result};
 
+use crate::state::panes::side_layout;
 use crate::ui::rows::{add_rows, on_row, on_row_click};
 use crate::ui::shell::shell;
-use crate::ui::{named, on_click, player, post};
+use crate::ui::{load_object, named, on_click, player, post};
 use crate::xaml::{
-    BitmapImage, IBitmapImage, IControl, IFrameworkElement, IImage, ITextBlock, IUIElement, SolidColorBrush, UIElement,
-    Uri, Visibility,
+    BitmapImage, DataTemplate, IBitmapImage, IControl, IFrameworkElement, IImage, IItemsControl, IItemsControl2,
+    IItemsWrapGrid, ITextBlock, IUIElement, SizeChangedEventArgs, SolidColorBrush, UIElement, Uri, Visibility,
 };
 
 const COVER_DECODE_WIDTH: i32 = 320;
 /// Rows from the end at which more comments load.
 const LOAD_AHEAD: usize = 6;
+
+/// A related video with its cover beside the words: a narrow pane.
+const SMALL_ROW: &str = r##"<DataTemplate xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation">
+  <Grid>
+    <Grid.ColumnDefinitions><ColumnDefinition Width="128" /><ColumnDefinition Width="*" /></Grid.ColumnDefinitions>
+    <Grid.RowDefinitions><RowDefinition Height="*" /><RowDefinition Height="Auto" /></Grid.RowDefinitions>
+    <Image Grid.RowSpan="2" Stretch="UniformToFill" />
+    <TextBlock Grid.Column="1" Margin="10,0,0,0" FontSize="13" TextWrapping="Wrap" MaxLines="2"
+               TextTrimming="CharacterEllipsis" />
+    <TextBlock Grid.Column="1" Grid.Row="1" Margin="10,0,0,0" FontSize="12" TextTrimming="CharacterEllipsis"
+               Foreground="{ThemeResource SystemControlForegroundBaseMediumBrush}" />
+  </Grid></DataTemplate>"##;
+
+/// With the cover above the words: a wide pane.
+const LARGE_ROW: &str = r##"<DataTemplate xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation">
+  <Grid>
+    <Grid.RowDefinitions>
+      <RowDefinition Height="*" /><RowDefinition Height="Auto" /><RowDefinition Height="Auto" />
+    </Grid.RowDefinitions>
+    <Image Stretch="UniformToFill" />
+    <TextBlock Grid.Row="1" Height="36" Margin="0,5,0,0" FontSize="13" TextWrapping="Wrap" MaxLines="2"
+               TextTrimming="CharacterEllipsis" />
+    <TextBlock Grid.Row="2" FontSize="12" TextTrimming="CharacterEllipsis"
+               Foreground="{ThemeResource SystemControlForegroundBaseMediumBrush}" />
+  </Grid></DataTemplate>"##;
 
 /// A comment as a row: replies carry how deep they sit.
 struct CommentRow {
@@ -34,6 +60,10 @@ pub struct Side {
     next_comments: RefCell<Option<String>>,
     comments_opened: Cell<bool>,
     loading: Cell<bool>,
+    /// The row template in use, so it changes only when the pane crosses a width.
+    large_rows: Cell<Option<bool>>,
+    /// The list's panel exists only once it has rows: until then the fit has to be tried again.
+    fitted: Cell<bool>,
 }
 
 impl Side {
@@ -46,9 +76,18 @@ impl Side {
             next_comments: RefCell::new(None),
             comments_opened: Cell::new(false),
             loading: Cell::new(false),
+            large_rows: Cell::new(None),
+            fitted: Cell::new(false),
         });
 
         let related = named::<IFrameworkElement>(root, "Related")?;
+        let sizing = Rc::downgrade(&side);
+        let revoker = related.SizeChanged(move |_: Ref<IInspectable>, _: Ref<SizeChangedEventArgs>| {
+            if let Some(side) = sizing.upgrade() {
+                let _ = side.fit_rows();
+            }
+        })?;
+        std::mem::forget(revoker);
         let filling = Rc::downgrade(&side);
         on_row(&related, move |at, parts| filling.upgrade().map_or(Ok(()), |s| s.fill_related(at, parts)))?;
         let opening = Rc::downgrade(&side);
@@ -92,6 +131,22 @@ impl Side {
         let count = cards.len();
         *self.related.borrow_mut() = cards;
         add_rows(&named(&self.root, "Related")?, 0, count)
+    }
+
+    /// Lays the related videos out for the pane's width, live while it is dragged.
+    fn fit_rows(&self) -> Result<()> {
+        let list = named::<IFrameworkElement>(&self.root, "Related")?;
+        let layout = side_layout(list.ActualWidth()?);
+        if self.large_rows.replace(Some(layout.large)) != Some(layout.large) {
+            let template = load_object(if layout.large { LARGE_ROW } else { SMALL_ROW })?;
+            list.cast::<IItemsControl>()?.SetItemTemplate(&template.cast::<DataTemplate>()?)?;
+        }
+        let panel = list.cast::<IItemsControl2>()?.ItemsPanelRoot()?.cast::<IItemsWrapGrid>()?;
+        panel.SetMaximumRowsOrColumns(layout.columns as i32)?;
+        panel.SetItemWidth(layout.cell_width)?;
+        panel.SetItemHeight(layout.cell_height)?;
+        self.fitted.set(true);
+        Ok(())
     }
 
     fn show_tab(&self, comments: bool) -> Result<()> {
@@ -161,6 +216,9 @@ impl Side {
     }
 
     fn fill_related(&self, at: usize, parts: &IVector<UIElement>) -> Result<()> {
+        if !self.fitted.get() {
+            self.fit_rows()?;
+        }
         let cards = self.related.borrow();
         let Some(card) = cards.get(at) else { return Ok(()) };
         let bitmap = BitmapImage::CreateInstanceWithUriSource(&Uri::CreateUri(&card.cover)?)?;

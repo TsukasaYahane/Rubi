@@ -9,7 +9,9 @@ use windows_core::{IInspectable, Interface, Ref, Result};
 use crate::backend::Backend;
 use crate::session;
 use crate::state::layout::WindowClass;
+use crate::state::panes::{self, Widths};
 use crate::ui::home::HomePage;
+use crate::ui::splitter::{self, BAR_TEMPLATE};
 use crate::ui::{load, me, named, on_click, player, post};
 use crate::xaml::{
     ApplicationData, ApplicationView, Color, CoreApplication, CoreDispatcher, CoreWindow, GridLength, GridUnitType,
@@ -54,6 +56,7 @@ const LAYOUT: &str = r##"
   </Grid.Resources>
   <Grid.ColumnDefinitions>
     <ColumnDefinition Width="Auto" />
+    <ColumnDefinition Width="Auto" />
     <ColumnDefinition Width="*" />
   </Grid.ColumnDefinitions>
   <Grid.RowDefinitions>
@@ -61,7 +64,8 @@ const LAYOUT: &str = r##"
     <RowDefinition Height="*" />
     <RowDefinition Height="Auto" />
   </Grid.RowDefinitions>
-  <Grid x:Name="DragBar" Grid.Column="1" Background="Transparent">
+  <Thumb x:Name="RailBar" Grid.Column="1" Grid.RowSpan="3" Width="5" Background="Transparent"><!--bar--></Thumb>
+  <Grid x:Name="DragBar" Grid.Column="2" Background="Transparent">
     <TextBlock Text="Rubi" FontSize="12" Margin="12,0,0,0" VerticalAlignment="Center"
                Foreground="{ThemeResource SystemControlForegroundBaseMediumBrush}" />
   </Grid>
@@ -76,9 +80,9 @@ const LAYOUT: &str = r##"
     <Button x:Name="RailMe" Style="{StaticResource Nav}"><StackPanel Orientation="Horizontal">
       <FontIcon Glyph="&#xE77B;" FontSize="20" /><TextBlock x:Name="LabelMe" Margin="12,0,0,0" Text="我的" /></StackPanel></Button>
   </StackPanel>
-  <ContentControl x:Name="Page" Grid.Column="1" Grid.Row="1" HorizontalContentAlignment="Stretch"
+  <ContentControl x:Name="Page" Grid.Column="2" Grid.Row="1" HorizontalContentAlignment="Stretch"
                   VerticalContentAlignment="Stretch" IsTabStop="False" />
-  <Grid x:Name="Bottom" Grid.Column="1" Grid.Row="2" BorderThickness="0,1,0,0"
+  <Grid x:Name="Bottom" Grid.Column="2" Grid.Row="2" BorderThickness="0,1,0,0"
         BorderBrush="{ThemeResource SystemControlForegroundBaseLowBrush}">
     <Grid.ColumnDefinitions>
       <ColumnDefinition /><ColumnDefinition /><ColumnDefinition /><ColumnDefinition />
@@ -104,6 +108,9 @@ pub struct Shell {
     root: IFrameworkElement,
     page: IContentControl,
     class: Cell<WindowClass>,
+    /// Where the user dragged the panes to; kept in the app's folder.
+    widths: Cell<Widths>,
+    folder: String,
     tab: Cell<Tab>,
     immersive: Cell<bool>,
     home: RefCell<Option<Rc<HomePage>>>,
@@ -121,15 +128,20 @@ pub fn shell() -> Option<Rc<Shell>> {
 /// Builds the window, then opens the core in the background.
 pub fn start() -> Result<()> {
     let window = Window::Current()?.cast::<IWindow>()?;
-    let root = load(LAYOUT)?;
+    let root = load(&LAYOUT.replace("<!--bar-->", BAR_TEMPLATE))?;
     let page = named::<IContentControl>(&root, "Page")?;
     let dispatcher = window.Dispatcher()?;
+    let folder = ApplicationData::Current()?.cast::<IApplicationData>()?.LocalFolder()?;
+    let data_dir = folder.cast::<IStorageItem>()?.Path()?;
+    let widths = std::fs::read_to_string(panes_file(&data_dir)).map(|t| Widths::parse(&t)).unwrap_or_default();
     let shell = Rc::new(Shell {
         dispatcher: dispatcher.clone(),
         backend: OnceCell::new(),
         root: root.clone(),
         page,
         class: Cell::new(WindowClass::of(window.Bounds()?.width as f64)),
+        widths: Cell::new(widths),
+        folder: data_dir.clone(),
         tab: Cell::new(Tab::Home),
         immersive: Cell::new(false),
         home: RefCell::new(None),
@@ -162,8 +174,7 @@ pub fn start() -> Result<()> {
     window.Activate()?;
     shell.show_home()?;
 
-    let folder = ApplicationData::Current()?.cast::<IApplicationData>()?.LocalFolder()?;
-    let data_dir = folder.cast::<IStorageItem>()?.Path()?;
+    splitter::attach(&root, "RailBar", drag_rail, save_widths, reset_rail)?;
     std::thread::spawn(move || {
         let opened = Backend::open(&data_dir, session::load()).map(Arc::new);
         post(&dispatcher, move || core_opened(opened));
@@ -183,6 +194,34 @@ fn extend_into_title_bar(window: &IWindow, root: &IFrameworkElement) -> Result<(
     // Clear buttons take no theme of their own: their glyphs follow the system's text colour.
     let text = UISettings::new()?.cast::<IUISettings3>()?.GetColorValue(UIColorType::Foreground)?;
     bar.SetButtonForegroundColor(Some(text))
+}
+
+fn panes_file(data_dir: &str) -> std::path::PathBuf {
+    std::path::Path::new(data_dir).join("panes.txt")
+}
+
+fn drag_rail(change: f64) {
+    let Some(shell) = shell() else { return };
+    let mut widths = shell.widths.get();
+    widths.rail = Some(panes::rail_width(shell.rail_width() + change));
+    shell.widths.set(widths);
+    let _ = shell.apply_rail();
+}
+
+fn reset_rail() {
+    let Some(shell) = shell() else { return };
+    let mut widths = shell.widths.get();
+    widths.rail = None;
+    shell.widths.set(widths);
+    let _ = shell.apply_rail();
+    save_widths();
+}
+
+/// Keeps the widths for the next start.
+pub fn save_widths() {
+    if let Some(shell) = shell() {
+        let _ = std::fs::write(panes_file(&shell.folder), shell.widths.get().to_text());
+    }
 }
 
 fn core_opened(opened: std::result::Result<Arc<Backend>, String>) {
@@ -231,6 +270,32 @@ impl Shell {
         self.class.get()
     }
 
+    /// The side pane's dragged width, if any.
+    pub fn side_width(&self) -> Option<f64> {
+        self.widths.get().side
+    }
+
+    pub fn set_side_width(&self, width: Option<f64>) {
+        let mut widths = self.widths.get();
+        widths.side = width;
+        self.widths.set(widths);
+    }
+
+    fn rail_width(&self) -> f64 {
+        self.widths.get().rail.unwrap_or_else(|| self.class.get().rail_width())
+    }
+
+    /// Sizes the rail and shows its labels when they fit.
+    fn apply_rail(&self) -> Result<()> {
+        let width = self.rail_width();
+        named::<IFrameworkElement>(&self.root, "Rail")?.SetWidth(width)?;
+        for (_, name) in TABS {
+            let wide_enough = panes::rail_has_labels(width);
+            visible(&self.root, &format!("Label{name}"), wide_enough)?;
+        }
+        Ok(())
+    }
+
     /// Folds the navigation away while a page fills the screen.
     pub fn immersive(&self, on: bool) -> Result<()> {
         self.immersive.set(on);
@@ -268,16 +333,13 @@ impl Shell {
     /// Lays the navigation out for the window's width.
     fn apply_class(&self) -> Result<()> {
         let class = self.class.get();
-        let rail = named::<IFrameworkElement>(&self.root, "Rail")?;
-        rail.SetWidth(class.rail_width())?;
+        self.apply_rail()?;
         let bare = self.immersive.get();
         let title = GridLength { value: if bare { 0.0 } else { TITLE_HEIGHT }, grid_unit_type: GridUnitType::Pixel };
         named::<IRowDefinition>(&self.root, "TitleRow")?.SetHeight(title)?;
         visible(&self.root, "Rail", class != WindowClass::Narrow && !bare)?;
+        visible(&self.root, "RailBar", class != WindowClass::Narrow && !bare)?;
         visible(&self.root, "Bottom", class == WindowClass::Narrow && !bare)?;
-        for (_, name) in TABS {
-            visible(&self.root, &format!("Label{name}"), class == WindowClass::Wide)?;
-        }
         if let Some(home) = self.home.borrow().as_ref() {
             home.resized();
         }

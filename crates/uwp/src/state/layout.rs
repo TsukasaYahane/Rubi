@@ -3,13 +3,15 @@
 const MEDIUM_MIN: f64 = 600.0;
 const WIDE_MIN: f64 = 840.0;
 
-/// Space around and between the cards of the video grid; the gap sits inside each cell.
-const GRID_PADDING: f64 = 16.0;
-const GRID_GAP: f64 = 14.0;
-/// Room under a card's 16:9 cover: two lines of title, the meta line, and the gap to the next row.
-const CARD_TEXT_HEIGHT: f64 = 86.0;
+/// Space left and right of the video grid.
+const GRID_PADDING: f64 = 18.0;
+/// Space around a card's content, the same on every side so a card sits centred in its cell.
+const CARD_MARGIN: f64 = 7.0;
+/// Room under a card's 16:9 cover: two lines of title and the meta line.
+const CARD_TEXT_HEIGHT: f64 = 64.0;
 /// Width a wide window's cards keep to.
 const WIDE_CARD_WIDTH: f64 = 280.0;
+const MEDIUM_CARD_WIDTH: f64 = 210.0;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum WindowClass {
@@ -34,7 +36,7 @@ impl WindowClass {
     pub fn columns(self, list_width: f64) -> u32 {
         match self {
             Self::Narrow => 2,
-            Self::Medium => 3,
+            Self::Medium => ((list_width / MEDIUM_CARD_WIDTH) as u32).clamp(2, 4),
             Self::Wide => ((list_width / WIDE_CARD_WIDTH) as u32).clamp(4, 8),
         }
     }
@@ -54,14 +56,13 @@ impl WindowClass {
 pub struct Cell {
     pub width: f64,
     pub height: f64,
-    pub cover_height: f64,
 }
 
 pub fn grid_cell(list_width: f64, columns: u32) -> Cell {
     let usable = (list_width - GRID_PADDING).max(1.0);
     let width = (usable / columns.max(1) as f64).floor();
-    let cover_height = ((width - GRID_GAP).max(1.0) * 9.0 / 16.0).floor();
-    Cell { width, height: cover_height + CARD_TEXT_HEIGHT, cover_height }
+    let cover_height = ((width - 2.0 * CARD_MARGIN).max(1.0) * 9.0 / 16.0).floor();
+    Cell { width, height: cover_height + CARD_TEXT_HEIGHT + 2.0 * CARD_MARGIN }
 }
 
 #[cfg(test)]
@@ -87,9 +88,8 @@ mod tests {
     #[test]
     fn cells_fill_the_row() {
         let cell = grid_cell(1016.0, 4);
-        assert_eq!(cell.width, 250.0);
-        assert_eq!(cell.cover_height, 132.0);
-        assert_eq!(cell.height, 218.0);
+        assert_eq!(cell.width, 249.0);
+        assert_eq!(cell.height, 132.0 + 64.0 + 14.0);
         assert!(grid_cell(0.0, 0).width >= 1.0);
     }
 }

@@ -39,7 +39,7 @@ const LAYOUT: &str = r##"
     <TextBlock x:Name="Status" Margin="16,0,0,0" FontSize="13" VerticalAlignment="Center"
                Foreground="{ThemeResource SystemControlForegroundBaseMediumBrush}" />
   </StackPanel>
-  <GridView x:Name="Grid" Grid.Row="1" Padding="16,0,0,12" SelectionMode="None" IsItemClickEnabled="True">
+  <GridView x:Name="Grid" Grid.Row="1" Padding="9,0,9,12" SelectionMode="None" IsItemClickEnabled="True">
     <GridView.ItemContainerStyle>
       <Style TargetType="GridViewItem">
         <Setter Property="Margin" Value="0" />
@@ -53,7 +53,7 @@ const LAYOUT: &str = r##"
     </GridView.ItemsPanel>
     <GridView.ItemTemplate>
       <DataTemplate>
-        <Grid Margin="0,0,14,14">
+        <Grid Margin="7">
           <Grid.RowDefinitions>
             <RowDefinition Height="*" />
             <RowDefinition Height="Auto" />
