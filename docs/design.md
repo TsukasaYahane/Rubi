@@ -297,6 +297,21 @@
 
 另外：`ffi` 只做类型转换不含业务；新增业务规则写在 `core`，Android 与 CLI 共用。
 
+### 11.5 Windows 移植（2026-11-05 定）
+
+路线：先 UWP，后 WinUI。核心与界面都用 Rust（`windows-rs`）。设备：桌面、Surface 为运行目标；Windows 手机没有真机，本阶段只验证编译，运行留到模拟器。分发：MSIX 自签名，不计划上架商店。视觉沿用 Metro（钴蓝、直角、图形 / 文字两套风格），窗口标题栏、滚动条、右键菜单和无障碍用系统原生。
+
+前置工作分四步，每步汇报，走不通时停下等决定，不自行切换退路：
+
+1. 核心编译并运行在 `x86_64-uwp-windows-msvc`。
+2. 核心编译到 `thumbv7a-uwp-windows-msvc`。退路：`api` 接口注入 WinRT 的网络与 TLS 实现；仍不行则手机标为不支持。
+3. 纯 Rust 跑通 XAML 窗口：代码创建控件，样式用 `XamlReader` 加载。退路：薄 C++/WinRT 外壳，只放 XAML 与绑定。
+4. 最小样板：扫码登录、首页、播放一个视频。
+
+第 3 步后出窄 / 中 / 宽三档原型（断点 600 / 840，与 Android 一致；首页、播放页、竖屏推流、我的 / 设置），审批后才写正式界面。
+
+技术决定：最低系统 15063、目标 22621；`crates/uwp` 进 workspace 但不进 `default-members`，直接依赖 `rubi-core`，`rubi-ffi` 只服务 Android；清单放 `windows/uwp/`，构建脚本 `scripts/build-uwp.ps1`，证书不入库；为 UWP 固定一个 nightly 版本。播放用 `MediaPlayerElement` + `AdaptiveMediaSource`，Rust 本地生成 MPD 并带请求头，退路为本机回环代理，先只用 AVC，上限 1080P，样板不含弹幕。登录先只做扫码，会话存 `PasswordVault`，数据放 `LocalFolder`。页面状态放 `crates/uwp` 的 `state` 模块且不碰 XAML 类型，做 WinUI 时再抽成共享 crate。
+
 ---
 
 ## 12. 待抓包确认事项

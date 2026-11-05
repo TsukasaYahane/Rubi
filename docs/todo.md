@@ -8,7 +8,7 @@ MVP 范围已全部完成（2026-10-31）。
 
 ## 第二阶段
 
-- [ ] **UWP 适配**：Windows 版（UWP / WinUI），沿用 Metro 风格。Rust 核心编译为 Windows 动态库（x86_64 / aarch64-pc-windows-msvc），绑定需另选方案（UniFFI 无官方 C# 后端，可评估社区的 uniffi-bindgen-cs 或手写 C ABI + P/Invoke）；播放用 MediaPlayerElement（DASH 音视频分离需合流）；凭证存 Windows 凭据管理器。需先调研绑定与打包分发方式，界面先出原型。
+- [ ] **Windows 移植**：先 UWP 后 WinUI，方案与四步验证见 `docs/design.md` §11.5。进度：第 1 步进行中。
 - [ ] 遇到时补抓包样本：商业合作稿件（需遇到实例）。2026-11-03 查热搜：`search/square` 50 条、`main/hotword` 30 条均无 `is_commercial = "1"`，现有规则已按该字段拦截，遇到时再核对。
 - [ ] **iOS 适配（1.0 正式发布之后再做）**：Rust 核心（`crates/ffi`）用 UniFFI 生成 Swift 绑定并打成 XCFramework（aarch64-apple-ios / 模拟器），界面用 SwiftUI 按 Metro 风格重做；播放用 AVPlayer（DASH 音视频分离需合流或改取 mp4 流）、后台播放与锁屏控制用 MPNowPlayingInfoCenter；凭证存 Keychain；需 macOS + Xcode 构建，CI 加 macOS 任务。
 
