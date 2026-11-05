@@ -8,7 +8,7 @@ MVP 范围已全部完成（2026-10-31）。
 
 ## 第二阶段
 
-- [ ] **Windows 移植**：先 UWP 后 WinUI，方案与四步验证见 `docs/design.md` §11.5。进度：第 1 步进行中。
+- [ ] **Windows 移植**：先 UWP 后 WinUI，方案与四步验证见 `docs/design.md` §11.5。进度：第 1 步通过（x64，未验证沙盒内与联网）；第 2 步（手机 ARM32）不通过，等决定。
 - [ ] 遇到时补抓包样本：商业合作稿件（需遇到实例）。2026-11-03 查热搜：`search/square` 50 条、`main/hotword` 30 条均无 `is_commercial = "1"`，现有规则已按该字段拦截，遇到时再核对。
 - [ ] **iOS 适配（1.0 正式发布之后再做）**：Rust 核心（`crates/ffi`）用 UniFFI 生成 Swift 绑定并打成 XCFramework（aarch64-apple-ios / 模拟器），界面用 SwiftUI 按 Metro 风格重做；播放用 AVPlayer（DASH 音视频分离需合流或改取 mp4 流）、后台播放与锁屏控制用 MPNowPlayingInfoCenter；凭证存 Keychain；需 macOS + Xcode 构建，CI 加 macOS 任务。
 

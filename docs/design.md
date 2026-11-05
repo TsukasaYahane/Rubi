@@ -312,6 +312,12 @@
 
 技术决定：最低系统 15063、目标 22621；`crates/uwp` 进 workspace 但不进 `default-members`，直接依赖 `rubi-core`，`rubi-ffi` 只服务 Android；清单放 `windows/uwp/`，构建脚本 `scripts/build-uwp.ps1`，证书不入库；为 UWP 固定一个 nightly 版本。播放用 `MediaPlayerElement` + `AdaptiveMediaSource`，Rust 本地生成 MPD 并带请求头，退路为本机回环代理，先只用 AVC，上限 1080P，样板不含弹幕。登录先只做扫码，会话存 `PasswordVault`，数据放 `LocalFolder`。页面状态放 `crates/uwp` 的 `state` 模块且不碰 XAML 类型，做 WinUI 时再抽成共享 crate。
 
+验证记录（2026-11-05，nightly-2026-10-15，`-Z build-std`）：
+
+- `x86_64-uwp`：`rubi-core` 编译通过，core 与 store 的 45 个单元测试通过（在包外运行，需 `Microsoft.VCLibs` 的 `vcruntime140_app.dll`；尚未在 AppContainer 内验证，也未验证联网）。
+- `thumbv7a-uwp`（手机）：不通过。`ring` 的 ARM 汇编无法用 MSVC 工具链构建（LNK1181）；`windows-sys` 0.61 缺 ARM32 类型（经 `mio` / `tokio net` 依赖）。`rubi-store`、`rubi-filter`、`rubi-recommend` 能编译。
+- `aarch64-uwp`（ARM 版 Surface）：`ring` 需要 clang，本机未装，其余待验证。
+
 ---
 
 ## 12. 待抓包确认事项
