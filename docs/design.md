@@ -316,7 +316,7 @@
 
 - `x86_64-uwp`：`rubi-core` 编译通过，core 与 store 的 45 个单元测试通过（在包外运行，需 `Microsoft.VCLibs` 的 `vcruntime140_app.dll`；尚未在 AppContainer 内验证，也未验证联网）。
 - `thumbv7a-uwp`（手机）：不通过。`ring` 的 ARM 汇编无法用 MSVC 工具链构建（LNK1181）；`windows-sys` 0.61 缺 ARM32 类型（经 `mio` / `tokio net` 依赖）。`rubi-store`、`rubi-filter`、`rubi-recommend` 能编译。
-- `aarch64-uwp`（ARM 版 Surface）：`ring` 需要 clang，本机未装，其余待验证。
+- `aarch64-uwp`（ARM 版 Surface）：`rubi-uwp` 编译并链接通过（需要 clang，LLVM 23.1.5），未实际运行。
 - 第 3 步（x64，已注册为 UWP 包在 AppContainer 内运行）：纯 Rust XAML 成立。`windows` crate 自 0.38 起不含 `Windows.UI.Xaml`，改用 `windows-bindgen` 0.100 从 SDK 元数据生成绑定（`tools/uwp-bindgen`，`--minimal --flat --compose`，输出 `crates/uwp/src/xaml.rs`）。`Application` 经 `compose` 继承；布局和模板用 `XamlReader` 加载；5000 行 `ListView` 只实例化约 95 行，用 `ContainerContentChanging` 填行代替数据绑定；SQLite、TLS、联网和 UI 线程回调都在沙盒内通过。
 
 ---
