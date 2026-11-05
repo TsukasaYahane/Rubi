@@ -10,12 +10,12 @@ use windows_collections::IVector;
 use windows_core::{IInspectable, Interface, Ref, Result};
 
 use crate::state::layout::grid_cell;
+use crate::ui::rows::{add_rows, on_row, on_row_click};
 use crate::ui::shell::shell;
 use crate::ui::{load, named, player, post, set_text};
 use crate::xaml::{
-    BitmapImage, ContainerContentChangingEventArgs, IBitmapImage, IContentControl2, IFrameworkElement, IImage,
-    IItemClickEventArgs, IItemsControl, IItemsControl2, IItemsWrapGrid, IListViewBase, IListViewBase2, IPanel,
-    IPropertyValue, ITextBlock, ItemClickEventArgs, ListViewBase, PropertyValue, SizeChangedEventArgs, UIElement, Uri,
+    BitmapImage, IBitmapImage, IFrameworkElement, IImage, IItemsControl2, IItemsWrapGrid, ITextBlock,
+    SizeChangedEventArgs, UIElement, Uri,
 };
 
 /// Cards asked for at a time.
@@ -89,23 +89,13 @@ impl HomePage {
         });
 
         let filling = Rc::downgrade(&page);
-        let revoker = grid.cast::<IListViewBase2>()?.ContainerContentChanging(
-            move |_: Ref<ListViewBase>, args: Ref<ContainerContentChangingEventArgs>| {
-                if let (Some(page), Ok(args)) = (filling.upgrade(), args.ok()) {
-                    let _ = page.fill_row(args);
-                }
-            },
-        )?;
-        std::mem::forget(revoker);
-
+        on_row(&grid, move |at, parts| filling.upgrade().map_or(Ok(()), |p| p.fill_row(at, parts)))?;
         let clicking = Rc::downgrade(&page);
-        let revoker =
-            grid.cast::<IListViewBase>()?.ItemClick(move |_: Ref<IInspectable>, args: Ref<ItemClickEventArgs>| {
-                if let (Some(page), Ok(args)) = (clicking.upgrade(), args.ok()) {
-                    let _ = page.open(args);
-                }
-            })?;
-        std::mem::forget(revoker);
+        on_row_click(&grid, move |at| {
+            if let Some(page) = clicking.upgrade() {
+                let _ = page.open(at);
+            }
+        })?;
 
         let sizing = Rc::downgrade(&page);
         let revoker = grid.SizeChanged(move |_: Ref<IInspectable>, _: Ref<SizeChangedEventArgs>| {
@@ -171,13 +161,9 @@ impl HomePage {
     }
 
     fn append(&self, cards: Vec<VideoCard>) -> Result<()> {
-        let items = self.grid.cast::<IItemsControl>()?.Items()?.cast::<IVector<IInspectable>>()?;
-        let mut held = self.cards.borrow_mut();
-        for card in cards {
-            items.Append(&PropertyValue::CreateInt32(held.len() as i32)?)?;
-            held.push(card);
-        }
-        Ok(())
+        let from = self.cards.borrow().len();
+        self.cards.borrow_mut().extend(cards);
+        add_rows(&self.grid, from, self.cards.borrow().len())
     }
 
     /// Sets the cells for the grid's width and the window's columns.
@@ -196,16 +182,10 @@ impl HomePage {
         Ok(())
     }
 
-    fn fill_row(&self, args: &ContainerContentChangingEventArgs) -> Result<()> {
-        if args.InRecycleQueue()? {
-            return Ok(());
-        }
+    fn fill_row(&self, at: usize, parts: &IVector<UIElement>) -> Result<()> {
         if self.cover_height.get() == 0.0 {
             self.apply_cell()?;
         }
-        let at = args.ItemIndex()? as usize;
-        let row = args.ItemContainer()?.cast::<IContentControl2>()?.ContentTemplateRoot()?;
-        let parts = row.cast::<IPanel>()?.Children()?.cast::<IVector<UIElement>>()?;
         let cards = self.cards.borrow();
         let Some(card) = cards.get(at) else { return Ok(()) };
 
@@ -226,8 +206,7 @@ impl HomePage {
         Ok(())
     }
 
-    fn open(&self, args: &ItemClickEventArgs) -> Result<()> {
-        let at = args.cast::<IItemClickEventArgs>()?.ClickedItem()?.cast::<IPropertyValue>()?.GetInt32()? as usize;
+    fn open(&self, at: usize) -> Result<()> {
         if let Some(card) = self.cards.borrow().get(at) {
             player::show(&card.bvid, &card.title, &card.owner.name)?;
         }

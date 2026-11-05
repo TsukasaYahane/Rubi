@@ -4,6 +4,8 @@
 pub mod home;
 pub mod me;
 pub mod player;
+pub mod player_side;
+pub mod rows;
 pub mod shell;
 
 use std::sync::Mutex;

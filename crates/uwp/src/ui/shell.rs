@@ -235,6 +235,7 @@ impl Shell {
         if let Some(home) = self.home.borrow().as_ref() {
             home.resized();
         }
+        player::resized();
         self.mark_tab()
     }
 
