@@ -1,6 +1,17 @@
 [workspace]
 resolver = "3"
 members = ["crates/*"]
+# The UWP app needs nightly and its own target; scripts/build-uwp.ps1 builds it.
+default-members = [
+    "crates/api",
+    "crates/cli",
+    "crates/core",
+    "crates/ffi",
+    "crates/filter",
+    "crates/model",
+    "crates/recommend",
+    "crates/store",
+]
 
 [workspace.package]
 version = "0.1.0"

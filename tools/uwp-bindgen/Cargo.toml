@@ -1,0 +1,13 @@
+# Regenerates crates/uwp/src/xaml.rs from the Windows SDK's metadata. The `windows` crate no longer
+# ships Windows.UI.Xaml, so the app carries bindings for the types in filter.txt. Run from this
+# folder with `cargo run` after changing the filter.
+[package]
+name = "uwp-bindgen"
+version = "0.0.0"
+edition = "2024"
+publish = false
+
+[workspace]
+
+[dependencies]
+windows-bindgen = "0.100"

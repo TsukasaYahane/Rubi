@@ -10,3 +10,5 @@
 local.properties
 .gradle/
 build/
+/tools/uwp-bindgen/target
+/tools/uwp-bindgen/Cargo.lock
