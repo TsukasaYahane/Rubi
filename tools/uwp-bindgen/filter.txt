@@ -146,6 +146,7 @@ Windows.UI.Xaml.Controls.UIElementCollection
 Windows.UI.Xaml.DataTemplate
 Windows.UI.Xaml.GridLength
 Windows.UI.Xaml.GridUnitType
+Windows.UI.Xaml.HorizontalAlignment
 Windows.UI.Xaml.IApplicationOverrides
 Windows.UI.Xaml.IApplicationStatics
 Windows.UI.Xaml.IDataTemplate
@@ -176,6 +177,7 @@ Windows.UI.Xaml.RoutedEventArgs
 Windows.UI.Xaml.RoutedEventHandler
 Windows.UI.Xaml.TextWrapping
 Windows.UI.Xaml.Thickness
+Windows.UI.Xaml.VerticalAlignment
 Windows.UI.Xaml.Visibility
 Windows.UI.Xaml.Window
 Windows.UI.Xaml.WindowSizeChangedEventHandler

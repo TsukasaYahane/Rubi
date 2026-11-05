@@ -12,7 +12,7 @@ use windows_core::{IInspectable, Interface, Ref, Result};
 use crate::state::layout::grid_cell;
 use crate::ui::rows::{Covers, add_rows, on_row, on_row_click};
 use crate::ui::shell::shell;
-use crate::ui::{load, named, player, post, set_text, soon};
+use crate::ui::{load, named, player, post, set_text};
 use crate::xaml::{
     IFrameworkElement, IImage, IItemsControl, IItemsControl2, IItemsWrapGrid, ITextBlock, SizeChangedEventArgs,
     UIElement,
@@ -82,7 +82,6 @@ pub struct HomePage {
     sized: Cell<bool>,
     /// The grid width and columns the cells were last set for.
     fitted: Cell<(f64, u32)>,
-    fit_pending: Rc<Cell<bool>>,
     covers: Covers,
 }
 
@@ -98,7 +97,6 @@ impl HomePage {
             started: Cell::new(false),
             sized: Cell::new(false),
             fitted: Cell::new((0.0, 0)),
-            fit_pending: Rc::default(),
             covers: Covers::default(),
         });
 
@@ -194,13 +192,11 @@ impl HomePage {
     }
 
     /// Sets the cells for the grid's width and the window's columns.
-    pub fn resized(self: &Rc<Self>) {
-        let page = Rc::downgrade(self);
-        soon(&self.fit_pending, move || {
-            if let Some(page) = page.upgrade() {
-                let _ = page.apply_cell();
-            }
-        });
+    ///
+    /// Done at once, inside the size change: left for later, a shrinking grid would first lay
+    /// its old, wider cells out on fewer columns, and flash that frame.
+    pub fn resized(&self) {
+        let _ = self.apply_cell();
     }
 
     fn apply_cell(&self) -> Result<()> {

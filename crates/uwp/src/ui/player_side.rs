@@ -11,7 +11,7 @@ use windows_core::{IInspectable, Interface, Ref, Result};
 use crate::state::panes::{SideLayout, side_layout};
 use crate::ui::rows::{Covers, add_rows, on_row, on_row_click};
 use crate::ui::shell::shell;
-use crate::ui::{load_object, named, on_click, player, post, soon};
+use crate::ui::{load_object, named, on_click, player, post};
 use crate::xaml::{
     DataTemplate, IControl, IFrameworkElement, IImage, IItemsControl, IItemsControl2, IItemsWrapGrid, ITextBlock,
     IUIElement, SizeChangedEventArgs, SolidColorBrush, UIElement, Visibility,
@@ -64,7 +64,6 @@ pub struct Side {
     large_rows: Cell<Option<bool>>,
     /// The list's panel exists only once it has rows: until then the fit has to be tried again.
     fitted: Cell<bool>,
-    fit_pending: Rc<Cell<bool>>,
     covers: Covers,
     /// The layout the rows were last set to.
     layout: Cell<Option<SideLayout>>,
@@ -82,7 +81,6 @@ impl Side {
             loading: Cell::new(false),
             large_rows: Cell::new(None),
             fitted: Cell::new(false),
-            fit_pending: Rc::default(),
             covers: Covers::default(),
             layout: Cell::new(None),
         });
@@ -90,13 +88,10 @@ impl Side {
         let related = named::<IFrameworkElement>(root, "Related")?;
         let sizing = Rc::downgrade(&side);
         let revoker = related.SizeChanged(move |_: Ref<IInspectable>, _: Ref<SizeChangedEventArgs>| {
-            let Some(side) = sizing.upgrade() else { return };
-            let pane = Rc::downgrade(&side);
-            soon(&side.fit_pending, move || {
-                if let Some(side) = pane.upgrade() {
-                    let _ = side.fit_rows();
-                }
-            });
+            // At once, for the reason in `HomePage::resized`.
+            if let Some(side) = sizing.upgrade() {
+                let _ = side.fit_rows();
+            }
         })?;
         std::mem::forget(revoker);
         let filling = Rc::downgrade(&side);

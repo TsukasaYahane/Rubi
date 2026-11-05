@@ -3,7 +3,9 @@
 
 use std::cell::{Cell, RefCell};
 use std::rc::Rc;
+use std::sync::Arc;
 use std::sync::atomic::{AtomicU64, Ordering};
+use std::time::{Duration, Instant};
 
 use rubi_core::{Playback, SendDanmaku, pick_streams};
 use windows_core::{Error, HRESULT, Interface, Ref, Result};
@@ -19,16 +21,21 @@ use crate::ui::splitter;
 use crate::ui::{load, named, on_click, post, set_text, soon};
 use crate::xaml::{
     AdaptiveMediaSource, AdaptiveMediaSourceCreationStatus, ApplicationView, DataWriter, FocusState, FrameworkElement,
-    Grid, GridLength, GridUnitType, HttpClient, IApplicationView3, IColumnDefinition, IControl, IDataWriter, IFontIcon,
-    IFrameworkElement, IInputStream, IMediaPlaybackSession, IMediaPlaybackSource, IMediaPlayer, IMediaPlayer3,
-    IMediaPlayerElement, IMediaPlayerFailedEventArgs, IMediaPlayerSource2, IOutputStream, IRandomAccessStream,
-    IRowDefinition, ITextBox, IUIElement, InMemoryRandomAccessStream, MediaPlaybackSession, MediaPlayer,
-    MediaPlayerFailedEventArgs, MediaSource, SizeChangedEventArgs, Uri, VirtualKey, Visibility,
+    Grid, GridLength, GridUnitType, HorizontalAlignment, HttpClient, IApplicationView3, IColumnDefinition, IControl,
+    IDataWriter, IFontIcon, IFrameworkElement, IInputStream, IMediaPlaybackSession, IMediaPlaybackSource, IMediaPlayer,
+    IMediaPlayer3, IMediaPlayerElement, IMediaPlayerFailedEventArgs, IMediaPlayerSource2, IOutputStream,
+    IRandomAccessStream, IRowDefinition, ITextBox, IUIElement, InMemoryRandomAccessStream, MediaPlaybackSession,
+    MediaPlayer, MediaPlayerFailedEventArgs, MediaSource, SizeChangedEventArgs, Uri, VerticalAlignment, VirtualKey,
+    Visibility,
 };
 
 /// Quality asked for; the core caps it to what the account may play.
 const QUALITY: u32 = 80;
 const DASH_TYPE: &str = "application/dash+xml";
+/// How long the page must hold still before the video takes its new size.
+const VIDEO_SETTLE: Duration = Duration::from_millis(250);
+/// How long entering or leaving fullscreen goes on changing the window's size.
+const FULLSCREEN_SETTLE: Duration = Duration::from_secs(1);
 
 const LAYOUT: &str = r##"
 <Grid xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
@@ -180,6 +187,12 @@ struct Page {
     cid: Rc<Cell<u64>>,
     /// Filling the screen.
     full: Rc<Cell<bool>>,
+    /// The video element is held at its size while the page resizes around it.
+    held: Rc<Cell<bool>>,
+    /// Bumped by each size change: only the last one lets the video go.
+    resizes: Arc<AtomicU64>,
+    /// Until when size changes are not held: entering or leaving fullscreen is one change.
+    hold_from: Rc<Cell<Instant>>,
 }
 
 fn page() -> Option<Page> {
@@ -215,8 +228,60 @@ pub fn overlay(run: u64) -> Option<Rc<Overlay>> {
     page()?.overlay.borrow().clone()
 }
 
+/// Keeps the video element at its size until the page stops resizing. The system player draws on
+/// a surface of its own, and resizing that many times in a row can leave it blank on screen; the
+/// side pane is opaque, so the page can move freely over a video that waits.
+fn hold_video() -> Result<()> {
+    let (Some(page), Some(shell)) = (page(), shell()) else { return Ok(()) };
+    if PLAYING.with(|p| p.borrow().is_none()) || Instant::now() < page.hold_from.get() {
+        return Ok(());
+    }
+    if !page.held.replace(true) {
+        let video = named::<IFrameworkElement>(&page.root, "Video")?;
+        let (width, height) = (video.ActualWidth()?, video.ActualHeight()?);
+        video.SetHorizontalAlignment(HorizontalAlignment::Left)?;
+        video.SetVerticalAlignment(VerticalAlignment::Top)?;
+        video.SetWidth(width)?;
+        video.SetHeight(height)?;
+    }
+    let turn = page.resizes.fetch_add(1, Ordering::Relaxed) + 1;
+    let (resizes, dispatcher, run) = (page.resizes.clone(), shell.dispatcher.clone(), self::run());
+    let Some(backend) = shell.backend.get().cloned() else { return Ok(()) };
+    backend.spawn(async move {
+        tokio::time::sleep(VIDEO_SETTLE).await;
+        if resizes.load(Ordering::Relaxed) == turn {
+            post(&dispatcher, move || {
+                if run == self::run() {
+                    let _ = release_video();
+                }
+            });
+        }
+    });
+    Ok(())
+}
+
+/// Lets the video take its place again, on a fresh surface.
+fn release_video() -> Result<()> {
+    let Some(page) = page() else { return Ok(()) };
+    if !page.held.replace(false) {
+        return Ok(());
+    }
+    let video = named::<IFrameworkElement>(&page.root, "Video")?;
+    video.SetWidth(f64::NAN)?;
+    video.SetHeight(f64::NAN)?;
+    video.SetHorizontalAlignment(HorizontalAlignment::Stretch)?;
+    video.SetVerticalAlignment(VerticalAlignment::Stretch)?;
+    let element = video.cast::<IMediaPlayerElement>()?;
+    if let Some(player) = PLAYING.with(|p| p.borrow().clone()) {
+        element.SetMediaPlayer(None::<&MediaPlayer>)?;
+        element.SetMediaPlayer(&player)?;
+    }
+    Ok(())
+}
+
 fn drag_side(change: f64) {
     let (Some(page), Some(shell)) = (page(), shell()) else { return };
+    let _ = hold_video();
     let Ok(side) = named::<IFrameworkElement>(&page.root, "Side") else { return };
     let (now, whole) = (side.ActualWidth().unwrap_or(0.0), page.root.ActualWidth().unwrap_or(0.0));
     shell.set_side_width(Some(panes::side_width(now - change, whole)));
@@ -241,6 +306,8 @@ fn set_full(on: bool) -> Result<()> {
     if page.full.replace(on) == on {
         return Ok(());
     }
+    page.hold_from.set(Instant::now() + FULLSCREEN_SETTLE);
+    release_video()?;
     let view = ApplicationView::GetForCurrentView()?.cast::<IApplicationView3>()?;
     if on {
         view.TryEnterFullScreenMode()?;
@@ -368,6 +435,9 @@ pub fn show(bvid: &str, title: &str, uploader: &str) -> Result<()> {
         bvid: bvid.to_owned(),
         cid,
         full: Rc::new(Cell::new(false)),
+        held: Rc::default(),
+        resizes: Arc::default(),
+        hold_from: Rc::new(Cell::new(Instant::now())),
     };
     PAGE.with(|p| *p.borrow_mut() = Some(opened));
     on_click(&root, "ActDanmaku", toggle_danmaku)?;
@@ -376,6 +446,7 @@ pub fn show(bvid: &str, title: &str, uploader: &str) -> Result<()> {
     let (sizing, pending) = (root.clone(), Rc::new(Cell::new(false)));
     let revoker = root.SizeChanged(move |_: Ref<windows_core::IInspectable>, _: Ref<SizeChangedEventArgs>| {
         let root = sizing.clone();
+        let _ = hold_video();
         soon(&pending, move || {
             let _ = apply_layout(&root);
         });
