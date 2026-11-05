@@ -8,6 +8,7 @@ use std::rc::Rc;
 use rubi_model::{FavFolder, VideoRelation};
 use windows_core::{IInspectable, Interface, Ref, Result};
 
+use crate::ui::keep;
 use crate::ui::shell::{Tab, shell, show_tab};
 use crate::ui::{load_object, named, on_click, player, post, set_text};
 use crate::xaml::{
@@ -50,7 +51,7 @@ impl Actions {
                     a.give_coins(coins);
                 }
             })?;
-            std::mem::forget(revoker);
+            keep(revoker);
         }
         Ok(actions)
     }
@@ -225,16 +226,14 @@ impl Actions {
             let item = items.GetAt(at as u32)?.cast::<ToggleMenuFlyoutItem>()?;
             let weak = Rc::downgrade(&self);
             let id = folder.id;
-            let toggled = item.clone();
             let revoker =
-                item.cast::<IMenuFlyoutItem>()?.Click(move |_: Ref<IInspectable>, _: Ref<RoutedEventArgs>| {
-                    if let (Some(a), Ok(on)) =
-                        (weak.upgrade(), toggled.cast::<IToggleMenuFlyoutItem>().and_then(|t| t.IsChecked()))
-                    {
+                item.cast::<IMenuFlyoutItem>()?.Click(move |sender: Ref<IInspectable>, _: Ref<RoutedEventArgs>| {
+                    let checked = sender.ok().and_then(|s| s.cast::<IToggleMenuFlyoutItem>()?.IsChecked());
+                    if let (Some(a), Ok(on)) = (weak.upgrade(), checked) {
                         a.set_folder(id, on);
                     }
                 })?;
-            std::mem::forget(revoker);
+            keep(revoker);
         }
         menu.cast::<IFlyoutBase>()?.ShowAt(&named::<FrameworkElement>(&self.root, "ActFav")?)
     }

@@ -3,6 +3,7 @@
 
 use windows_core::{IInspectable, Interface, Ref, Result};
 
+use crate::ui::keep;
 use crate::ui::named;
 use crate::xaml::{
     Color, CoreCursor, CoreCursorType, CoreWindow, DoubleTappedRoutedEventArgs, DragCompletedEventArgs,
@@ -41,24 +42,22 @@ pub fn attach(
             drag(change);
         }
     })?;
-    std::mem::forget(moved);
+    keep(moved);
     let finished = thumb.DragCompleted(move |_: Ref<IInspectable>, _: Ref<DragCompletedEventArgs>| done())?;
-    std::mem::forget(finished);
+    keep(finished);
 
     let element = named::<IUIElement>(root, name)?;
-    let bar = named::<IControl>(root, name)?;
-    let lit = bar.clone();
-    let entered = element.PointerEntered(move |_: Ref<IInspectable>, _: Ref<PointerRoutedEventArgs>| {
+    let entered = element.PointerEntered(move |sender: Ref<IInspectable>, _: Ref<PointerRoutedEventArgs>| {
         let _ = set_cursor(CoreCursorType::SizeWestEast);
-        let _ = tint(&lit, COBALT);
+        let _ = sender.ok().and_then(|bar| tint(&bar.cast()?, COBALT));
     })?;
-    std::mem::forget(entered);
-    let exited = element.PointerExited(move |_: Ref<IInspectable>, _: Ref<PointerRoutedEventArgs>| {
+    keep(entered);
+    let exited = element.PointerExited(move |sender: Ref<IInspectable>, _: Ref<PointerRoutedEventArgs>| {
         let _ = set_cursor(CoreCursorType::Arrow);
-        let _ = tint(&bar, CLEAR);
+        let _ = sender.ok().and_then(|bar| tint(&bar.cast()?, CLEAR));
     })?;
-    std::mem::forget(exited);
+    keep(exited);
     let tapped = element.DoubleTapped(move |_: Ref<IInspectable>, _: Ref<DoubleTappedRoutedEventArgs>| reset())?;
-    std::mem::forget(tapped);
+    keep(tapped);
     Ok(())
 }

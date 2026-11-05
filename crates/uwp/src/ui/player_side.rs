@@ -10,6 +10,7 @@ use windows_core::{IInspectable, Interface, Ref, Result};
 
 use crate::state::panes::{SideLayout, side_layout};
 use crate::ui::feed;
+use crate::ui::keep;
 use crate::ui::rows::{Covers, add_rows, on_row, on_row_click};
 use crate::ui::shell::shell;
 use crate::ui::{load_object, named, on_click, player, post};
@@ -94,7 +95,7 @@ impl Side {
                 let _ = side.fit_rows();
             }
         })?;
-        std::mem::forget(revoker);
+        keep(revoker);
         let filling = Rc::downgrade(&side);
         on_row(&related, move |at, parts| filling.upgrade().map_or(Ok(()), |s| s.fill_related(at, parts)))?;
         let opening = Rc::downgrade(&side);

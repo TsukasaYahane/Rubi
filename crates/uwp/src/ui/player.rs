@@ -15,6 +15,7 @@ use crate::state::manifest::dash_manifest;
 use crate::state::panes;
 use crate::ui::danmaku::Overlay;
 use crate::ui::feed;
+use crate::ui::keep;
 use crate::ui::player_actions::Actions;
 use crate::ui::player_side::Side;
 use crate::ui::shell::shell;
@@ -441,6 +442,11 @@ pub fn leave() {
     if let Some(page) = page() {
         let video = named::<IMediaPlayerElement>(&page.root, "Video");
         let _ = video.and_then(|v| v.SetMediaPlayer(None::<&MediaPlayer>));
+        // Leaving may come from an event of this very page: it goes when that is over.
+        let old = page.root.clone();
+        soon(&Rc::default(), move || {
+            let _ = &old;
+        });
     }
     PAGE.with(|p| *p.borrow_mut() = None);
     if let Some(player) = PLAYING.with(|p| p.borrow_mut().take()) {
@@ -499,15 +505,16 @@ pub fn open(feed: bool, bvid: &str, title: &str, uploader: &str) -> Result<()> {
     on_click(&root, "ActDanmaku", toggle_danmaku)?;
     on_click(&root, "Full", toggle_full)?;
     on_click(&root, "SendButton", send_danmaku)?;
-    let (sizing, pending) = (root.clone(), Rc::new(Cell::new(false)));
-    let revoker = root.SizeChanged(move |_: Ref<windows_core::IInspectable>, _: Ref<SizeChangedEventArgs>| {
-        let root = sizing.clone();
+    let pending = Rc::new(Cell::new(false));
+    let revoker = root.SizeChanged(move |sender: Ref<windows_core::IInspectable>, _: Ref<SizeChangedEventArgs>| {
+        // From the sender: a handler holding its own source would keep the page for good.
+        let Ok(root) = sender.ok().and_then(|s| s.cast::<IFrameworkElement>()) else { return };
         let _ = hold_video();
         soon(&pending, move || {
             let _ = apply_layout(&root);
         });
     })?;
-    std::mem::forget(revoker);
+    keep(revoker);
     shell.set_page(&root)?;
     apply_layout(&root)?;
 
@@ -650,7 +657,7 @@ fn report_failures(player: &MediaPlayer) -> Result<()> {
             });
         },
     )?;
-    std::mem::forget(revoker);
+    keep(revoker);
     Ok(())
 }
 

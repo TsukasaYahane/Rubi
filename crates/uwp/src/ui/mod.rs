@@ -16,7 +16,7 @@ use std::cell::Cell;
 use std::rc::Rc;
 use std::sync::Mutex;
 
-use windows_core::{IInspectable, Interface, Ref, Result};
+use windows_core::{EventRevoker, IInspectable, Interface, Ref, Result};
 
 use crate::xaml::{
     CoreDispatcher, CoreDispatcherPriority, DispatchedHandler, IButtonBase, ICoreDispatcher, IFrameworkElement,
@@ -70,9 +70,15 @@ pub fn set_text(root: &IFrameworkElement, name: &str, text: &str) -> Result<()> 
 
 /// Calls `action` when the button named `name` is clicked, for as long as the process runs:
 /// pages are few and rebuilt rarely, and XAML drops a handler with its button.
+/// Keeps an event wired for as long as its source lives. `EventRevoker::forget` would keep the
+/// source too, and the page with it.
+pub fn keep(revoker: EventRevoker) {
+    let _ = revoker.into_token();
+}
+
 pub fn on_click(root: &IFrameworkElement, name: &str, action: impl Fn() + 'static) -> Result<()> {
     let revoker =
         named::<IButtonBase>(root, name)?.Click(move |_: Ref<IInspectable>, _: Ref<RoutedEventArgs>| action())?;
-    std::mem::forget(revoker);
+    keep(revoker);
     Ok(())
 }

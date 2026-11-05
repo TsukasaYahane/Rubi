@@ -11,6 +11,7 @@ use crate::session;
 use crate::state::layout::WindowClass;
 use crate::state::panes::{self, Widths};
 use crate::ui::home::HomePage;
+use crate::ui::keep;
 use crate::ui::splitter::{self, BAR_TEMPLATE};
 use crate::ui::{load, me, named, on_click, player, post};
 use crate::xaml::{
@@ -156,7 +157,7 @@ pub fn start() -> Result<()> {
     let revoker = window.SizeChanged(|_: Ref<IInspectable>, _: Ref<WindowSizeChangedEventArgs>| {
         let _ = window_resized();
     })?;
-    std::mem::forget(revoker);
+    keep(revoker);
     let revoker = CoreWindow::GetForCurrentThread()?.cast::<ICoreWindow>()?.KeyDown(
         |_: Ref<CoreWindow>, args: Ref<KeyEventArgs>| {
             if let Ok(args) = args.ok()
@@ -166,7 +167,7 @@ pub fn start() -> Result<()> {
             }
         },
     )?;
-    std::mem::forget(revoker);
+    keep(revoker);
 
     shell.apply_class()?;
     window.SetContent(&root.cast::<UIElement>()?)?;

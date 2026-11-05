@@ -11,6 +11,7 @@ use windows_core::{IInspectable, Interface, Ref, Result};
 
 use crate::state::layout::grid_cell;
 use crate::ui::feed;
+use crate::ui::keep;
 use crate::ui::rows::{Covers, add_rows, on_row, on_row_click};
 use crate::ui::shell::shell;
 use crate::ui::{load, named, post, set_text};
@@ -116,7 +117,7 @@ impl HomePage {
                 page.resized();
             }
         })?;
-        std::mem::forget(revoker);
+        keep(revoker);
         Ok(page)
     }
 

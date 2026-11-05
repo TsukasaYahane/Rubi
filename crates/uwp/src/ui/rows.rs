@@ -7,6 +7,7 @@ use std::collections::HashMap;
 use windows_collections::IVector;
 use windows_core::{IInspectable, Interface, Ref, Result};
 
+use crate::ui::keep;
 use crate::xaml::{
     BitmapImage, ContainerContentChangingEventArgs, IBitmapImage, IContentControl2, IFrameworkElement,
     IItemClickEventArgs, IItemsControl, IListViewBase, IListViewBase2, IPanel, IPropertyValue, ItemClickEventArgs,
@@ -49,7 +50,7 @@ pub fn on_row(
             }
         },
     )?;
-    std::mem::forget(revoker);
+    keep(revoker);
     Ok(())
 }
 
@@ -76,7 +77,7 @@ pub fn on_row_click(list: &IFrameworkElement, open: impl Fn(usize) + 'static) ->
                 open(at as usize);
             }
         })?;
-    std::mem::forget(revoker);
+    keep(revoker);
     Ok(())
 }
 

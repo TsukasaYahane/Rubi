@@ -9,6 +9,7 @@ use rubi_core::portrait_of;
 use windows_core::{IInspectable, Ref, Result};
 
 use crate::state::feed::{BATCH, Feed, Item};
+use crate::ui::keep;
 use crate::ui::shell::shell;
 use crate::ui::{named, on_click, player, post, set_text};
 use crate::xaml::{IFrameworkElement, IUIElement, PointerRoutedEventArgs};
@@ -229,7 +230,7 @@ pub fn attach(root: &IFrameworkElement) -> Result<()> {
             }
         },
     )?;
-    std::mem::forget(revoker);
+    keep(revoker);
     Ok(())
 }
 
