@@ -18,6 +18,15 @@ class UiPrefs(context: Context) {
         set(value) = prefs.edit().putBoolean("auto_next", value).apply()
 
     /** 离线缓存 only on unmetered networks (Wi-Fi). */
+    /** Offline copies to save as MP4 or audio once they finish, by BV id. */
+    var pendingExports: Map<String, dev.rubi.app.playback.ExportFormat>
+        get() = prefs.getString("pending_exports", "").orEmpty().split(';').mapNotNull { e ->
+            val parts = e.split(':')
+            if (parts.size != 2) return@mapNotNull null
+            dev.rubi.app.playback.ExportFormat.entries.firstOrNull { it.name == parts[1] }?.let { parts[0] to it }
+        }.toMap()
+        set(value) = prefs.edit().putString("pending_exports", value.entries.joinToString(";") { "${it.key}:${it.value.name}" }).apply()
+
     var downloadWifiOnly: Boolean
         get() = prefs.getBoolean("download_wifi_only", true)
         set(value) = prefs.edit().putBoolean("download_wifi_only", value).apply()
@@ -51,6 +60,21 @@ class UiPrefs(context: Context) {
     var themeMode: Int
         get() = prefs.getInt("theme_mode", 0)
         set(value) = prefs.edit().putInt("theme_mode", value).apply()
+
+    /** 画面: [dev.rubi.app.ui.VideoScale] by position (适应 / 拉伸 / 填充). */
+    var videoScale: Int
+        get() = prefs.getInt("video_scale", 0)
+        set(value) = prefs.edit().putInt("video_scale", value).apply()
+
+    /** 竖屏视频封面 in 16:9 cards: 0 适应 (whole picture on a blurred copy), 1 填充 (cropped). */
+    var portraitCover: Int
+        get() = prefs.getInt("portrait_cover", 0)
+        set(value) = prefs.edit().putInt("portrait_cover", value).apply()
+
+    /** 界面风格: 0 图形 (line icons, default), 1 文字 (words only, the earlier look). */
+    var uiStyle: Int
+        get() = prefs.getInt("ui_style", 0)
+        set(value) = prefs.edit().putInt("ui_style", value).apply()
 
     /** 应用图标: 0 小电视 (default), 1 R 字. */
     var appIcon: Int

@@ -2,10 +2,10 @@
 
 use rubi_core::QrState;
 
-use crate::{FfiAccount, FfiLoginCaptcha, FfiLoginKey, FfiQrState, FfiQrTicket, FfiSolvedCaptcha, Res, RubiCore};
+use crate::{AccountService, FfiAccount, FfiLoginCaptcha, FfiLoginKey, FfiQrState, FfiQrTicket, FfiSolvedCaptcha, Res};
 
 #[uniffi::export(async_runtime = "tokio")]
-impl RubiCore {
+impl AccountService {
     /// The current session, to be stored encrypted by the caller.
     pub fn session_json(&self) -> Res<String> {
         Ok(serde_json::to_string(&self.account.session())?)

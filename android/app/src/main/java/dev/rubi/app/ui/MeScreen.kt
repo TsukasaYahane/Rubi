@@ -1,5 +1,12 @@
 package dev.rubi.app.ui
 
+import dev.rubi.core.WatchLaterService
+import dev.rubi.core.PreferencesService
+import dev.rubi.core.HomeService
+import dev.rubi.core.HistoryService
+import dev.rubi.core.AccountService
+import dev.rubi.app.Signin
+import android.content.Context
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
@@ -33,7 +40,6 @@ import androidx.compose.ui.unit.sp
 import com.google.zxing.BarcodeFormat
 import com.google.zxing.common.BitMatrix
 import com.google.zxing.qrcode.QRCodeWriter
-import dev.rubi.app.RubiApp
 import dev.rubi.app.ui.theme.LocalMetro
 import dev.rubi.app.ui.theme.MetroType
 import dev.rubi.core.FfiAccount
@@ -44,13 +50,13 @@ import kotlinx.coroutines.delay
 import kotlinx.coroutines.withContext
 
 @Composable
-fun MeScreen(app: RubiApp, nav: Nav) {
+fun MeScreen(history: HistoryService, watchLater: WatchLaterService, preferences: PreferencesService, signin: Signin, context: Context, nav: Nav) {
     val c = LocalMetro.current
-    val account by app.account
+    val account by signin.current
     var note by remember { mutableStateOf("") }
     var backup by remember { mutableStateOf(false) }
     // Re-read after login / logout (the stack changes); what is known shows meanwhile.
-    LaunchedEffect(nav.stack.size) { app.refreshAccount() }
+    LaunchedEffect(nav.stack.size) { signin.refresh() }
 
     val list = rememberLazyListState()
     LaunchedEffect(Unit) { nav.reselected.collect { if (it == Tab.Me) list.animateScrollToItem(0) } }
@@ -62,7 +68,7 @@ fun MeScreen(app: RubiApp, nav: Nav) {
                 if (a?.loggedIn == true) {
                     Text(a.name, fontSize = 24.sp, fontWeight = FontWeight.SemiBold, color = c.fg)
                     Meta("mid ${a.mid} · 凭证经 Keystore 加密仅存本机")
-                    TextAction("退出登录", onClick = { app.logout() }, dim = true)
+                    TextAction("退出登录", onClick = { signin.logout() }, dim = true)
                 } else {
                     Text("游客", fontSize = 24.sp, fontWeight = FontWeight.SemiBold, color = c.fg)
                     Meta("未登录 · 历史与推荐画像仅保存在本机")
@@ -71,9 +77,9 @@ fun MeScreen(app: RubiApp, nav: Nav) {
             }
         }
         val rows = listOf<Pair<String, () -> Unit>>(
-            "历史记录" to { nav.push(Screen.History(HistoryState(app.core))) },
+            "历史记录" to { nav.push(Screen.History(HistoryState(history))) },
             "收藏夹" to { nav.push(Screen.FavFolders) },
-            "稍后再看" to { nav.push(Screen.WatchLater(WatchLaterState(app.core))) },
+            "稍后再看" to { nav.push(Screen.WatchLater(WatchLaterState(watchLater))) },
             "订阅的合集" to { nav.push(Screen.SeasonSubs(SeasonSubsState())) },
             "播放列表" to { nav.push(Screen.Playlist) },
             "离线缓存" to { nav.push(Screen.Downloads) },
@@ -90,15 +96,15 @@ fun MeScreen(app: RubiApp, nav: Nav) {
         }
         item { if (note.isNotEmpty()) Meta(note, Modifier.padding(16.dp)) }
     }
-    if (backup) BackupSheet(app, onDismiss = { backup = false }) { note = it; backup = false }
+    if (backup) BackupSheet(preferences, context, onDismiss = { backup = false }) { note = it; backup = false }
 }
 
 @Composable
-fun LoginScreen(app: RubiApp, nav: Nav) {
+fun LoginScreen(account: AccountService, signin: Signin, nav: Nav) {
     var tab by remember { mutableStateOf(0) }
     // Every method ends the same way: persist the session (Keystore) and go back.
     val done: (String) -> Unit = { json ->
-        app.sessions.save(json)
+        signin.save(json)
         nav.pop()
     }
     Column(Modifier.fillMaxSize()) {
@@ -107,9 +113,9 @@ fun LoginScreen(app: RubiApp, nav: Nav) {
         Pivot(listOf("扫码", "短信", "密码"), tab, { i -> if (i != tab) turns.switch(i > tab) { tab = i } }, MetroType.section)
         Column(Modifier.weight(1f).pivotSlide(tab)) {
             when (tab) {
-                0 -> QrLogin(app, done)
-                1 -> SmsLogin(app, done)
-                else -> PasswordLogin(app, done)
+                0 -> QrLogin(account, done)
+                1 -> SmsLogin(account, done)
+                else -> PasswordLogin(account, done)
             }
         }
     }
@@ -117,19 +123,19 @@ fun LoginScreen(app: RubiApp, nav: Nav) {
 
 /** QR login; polling runs only while this tab is shown. */
 @Composable
-private fun QrLogin(app: RubiApp, onLoggedIn: (String) -> Unit) {
+private fun QrLogin(account: AccountService, onLoggedIn: (String) -> Unit) {
     val c = LocalMetro.current
     var matrix by remember { mutableStateOf<BitMatrix?>(null) }
     var status by remember { mutableStateOf("正在获取二维码") }
     var round by remember { mutableStateOf(0) }
 
     LaunchedEffect(round) {
-        val ticket = runCatching { app.core.qrGenerate() }.getOrElse { status = "获取失败：${it.message}"; return@LaunchedEffect }
+        val ticket = runCatching { account.qrGenerate() }.getOrElse { status = "获取失败：${it.message}"; return@LaunchedEffect }
         matrix = withContext(Dispatchers.Default) { QRCodeWriter().encode(ticket.url, BarcodeFormat.QR_CODE, 0, 0) }
         status = "等待扫码 · 有效期 180s"
         while (true) {
             delay(2000)
-            when (val s = runCatching { app.core.qrPoll(ticket.key) }.getOrNull()) {
+            when (val s = runCatching { account.qrPoll(ticket.key) }.getOrNull()) {
                 FfiQrState.Waiting, null -> {}
                 FfiQrState.Scanned -> status = "已扫码，请在手机上确认"
                 FfiQrState.Expired -> { status = "二维码已过期"; return@LaunchedEffect }
@@ -159,10 +165,10 @@ private fun QrLogin(app: RubiApp, onLoggedIn: (String) -> Unit) {
 }
 
 @Composable
-fun FilteredScreen(app: RubiApp, nav: Nav) {
+fun FilteredScreen(home: HomeService, nav: Nav) {
     val c = LocalMetro.current
     var entries by remember { mutableStateOf(emptyList<FfiFilterLogEntry>()) }
-    LaunchedEffect(Unit) { entries = withContext(Dispatchers.IO) { runCatching { app.core.filterLog(200u) }.getOrDefault(emptyList()) } }
+    LaunchedEffect(Unit) { entries = withContext(Dispatchers.IO) { runCatching { home.filterLog(200u) }.getOrDefault(emptyList()) } }
     Column(Modifier.fillMaxSize()) {
         PageHeader(nav, "被过滤内容")
         Meta("规则表 v1 · 最近 ${entries.size} 条", Modifier.padding(horizontal = 16.dp, vertical = 4.dp))

@@ -149,7 +149,7 @@ async fn articles_and_opus_read() {
 #[tokio::test]
 #[ignore = "live API"]
 async fn live_rooms_streams_and_channel() {
-    use rubi_api::{ChannelJoin, LiveApi, LiveSocket, WebLive};
+    use rubi_api::{ChannelJoin, ChannelOpener, LiveApi, WebChannels, WebLive};
     let http = guest().await;
     let live = WebLive::new(http);
     let rec = live.recommended().await.expect("recommended");
@@ -165,7 +165,7 @@ async fn live_rooms_streams_and_channel() {
     let server = live.danmu_server(room.room_id).await.expect("danmu info");
     let (uid, buvid) = live.identity();
     let join = ChannelJoin { room_id: room.room_id, uid, buvid: &buvid, token: &server.token };
-    let mut socket = LiveSocket::open(&server.urls, &join).await.expect("channel");
+    let mut socket = WebChannels.open(&server.urls, &join).await.expect("channel");
     let got = tokio::time::timeout(std::time::Duration::from_secs(20), socket.next()).await;
     let msgs = got.expect("a message within 20 s").expect("channel read").expect("open");
     assert!(msgs.iter().all(|m| m["cmd"].is_string()));

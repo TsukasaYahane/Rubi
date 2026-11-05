@@ -43,12 +43,13 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import coil3.compose.AsyncImage
 import dev.rubi.app.ui.theme.LocalMetro
+import dev.rubi.core.EsportsService
+import dev.rubi.core.LiveService
 import dev.rubi.core.FfiEsportsGame
 import dev.rubi.core.FfiLiveArea
 import dev.rubi.core.FfiLiveRoom
 import dev.rubi.core.FfiMatch
 import dev.rubi.core.FfiMatchState
-import dev.rubi.core.RubiCore
 import dev.rubi.core.RubiException
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -64,7 +65,7 @@ val LiveRed = Color(0xFFE5484D)
  * the 直播 pivot (area chips over a grid of rooms) and the 赛事 pivot (game chips over the
  * schedule).
  */
-class LiveState(private val core: RubiCore) {
+class LiveState(private val live: LiveService, private val esports: EsportsService) {
     var pivot by mutableStateOf(0)
     var areas by mutableStateOf(emptyList<FfiLiveArea>())
         private set
@@ -76,10 +77,10 @@ class LiveState(private val core: RubiCore) {
         val z = zone
         withContext(Dispatchers.IO) {
             if (z == 0) {
-                Page(core.liveRecommended(), null)
+                Page(live.liveRecommended(), null)
             } else {
                 val n = page ?: 1u
-                val p = core.liveAreaRooms(areas[z - 1].id, n)
+                val p = live.liveAreaRooms(areas[z - 1].id, n)
                 Page(p.rooms, if (p.hasMore) n + 1u else null)
             }
         }
@@ -95,17 +96,17 @@ class LiveState(private val core: RubiCore) {
         val g = game
         withContext(Dispatchers.IO) {
             val n = page ?: 1u
-            val p = core.esportsSchedule(g, n)
+            val p = esports.esportsSchedule(g, n)
             Page(p.matches, if (p.hasMore) n + 1u else null)
         }
     }
 
     suspend fun loadAreas() {
-        if (areas.isEmpty()) areas = runCatching { withContext(Dispatchers.IO) { core.liveAreas() } }.getOrDefault(emptyList())
+        if (areas.isEmpty()) areas = runCatching { withContext(Dispatchers.IO) { live.liveAreas() } }.getOrDefault(emptyList())
     }
 
     suspend fun loadGames() {
-        if (games.isEmpty()) games = runCatching { withContext(Dispatchers.IO) { core.esportsGames() } }.getOrDefault(emptyList())
+        if (games.isEmpty()) games = runCatching { withContext(Dispatchers.IO) { esports.esportsGames() } }.getOrDefault(emptyList())
     }
 
     fun pickZone(z: Int) {
@@ -123,7 +124,7 @@ class LiveState(private val core: RubiCore) {
 }
 
 @Composable
-fun LiveScreen(state: LiveState, nav: Nav, core: RubiCore) {
+fun LiveScreen(state: LiveState, nav: Nav, esports: EsportsService) {
     // 查看全部赛程 from search lands here on 赛事.
     LaunchedEffect(nav.openSchedule) {
         if (nav.openSchedule) {
@@ -138,7 +139,7 @@ fun LiveScreen(state: LiveState, nav: Nav, core: RubiCore) {
         val turns = LocalPageTurns.current
         Pivot(listOf("直播", "赛事"), state.pivot, { i -> turns.switch(i > state.pivot) { state.pivot = i } })
         Column(Modifier.weight(1f).pivotSlide(state.pivot)) {
-            if (state.pivot == 0) LiveRooms(state, nav) else Schedule(state, nav, core)
+            if (state.pivot == 0) LiveRooms(state, nav) else Schedule(state, nav, esports)
         }
     }
 }
@@ -153,7 +154,7 @@ private fun LiveRooms(state: LiveState, nav: Nav) {
     Chips(listOf("推荐") + state.areas.map { it.name }, state.zone, state::pickZone)
     LoadMoreNearEnd(state.grid, state.rooms)
     LazyVerticalGrid(
-        columns = GridCells.Fixed(2),
+        columns = GridCells.Fixed(LocalScreenLayout.current.gridColumns(2)),
         state = state.grid,
         contentPadding = PaddingValues(start = 16.dp, end = 16.dp, top = 6.dp, bottom = 24.dp),
         horizontalArrangement = Arrangement.spacedBy(12.dp),
@@ -229,7 +230,7 @@ private fun Chips(labels: List<String>, selected: Int, onSelect: (Int) -> Unit) 
 }
 
 @Composable
-private fun Schedule(state: LiveState, nav: Nav, core: RubiCore) {
+private fun Schedule(state: LiveState, nav: Nav, esports: EsportsService) {
     val scope = rememberCoroutineScope()
     var problem by remember { mutableStateOf<String?>(null) }
     LaunchedEffect(Unit) {
@@ -254,7 +255,7 @@ private fun Schedule(state: LiveState, nav: Nav, core: RubiCore) {
     LoadMoreNearEnd(state.list, state.matches)
     LazyColumn(Modifier.fillMaxSize(), state = state.list, contentPadding = PaddingValues(bottom = 24.dp)) {
         items(state.matches.items, key = { it.id.toString() }) { m ->
-            MatchRow(m) { openMatch(m, nav, core, scope, changed = { state.matches.replace(it) }, say = { problem = it }) }
+            MatchRow(m) { openMatch(m, nav, esports, scope, changed = { state.matches.replace(it) }, say = { problem = it }) }
         }
         item {
             val e = state.matches.error
@@ -288,7 +289,7 @@ fun MatchCard(m: FfiMatch, onClick: () -> Unit) {
  * What tapping a match does: on now opens its room, over opens the replay, to come toggles 预约.
  * `changed` gets the match after a 预约 change; `say` what went wrong.
  */
-fun openMatch(m: FfiMatch, nav: Nav, core: RubiCore, scope: CoroutineScope, changed: (FfiMatch) -> Unit, say: (String?) -> Unit) {
+fun openMatch(m: FfiMatch, nav: Nav, esports: EsportsService, scope: CoroutineScope, changed: (FfiMatch) -> Unit, say: (String?) -> Unit) {
     say(null)
     when (m.state) {
         FfiMatchState.LIVE -> if (m.liveRoom > 0uL) nav.push(Screen.LiveRoom(m.liveRoom, "${m.home.name} vs ${m.away.name}"))
@@ -297,7 +298,7 @@ fun openMatch(m: FfiMatch, nav: Nav, core: RubiCore, scope: CoroutineScope, chan
             else say("这场还没有回放")
         FfiMatchState.UPCOMING -> scope.launch {
             val on = !m.subscribed
-            runCatching { withContext(Dispatchers.IO) { core.esportsSubscribe(m.id, on) } }
+            runCatching { withContext(Dispatchers.IO) { esports.esportsSubscribe(m.id, on) } }
                 .onSuccess { changed(m.copy(subscribed = on)) }
                 .onFailure { say(if (it is RubiException.NotLoggedIn) "登录后才能预约" else "预约失败：${errorText(it)}") }
         }

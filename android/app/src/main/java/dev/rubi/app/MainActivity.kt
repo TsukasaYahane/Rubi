@@ -1,5 +1,7 @@
 package dev.rubi.app
 
+import dev.rubi.app.ui.UI_WORDS
+import dev.rubi.app.ui.LocalWordsUi
 import android.content.Intent
 import android.content.res.Configuration
 import android.os.Bundle
@@ -19,6 +21,11 @@ import androidx.compose.runtime.CompositionLocalProvider
 import dev.rubi.app.playback.ACTION_LISTEN
 import dev.rubi.app.playback.LocalMedia
 import dev.rubi.app.ui.RubiRoot
+import dev.rubi.app.ui.LocalPortraitCover
+import dev.rubi.app.ui.PORTRAIT_FILL
+import dev.rubi.app.ui.LocalScreenLayout
+import dev.rubi.app.ui.applyDeviceOrientation
+import dev.rubi.app.ui.rememberScreenLayout
 import dev.rubi.app.ui.theme.LocalMetro
 import dev.rubi.app.ui.theme.MetroTheme
 import androidx.compose.foundation.background
@@ -32,9 +39,10 @@ class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         enableEdgeToEdge()
+        applyDeviceOrientation()
         val app = application as RubiApp
         setContent {
-            val mode = app.themeMode.value
+            val mode = app.appearance.themeMode.value
             val dark = isDark(mode)
             // Status and navigation bar icons follow the chosen 外观, not only the system's.
             LaunchedEffect(dark) {
@@ -45,7 +53,11 @@ class MainActivity : ComponentActivity() {
                 CompositionLocalProvider(
                     LocalMedia provides app.media,
                     LocalFrozen provides app.power.frozen.value,
-                    LocalMotion provides Motion(app.motion.value, app.motionStyle.value),
+                    LocalMotion provides Motion(app.appearance.motion.value, app.appearance.motionStyle.value),
+                    // 宽屏: tablet or phone, and how wide the window is now.
+                    LocalScreenLayout provides rememberScreenLayout(),
+                    LocalPortraitCover provides (app.appearance.portraitCover.value == PORTRAIT_FILL),
+                    LocalWordsUi provides (app.appearance.uiStyle.value == UI_WORDS),
                 ) {
                     // The core opens on its own thread at start; until then, the page background.
                     if (app.coreReady.value) RubiRoot(app)
@@ -101,6 +113,12 @@ class MainActivity : ComponentActivity() {
     override fun onUserLeaveHint() {
         super.onUserLeaveHint()
         media.pip.onUserLeaveHint(this)
+    }
+
+    override fun onConfigurationChanged(newConfig: Configuration) {
+        super.onConfigurationChanged(newConfig)
+        // Folded or unfolded: a foldable becomes a phone or a tablet. Fullscreen video keeps landscape.
+        if (!media.fullscreen.value) applyDeviceOrientation()
     }
 
     override fun onPictureInPictureModeChanged(isInPictureInPictureMode: Boolean, newConfig: Configuration) {

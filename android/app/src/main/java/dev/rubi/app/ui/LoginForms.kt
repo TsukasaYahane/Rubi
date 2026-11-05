@@ -1,5 +1,6 @@
 package dev.rubi.app.ui
 
+import dev.rubi.core.AccountService
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
@@ -28,7 +29,6 @@ import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.text.input.VisualTransformation
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
-import dev.rubi.app.RubiApp
 import dev.rubi.app.data.PasswordCrypto
 import dev.rubi.app.ui.theme.LocalMetro
 import dev.rubi.core.FfiLoginCaptcha
@@ -85,7 +85,7 @@ private fun CaptchaHost(step: CaptchaStep, onError: (String) -> Unit) {
 }
 
 @Composable
-fun SmsLogin(app: RubiApp, onLoggedIn: (String) -> Unit) {
+fun SmsLogin(account: AccountService, onLoggedIn: (String) -> Unit) {
     val c = LocalMetro.current
     val scope = rememberCoroutineScope()
     val captcha = remember { CaptchaStep() }
@@ -106,11 +106,11 @@ fun SmsLogin(app: RubiApp, onLoggedIn: (String) -> Unit) {
         busy = true
         note = "正在获取人机验证…"
         scope.launch {
-            runCatching { app.core.loginCaptcha() }
+            runCatching { account.loginCaptcha() }
                 .onSuccess { cap ->
                     note = ""
                     captcha.then = { solved ->
-                        runCatching { app.core.smsSend(cid.toUIntOrNull() ?: 86u, tel.trim(), solved) }
+                        runCatching { account.smsSend(cid.toUIntOrNull() ?: 86u, tel.trim(), solved) }
                             .onSuccess { captchaKey = it; cooldown = 60; note = "验证码已发送，5 分钟内有效" }
                             .onFailure { note = loginError(it) }
                         busy = false
@@ -126,7 +126,7 @@ fun SmsLogin(app: RubiApp, onLoggedIn: (String) -> Unit) {
         if (code.isBlank() || busy) return
         busy = true
         scope.launch {
-            runCatching { app.core.smsLogin(cid.toUIntOrNull() ?: 86u, tel.trim(), code.trim(), key) }
+            runCatching { account.smsLogin(cid.toUIntOrNull() ?: 86u, tel.trim(), code.trim(), key) }
                 .onSuccess(onLoggedIn)
                 .onFailure { note = loginError(it) }
             busy = false
@@ -150,7 +150,7 @@ fun SmsLogin(app: RubiApp, onLoggedIn: (String) -> Unit) {
 }
 
 @Composable
-fun PasswordLogin(app: RubiApp, onLoggedIn: (String) -> Unit) {
+fun PasswordLogin(account: AccountService, onLoggedIn: (String) -> Unit) {
     val c = LocalMetro.current
     val scope = rememberCoroutineScope()
     val captcha = remember { CaptchaStep() }
@@ -164,15 +164,15 @@ fun PasswordLogin(app: RubiApp, onLoggedIn: (String) -> Unit) {
         busy = true
         note = "正在获取人机验证…"
         scope.launch {
-            runCatching { app.core.loginCaptcha() }
+            runCatching { account.loginCaptcha() }
                 .onSuccess { cap ->
                     note = ""
                     captcha.then = { solved ->
                         // The salt lives 20 s: fetch it only after the captcha is done.
                         runCatching {
-                            val key = app.core.loginKey()
+                            val key = account.loginKey()
                             val encrypted = PasswordCrypto.encrypt(key.hash, key.publicKeyPem, password)
-                            app.core.passwordLogin(user.trim(), encrypted, solved)
+                            account.passwordLogin(user.trim(), encrypted, solved)
                         }
                             .onSuccess { password = ""; onLoggedIn(it) }
                             .onFailure { note = loginError(it) }

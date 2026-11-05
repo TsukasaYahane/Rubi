@@ -1,5 +1,7 @@
 package dev.rubi.app.ui
 
+import dev.rubi.core.VideosService
+import dev.rubi.app.Appearance
 import dev.rubi.app.rubiLink
 import android.content.ContentValues
 import android.content.Context
@@ -55,7 +57,6 @@ import coil3.toBitmap
 import com.google.zxing.BarcodeFormat
 import com.google.zxing.EncodeHintType
 import com.google.zxing.qrcode.QRCodeWriter
-import dev.rubi.app.RubiApp
 import dev.rubi.app.ui.theme.Cobalt
 import dev.rubi.app.ui.theme.LocalMetro
 import dev.rubi.app.ui.theme.MetroType
@@ -74,7 +75,7 @@ private const val PAD = 60
  */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-fun ShareCardSheet(app: RubiApp, d: FfiVideoDetail, onDismiss: () -> Unit, done: (String) -> Unit) {
+fun ShareCardSheet(videos: VideosService, appearance: Appearance, d: FfiVideoDetail, onDismiss: () -> Unit, done: (String) -> Unit) {
     val c = LocalMetro.current
     val ctx = LocalContext.current
     val scope = rememberCoroutineScope()
@@ -82,8 +83,8 @@ fun ShareCardSheet(app: RubiApp, d: FfiVideoDetail, onDismiss: () -> Unit, done:
     var note by remember { mutableStateOf("生成中…") }
     LaunchedEffect(d.bvid) {
         card = runCatching {
-            val cover = runCatching { app.core.video(d.bvid).cover }.getOrDefault("")
-            renderCard(ctx, d, cover, app.appIcon.value)
+            val cover = runCatching { videos.video(d.bvid).cover }.getOrDefault("")
+            renderCard(ctx, d, cover, appearance.appIcon.value)
         }.onFailure { note = "生成失败：${it.message}" }.getOrNull()
         if (card != null) note = ""
     }

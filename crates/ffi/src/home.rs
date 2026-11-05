@@ -2,12 +2,18 @@
 
 use rubi_model::{DislikeReason, Signal};
 
-use crate::{FfiBreakdown, FfiFilterLogEntry, FfiRefreshReport, FfiSignal, FfiVideoCard, Res, RubiCore};
+use crate::{FfiBreakdown, FfiFilterLogEntry, FfiRefreshReport, FfiSignal, FfiVideoCard, HomeService, Res};
 
 #[uniffi::export(async_runtime = "tokio")]
-impl RubiCore {
+impl HomeService {
     pub async fn refresh_feed(&self, per_source: u32) -> Res<FfiRefreshReport> {
         let r = self.home.refresh(per_source as usize).await?;
+        Ok(FfiRefreshReport { kept: r.kept as u32, blocked: r.blocked as u32, errors: r.errors })
+    }
+
+    /// 下拉刷新: a new batch from every source, not waiting out their cooldown.
+    pub async fn refresh_feed_now(&self, per_source: u32) -> Res<FfiRefreshReport> {
+        let r = self.home.refresh_now(per_source as usize).await?;
         Ok(FfiRefreshReport { kept: r.kept as u32, blocked: r.blocked as u32, errors: r.errors })
     }
 

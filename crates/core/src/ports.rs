@@ -47,6 +47,8 @@ pub trait FeedbackSink: Send + Sync {
 #[async_trait]
 pub trait HomeFeed: Send + Sync {
     async fn refresh(&self, want_per_source: usize) -> Result<RefreshReport>;
+    /// A refresh the user asked for: sources are fetched again despite their cooldown.
+    async fn refresh_now(&self, want_per_source: usize) -> Result<RefreshReport>;
     fn new_session(&self);
     fn next_page(&self, n: usize) -> Result<Vec<Ranked>>;
     fn explain(&self, bvid: &str) -> Result<Option<ScoreBreakdown>>;

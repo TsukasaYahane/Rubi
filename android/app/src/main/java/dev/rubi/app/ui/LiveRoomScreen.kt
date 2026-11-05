@@ -1,8 +1,17 @@
 package dev.rubi.app.ui
 
+import kotlinx.coroutines.CoroutineScope
+import dev.rubi.core.SpaceService
+import dev.rubi.core.LiveService
+import dev.rubi.core.ActionsService
+import dev.rubi.app.data.UiPrefs
+import dev.rubi.app.data.CoreSettings
 import dev.rubi.app.LocalFrozen
 import kotlin.math.roundToInt
 import dev.rubi.app.data.LiveDanmakuPrefs
+import dev.rubi.app.data.PlaybackPrefs
+import androidx.compose.ui.layout.boundsInWindow
+import androidx.compose.ui.layout.onGloballyPositioned
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.material3.SliderDefaults
@@ -68,7 +77,6 @@ import androidx.compose.ui.unit.sp
 import androidx.compose.ui.viewinterop.AndroidView
 import androidx.media3.ui.PlayerView
 import dev.rubi.app.R
-import dev.rubi.app.RubiApp
 import dev.rubi.app.playback.LocalMedia
 import dev.rubi.app.ui.theme.LocalMetro
 import dev.rubi.core.FfiLiveChannel
@@ -109,7 +117,7 @@ private class ChatLine(val id: Long, val uname: String, val text: String)
  * effects only appear when their switch is off.
  */
 @Composable
-fun LiveRoomScreen(app: RubiApp, nav: Nav, roomId: ULong, title: String) {
+fun LiveRoomScreen(space: SpaceService, actions: ActionsService, liveService: LiveService, uiPrefs: UiPrefs, settings: CoreSettings, appScope: CoroutineScope, nav: Nav, roomId: ULong, title: String) {
     val c = LocalMetro.current
     val media = LocalMedia.current
     val scope = rememberCoroutineScope()
@@ -120,16 +128,32 @@ fun LiveRoomScreen(app: RubiApp, nav: Nav, roomId: ULong, title: String) {
     var online by remember { mutableStateOf(0uL) }
     var onAir by remember { mutableStateOf(true) }
     var followed by remember { mutableStateOf<Boolean?>(null) }
-    var filter by remember { mutableStateOf(app.ui.liveFilter) }
+    var filter by remember { mutableStateOf(uiPrefs.liveFilter) }
     var blocked by remember { mutableStateOf(Triple(0u, 0u, 0u)) }
     var channel by remember { mutableStateOf<FfiLiveChannel?>(null) }
     var pickingQuality by remember { mutableStateOf(false) }
     var fullscreen by remember { mutableStateOf(false) }
     var bars by remember { mutableStateOf(true) }
     var settingsOpen by remember { mutableStateOf(false) }
-    var dm by remember { mutableStateOf(app.ui.liveDanmaku) }
+    var dm by remember { mutableStateOf(uiPrefs.liveDanmaku) }
     var laneCount by remember { mutableStateOf(8) }
     val gestures = rememberGestureRestore()
+    // 小窗: the live picture goes on in picture-in-picture (by the button, or on leaving when
+    // 切到后台自动小窗 is on), showing the picture alone.
+    val ctx = LocalContext.current
+    val activity = remember(ctx) { ctx.activity() }
+    val inPip by media.pip.active
+    val compact = fullscreen || inPip
+    DisposableEffect(Unit) {
+        media.pip.onPlayer = true
+        media.pip.autoEnter = PlaybackPrefs.autoPip(settings)
+        activity?.let(media.pip::sync)
+        onDispose {
+            media.pip.onPlayer = false
+            media.pip.clearVideo()
+            activity?.let(media.pip::sync)
+        }
+    }
 
     val flying = remember { mutableStateListOf<Flying>() }
     val laneLast = remember { LongArray(MAX_LANES) }
@@ -168,7 +192,7 @@ fun LiveRoomScreen(app: RubiApp, nav: Nav, roomId: ULong, title: String) {
 
     suspend fun startPlaying(qn: UInt?) {
         val r = room ?: return
-        runCatching { withContext(Dispatchers.IO) { app.core.livePlay(r.roomId, qn) } }
+        runCatching { withContext(Dispatchers.IO) { liveService.livePlay(r.roomId, qn) } }
             .onSuccess { p ->
                 play = p
                 onAir = p.live
@@ -180,13 +204,13 @@ fun LiveRoomScreen(app: RubiApp, nav: Nav, roomId: ULong, title: String) {
     // The room header first (short ids resolve to the real room), then the picture.
     LaunchedEffect(roomId) {
         media.listening.stop()
-        runCatching { withContext(Dispatchers.IO) { app.core.liveRoom(roomId) } }
+        runCatching { withContext(Dispatchers.IO) { liveService.liveRoom(roomId) } }
             .onSuccess { r ->
                 room = r
                 online = r.online
                 onAir = r.live
                 startPlaying(null)
-                if (r.uid > 0uL) followed = runCatching { withContext(Dispatchers.IO) { app.core.upProfile(r.uid).followed } }.getOrNull()
+                if (r.uid > 0uL) followed = runCatching { withContext(Dispatchers.IO) { space.upProfile(r.uid).followed } }.getOrNull()
             }
             .onFailure { problem = errorText(it) }
     }
@@ -202,7 +226,7 @@ fun LiveRoomScreen(app: RubiApp, nav: Nav, roomId: ULong, title: String) {
         var tries = 0
         while (tries <= MAX_RECONNECTS) {
             try {
-                val ch = withContext(Dispatchers.IO) { app.core.liveChannel(id, filter) }
+                val ch = withContext(Dispatchers.IO) { liveService.liveChannel(id, filter) }
                 channel = ch
                 tries = 0
                 while (true) {
@@ -217,7 +241,7 @@ fun LiveRoomScreen(app: RubiApp, nav: Nav, roomId: ULong, title: String) {
             } finally {
                 // The page scope is already cancelled when the page goes: leave on the app's,
                 // so the socket is closed and the Rust object freed now, not at some GC.
-                channel?.let { ch -> app.scope.launch { runCatching { ch.leave() }; ch.close() } }
+                channel?.let { ch -> appScope.launch { runCatching { ch.leave() }; ch.close() } }
                 channel = null
             }
             delay(3_000L)
@@ -229,14 +253,14 @@ fun LiveRoomScreen(app: RubiApp, nav: Nav, roomId: ULong, title: String) {
 
     fun setDm(next: LiveDanmakuPrefs) {
         dm = next
-        app.ui.liveDanmaku = next
+        uiPrefs.liveDanmaku = next
         if (!next.enabled) flying.clear()
     }
 
     fun send(text: String, done: (String?) -> Unit) {
         val r = room ?: return
         scope.launch {
-            runCatching { withContext(Dispatchers.IO) { app.core.liveSend(r.roomId, text) } }
+            runCatching { withContext(Dispatchers.IO) { liveService.liveSend(r.roomId, text) } }
                 .onSuccess { done(null) }
                 .onFailure { done(if (it is RubiException.NotLoggedIn) "登录后才能发弹幕" else "发送失败：${errorText(it)}") }
         }
@@ -247,7 +271,7 @@ fun LiveRoomScreen(app: RubiApp, nav: Nav, roomId: ULong, title: String) {
 
     fun setFilter(f: FfiLiveFilter) {
         filter = f
-        app.ui.liveFilter = f
+        uiPrefs.liveFilter = f
         channel?.setFilter(f)
         if (f.popups) popup = null
     }
@@ -255,14 +279,25 @@ fun LiveRoomScreen(app: RubiApp, nav: Nav, roomId: ULong, title: String) {
     Box(Modifier.fillMaxSize()) {
         Column(Modifier.fillMaxSize()) {
             // Header: back, title, viewers.
-            if (!fullscreen) Row(Modifier.fillMaxWidth().height(48.dp).padding(start = 4.dp, end = 12.dp), verticalAlignment = Alignment.CenterVertically) {
+            if (!compact) Row(Modifier.fillMaxWidth().height(48.dp).padding(start = 4.dp, end = 12.dp), verticalAlignment = Alignment.CenterVertically) {
                 Box(Modifier.size(44.dp).clickable { nav.pop() }, contentAlignment = Alignment.Center) { GlyphIcon(Glyph.Back) }
                 Text(room?.title ?: title, fontSize = 15.sp, color = c.fg, maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.weight(1f))
                 if (online > 0uL) Meta("${formatCount(online)}人", Modifier.padding(start = 8.dp))
             }
             // The picture, its danmaku, and what the switches let through.
             // The same slot in both modes, so the PlayerView survives the switch.
-            BoxWithConstraints((if (fullscreen) Modifier.fillMaxSize() else Modifier.fillMaxWidth().aspectRatio(16f / 9f)).background(Color.Black)) {
+            BoxWithConstraints(
+                (if (compact) Modifier.fillMaxSize() else Modifier.fillMaxWidth().aspectRatio(16f / 9f))
+                    // Where the picture is, so 小窗 shrinks from it.
+                    .onGloballyPositioned { coords ->
+                        val a = activity
+                        if (a != null && !inPip) {
+                            val r = coords.boundsInWindow()
+                            media.pip.videoAt(a, r.left.toInt(), r.top.toInt(), r.right.toInt(), r.bottom.toInt())
+                        }
+                    }
+                    .background(Color.Black),
+            ) {
                 AndroidView(
                     factory = {
                         (LayoutInflater.from(it).inflate(R.layout.player_view, null) as PlayerView).apply {
@@ -280,7 +315,8 @@ fun LiveRoomScreen(app: RubiApp, nav: Nav, roomId: ULong, title: String) {
                 val fits = ((with(density) { maxHeight.toPx() } * DM_AREAS[dm.area.coerceIn(0, 2)]) / laneH).toInt().coerceIn(1, MAX_LANES)
                 LaunchedEffect(fits) { laneCount = fits }
                 val style = TextStyle(fontSize = fontSp.sp, color = Color.White, shadow = Shadow(Color.Black, blurRadius = 4f))
-                if (dm.enabled) flying.forEach { f ->
+                // No danmaku in the small window: too little room to read them.
+                if (dm.enabled && !inPip) flying.forEach { f ->
                     if (f.lane >= fits) return@forEach
                     Text(
                         f.text,
@@ -293,9 +329,9 @@ fun LiveRoomScreen(app: RubiApp, nav: Nav, roomId: ULong, title: String) {
                         },
                     )
                 }
-                if (onAir && !fullscreen) LiveBadge(Modifier.align(Alignment.TopStart).padding(6.dp))
+                if (onAir && !compact) LiveBadge(Modifier.align(Alignment.TopStart).padding(6.dp))
                 if (!onAir) Text("主播还没有开播", fontSize = 14.sp, color = Color.White, modifier = Modifier.align(Alignment.Center))
-                banner?.takeIf { now - it.second < SHOW_MS }?.let {
+                banner?.takeIf { now - it.second < SHOW_MS && !inPip }?.let {
                     Text(
                         "🎁 ${it.first}",
                         fontSize = 12.sp,
@@ -305,7 +341,7 @@ fun LiveRoomScreen(app: RubiApp, nav: Nav, roomId: ULong, title: String) {
                         modifier = Modifier.align(Alignment.CenterStart).background(Color(0xFFC9A227)).padding(horizontal = 10.dp, vertical = 4.dp),
                     )
                 }
-                effect?.takeIf { now - it.second < SHOW_MS }?.let {
+                effect?.takeIf { now - it.second < SHOW_MS && !inPip }?.let {
                     Text(
                         it.first,
                         fontSize = 12.sp,
@@ -315,7 +351,19 @@ fun LiveRoomScreen(app: RubiApp, nav: Nav, roomId: ULong, title: String) {
                         modifier = Modifier.align(Alignment.BottomStart).fillMaxWidth().background(c.accent.copy(alpha = 0.8f)).padding(horizontal = 10.dp, vertical = 3.dp),
                     )
                 }
-                if (!fullscreen) {
+                if (inPip) {
+                    // The small window shows the picture alone.
+                } else if (!fullscreen) {
+                    if (activity != null && media.pip.supported(activity)) {
+                        Row(
+                            Modifier.align(Alignment.TopEnd).clickable { media.pip.enter(activity) }.padding(horizontal = 10.dp, vertical = 8.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(4.dp),
+                        ) {
+                            if (!LocalWordsUi.current) LineIconView(LineIcon.Pip, Color.White, 18.dp)
+                            Text("小窗", fontSize = 12.sp, color = Color.White)
+                        }
+                    }
                     Text(
                         "全屏",
                         fontSize = 12.sp,
@@ -356,7 +404,7 @@ fun LiveRoomScreen(app: RubiApp, nav: Nav, roomId: ULong, title: String) {
                     }
                 }
             }
-            if (!fullscreen) {
+            if (!compact) {
             problem?.let { Meta(it, Modifier.padding(horizontal = 16.dp, vertical = 4.dp), color = LiveRed) }
             // Anchor, quality, 关注.
             Row(Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 8.dp), verticalAlignment = Alignment.CenterVertically) {
@@ -382,7 +430,7 @@ fun LiveRoomScreen(app: RubiApp, nav: Nav, roomId: ULong, title: String) {
                         color = if (f) c.fg2 else c.fg,
                         modifier = Modifier.border(1.dp, if (f) c.line else c.fg).clickable {
                             scope.launch {
-                                runCatching { withContext(Dispatchers.IO) { app.core.followMid(r.uid, r.uname, !f) } }
+                                runCatching { withContext(Dispatchers.IO) { actions.followMid(r.uid, r.uname, !f) } }
                                     .onSuccess { followed = !f }
                                     .onFailure { problem = if (it is RubiException.NotLoggedIn) "登录后才能关注" else "关注失败：${errorText(it)}" }
                             }

@@ -30,7 +30,7 @@ mod stein;
 mod video;
 pub mod wbi;
 
-pub use action::{ActionApi, LibraryApi, Triple, WebAccount};
+pub use action::{FavoritesApi, FollowingsApi, HistoryApi, Triple, VideoActionApi, WatchLaterApi, WebAccount};
 pub use article::{ArticleApi, WebArticle};
 pub use auth::{AuthApi, LoginCaptcha, LoginKey, NavInfo, QrState, QrTicket, SolvedCaptcha, WebAuth};
 pub use comment::{CommentApi, CommentArea, CommentPage, CommentSort, ThreadPreview, WebComment};
@@ -43,14 +43,14 @@ pub use feed::{FeedApi, WebFeed};
 pub use http::{HttpClient, SessionHolder};
 pub use limiter::RateLimiter;
 pub use live::{BEST_LIVE_QN, DanmuServer, LiveApi, WebLive, event_of};
-pub use live_socket::{ChannelJoin, LiveSocket};
+pub use live_socket::{ChannelJoin, ChannelOpener, ChannelStream, WebChannels};
 pub use media::{MediaBody, MediaFetch, WebMedia};
 pub use message::{ChatApi, NoticeApi, NoticeCursor, VideoShare, WebMessages};
 pub use parse::{https_image, plain_letters};
 pub use pgc::{
     PgcApi, PgcConditions, PgcDay, PgcEpisode, PgcFilter, PgcPlay, PgcRelease, PgcSeason, PgcSeasonDetail, WebPgc,
 };
-pub use search::{HotWord, SearchApi, SearchOrder, UserHit, UserHits, WebSearch};
+pub use search::{HotWord, PgcHit, PgcSearch, SearchApi, SearchOrder, UserHit, UserHits, WebSearch};
 pub use season::{SEASON_PAGE, SeasonApi, WebSeasons};
 pub use session::Session;
 pub use space::{SpaceApi, UpArticle, UpArticles, UpOrder, UpVideo, UpVideos, WebSpace};

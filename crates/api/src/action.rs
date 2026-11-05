@@ -34,8 +34,10 @@ const HISTORY: &str = "https://api.bilibili.com/x/web-interface/history/cursor";
 const FOLLOWINGS: &str = "https://api.bilibili.com/x/relation/followings";
 const HEARTBEAT: &str = "https://api.bilibili.com/x/click-interface/web/heartbeat";
 
+/// What the video page does to a video and its uploader: like, coin, 三连, favourite,
+/// 稍后再看, follow. Used by `Actions` only.
 #[async_trait]
-pub trait ActionApi: Send + Sync {
+pub trait VideoActionApi: Send + Sync {
     async fn relation(&self, bvid: &str) -> Result<VideoRelation>;
     async fn like(&self, bvid: &str, on: bool) -> Result<()>;
     /// `count` is 1 or 2.
@@ -43,9 +45,20 @@ pub trait ActionApi: Send + Sync {
     /// 一键三连: like, coins and the default favourite folder at once. A video already coined
     /// gets no more coins (verified 2026-10-31: `coin` succeeds with `multiply` 0).
     async fn triple(&self, bvid: &str) -> Result<Triple>;
-    /// The user's own folders; with `aid > 0` each is marked if it holds that video.
+    /// The user's own folders, each marked if it holds the video `aid`.
     async fn fav_folders(&self, aid: u64) -> Result<Vec<FavFolder>>;
     async fn set_fav(&self, aid: u64, add: &[u64], remove: &[u64]) -> Result<()>;
+    /// Adds the video to 稍后再看.
+    async fn watch_later(&self, bvid: &str) -> Result<()>;
+    async fn follow(&self, mid: u64, on: bool) -> Result<()>;
+}
+
+/// The user's favourite folders and what is in them. Used by `Favorites` only.
+#[async_trait]
+pub trait FavoritesApi: Send + Sync {
+    async fn my_folders(&self) -> Result<Vec<FavFolder>>;
+    /// Page `pn` (from 1) of a folder; also whether more follow.
+    async fn fav_items(&self, folder_id: u64, pn: u32) -> Result<(Vec<VideoCard>, bool)>;
     /// A new folder; returns its id.
     async fn create_folder(&self, title: &str, intro: &str, private: bool) -> Result<u64>;
     async fn edit_folder(&self, id: u64, title: &str, intro: &str, private: bool) -> Result<()>;
@@ -56,27 +69,34 @@ pub trait ActionApi: Send + Sync {
     async fn remove_from_folder(&self, folder: u64, aids: &[u64]) -> Result<()>;
     /// Moves (or with `keep`, copies) videos from one folder to another.
     async fn transfer(&self, from: u64, to: u64, aids: &[u64], keep: bool) -> Result<()>;
-    async fn watch_later(&self, bvid: &str) -> Result<()>;
-    /// Takes one video (by aid) out of 稍后再看.
-    async fn remove_watch_later(&self, aid: u64) -> Result<()>;
-    /// Takes every video already watched to the end out of 稍后再看.
-    async fn clear_watched_later(&self) -> Result<()>;
-    async fn follow(&self, mid: u64, on: bool) -> Result<()>;
 }
 
+/// The 稍后再看 list. Used by `WatchLater` only.
 #[async_trait]
-pub trait LibraryApi: Send + Sync {
+pub trait WatchLaterApi: Send + Sync {
+    /// With how far each was watched (`progress_s` -1: to the end) and when added.
+    async fn list(&self) -> Result<Vec<HistoryEntry>>;
+    /// Takes one video (by aid) out.
+    async fn remove(&self, aid: u64) -> Result<()>;
+    /// Takes every video already watched to the end out.
+    async fn clear_watched(&self) -> Result<()>;
+}
+
+/// 历史记录: reading it, and reporting playback into it. Used by `History` only.
+#[async_trait]
+pub trait HistoryApi: Send + Sync {
     /// Video history; pass the returned cursor back for the next page.
     async fn history(&self, cursor: Option<&str>) -> Result<(Vec<HistoryEntry>, Option<String>)>;
-    /// 稍后再看, with how far each was watched (`progress_s` -1: to the end) and when added.
-    async fn watch_later_list(&self) -> Result<Vec<HistoryEntry>>;
-    async fn fav_items(&self, folder_id: u64, pn: u32) -> Result<(Vec<VideoCard>, bool)>;
-    /// Mids the user follows, one page of 50; returns the total too.
-    /// One page (50) of the user's followings, newest follow first; also the total.
-    async fn followings(&self, pn: u32) -> Result<(Vec<Following>, u32)>;
     /// Playback heartbeat: puts the video in 历史记录 with its progress. `play_type` is 1 when
     /// playback starts, 0 while playing, 2 on pause / leaving. Times in seconds.
     async fn heartbeat(&self, aid: u64, cid: u64, played_s: u64, realtime_s: u64, play_type: u8) -> Result<()>;
+}
+
+/// Whom the user follows. Used by `Following` only.
+#[async_trait]
+pub trait FollowingsApi: Send + Sync {
+    /// One page (50) of the user's followings, newest follow first; also the total.
+    async fn followings(&self, pn: u32) -> Result<(Vec<Following>, u32)>;
 }
 
 /// What a 一键三连 request achieved; each part can fail on its own (e.g. coins run out).
@@ -178,8 +198,35 @@ pub(crate) fn fav_item_of(v: &Value) -> VideoCard {
     }
 }
 
+impl WebAccount {
+    /// The user's own folders; with `aid > 0` each is marked if it holds that video.
+    async fn folders(&self, aid: u64) -> Result<Vec<FavFolder>> {
+        let mid = self.my_mid()?;
+        let mut p = params!["up_mid" => mid, "type" => 2];
+        if aid > 0 {
+            p.push(("rid".into(), aid.to_string()));
+        }
+        let d = self.http.get_json(FAV_FOLDERS, p, false).await?;
+        Ok(d["list"]
+            .as_array()
+            .map(|a| {
+                a.iter()
+                    .map(|f| FavFolder {
+                        id: u64_of(&f["id"]),
+                        title: str_of(&f["title"]),
+                        count: u64_of(&f["media_count"]) as u32,
+                        contains: u64_of(&f["fav_state"]) == 1,
+                        private: folder_private(&f["attr"]),
+                        default: folder_default(&f["attr"]),
+                    })
+                    .collect()
+            })
+            .unwrap_or_default())
+    }
+}
+
 #[async_trait]
-impl ActionApi for WebAccount {
+impl VideoActionApi for WebAccount {
     async fn relation(&self, bvid: &str) -> Result<VideoRelation> {
         let d = self.http.get_json(ARCHIVE_RELATION, params!["bvid" => bvid], false).await?;
         Ok(VideoRelation {
@@ -204,32 +251,37 @@ impl ActionApi for WebAccount {
     }
 
     async fn fav_folders(&self, aid: u64) -> Result<Vec<FavFolder>> {
-        let mid = self.my_mid()?;
-        let mut p = params!["up_mid" => mid, "type" => 2];
-        if aid > 0 {
-            p.push(("rid".into(), aid.to_string()));
-        }
-        let d = self.http.get_json(FAV_FOLDERS, p, false).await?;
-        Ok(d["list"]
-            .as_array()
-            .map(|a| {
-                a.iter()
-                    .map(|f| FavFolder {
-                        id: u64_of(&f["id"]),
-                        title: str_of(&f["title"]),
-                        count: u64_of(&f["media_count"]) as u32,
-                        contains: u64_of(&f["fav_state"]) == 1,
-                        private: folder_private(&f["attr"]),
-                        default: folder_default(&f["attr"]),
-                    })
-                    .collect()
-            })
-            .unwrap_or_default())
+        self.folders(aid).await
     }
 
     async fn set_fav(&self, aid: u64, add: &[u64], remove: &[u64]) -> Result<()> {
         let form = params!["rid" => aid, "type" => 2, "add_media_ids" => ids(add), "del_media_ids" => ids(remove)];
         self.http.post_form(FAV_DEAL, form).await.map(|_| ())
+    }
+
+    async fn watch_later(&self, bvid: &str) -> Result<()> {
+        self.http.post_form(TOVIEW_ADD, params!["bvid" => bvid]).await.map(|_| ())
+    }
+
+    async fn follow(&self, mid: u64, on: bool) -> Result<()> {
+        let form = params!["fid" => mid, "act" => if on { 1 } else { 2 }, "re_src" => 11];
+        self.http.post_form(RELATION_MODIFY, form).await.map(|_| ())
+    }
+}
+
+#[async_trait]
+impl FavoritesApi for WebAccount {
+    async fn my_folders(&self) -> Result<Vec<FavFolder>> {
+        self.folders(0).await
+    }
+
+    async fn fav_items(&self, folder_id: u64, pn: u32) -> Result<(Vec<VideoCard>, bool)> {
+        let d = self
+            .http
+            .get_json(FAV_LIST, params!["media_id" => folder_id, "pn" => pn, "ps" => 20, "platform" => "web"], false)
+            .await?;
+        let items = d["medias"].as_array().map(|a| a.iter().map(fav_item_of).collect()).unwrap_or_default();
+        Ok((items, d["has_more"].as_bool().unwrap_or(false)))
     }
 
     async fn create_folder(&self, title: &str, intro: &str, private: bool) -> Result<u64> {
@@ -246,6 +298,11 @@ impl ActionApi for WebAccount {
         self.http.post_form(FOLDER_DEL, params!["media_ids" => id]).await.map(|_| ())
     }
 
+    async fn folder_intro(&self, id: u64) -> Result<String> {
+        let d = self.http.get_json(FOLDER_INFO, params!["media_id" => id], false).await?;
+        Ok(str_of(&d["intro"]))
+    }
+
     async fn remove_from_folder(&self, folder: u64, aids: &[u64]) -> Result<()> {
         let form = params!["media_id" => folder, "resources" => video_resources(aids), "platform" => "web"];
         self.http.post_form(FAV_BATCH_DEL, form).await.map(|_| ())
@@ -258,32 +315,26 @@ impl ActionApi for WebAccount {
         ];
         self.http.post_form(if keep { FAV_COPY } else { FAV_MOVE }, form).await.map(|_| ())
     }
+}
 
-    async fn folder_intro(&self, id: u64) -> Result<String> {
-        let d = self.http.get_json(FOLDER_INFO, params!["media_id" => id], false).await?;
-        Ok(str_of(&d["intro"]))
+#[async_trait]
+impl WatchLaterApi for WebAccount {
+    async fn list(&self) -> Result<Vec<HistoryEntry>> {
+        let d = self.http.get_json(TOVIEW_LIST, params![], false).await?;
+        Ok(d["list"].as_array().map(|a| a.iter().map(watch_later_of).collect()).unwrap_or_default())
     }
 
-    async fn watch_later(&self, bvid: &str) -> Result<()> {
-        self.http.post_form(TOVIEW_ADD, params!["bvid" => bvid]).await.map(|_| ())
-    }
-
-    async fn remove_watch_later(&self, aid: u64) -> Result<()> {
+    async fn remove(&self, aid: u64) -> Result<()> {
         self.http.post_form(TOVIEW_DEL, params!["aid" => aid]).await.map(|_| ())
     }
 
-    async fn clear_watched_later(&self) -> Result<()> {
+    async fn clear_watched(&self) -> Result<()> {
         self.http.post_form(TOVIEW_DEL, params!["viewed" => "true"]).await.map(|_| ())
-    }
-
-    async fn follow(&self, mid: u64, on: bool) -> Result<()> {
-        let form = params!["fid" => mid, "act" => if on { 1 } else { 2 }, "re_src" => 11];
-        self.http.post_form(RELATION_MODIFY, form).await.map(|_| ())
     }
 }
 
 #[async_trait]
-impl LibraryApi for WebAccount {
+impl HistoryApi for WebAccount {
     async fn history(&self, cursor: Option<&str>) -> Result<(Vec<HistoryEntry>, Option<String>)> {
         let mut p = params!["ps" => 20, "type" => "archive"];
         if let Some((max, view_at)) = cursor.and_then(|c| c.split_once(':')) {
@@ -300,20 +351,6 @@ impl LibraryApi for WebAccount {
         Ok((list, next))
     }
 
-    async fn watch_later_list(&self) -> Result<Vec<HistoryEntry>> {
-        let d = self.http.get_json(TOVIEW_LIST, params![], false).await?;
-        Ok(d["list"].as_array().map(|a| a.iter().map(watch_later_of).collect()).unwrap_or_default())
-    }
-
-    async fn fav_items(&self, folder_id: u64, pn: u32) -> Result<(Vec<VideoCard>, bool)> {
-        let d = self
-            .http
-            .get_json(FAV_LIST, params!["media_id" => folder_id, "pn" => pn, "ps" => 20, "platform" => "web"], false)
-            .await?;
-        let items = d["medias"].as_array().map(|a| a.iter().map(fav_item_of).collect()).unwrap_or_default();
-        Ok((items, d["has_more"].as_bool().unwrap_or(false)))
-    }
-
     async fn heartbeat(&self, aid: u64, cid: u64, played_s: u64, realtime_s: u64, play_type: u8) -> Result<()> {
         let mid = self.my_mid()?;
         let form = params![
@@ -322,7 +359,10 @@ impl LibraryApi for WebAccount {
         ];
         self.http.post_form(HEARTBEAT, form).await.map(|_| ())
     }
+}
 
+#[async_trait]
+impl FollowingsApi for WebAccount {
     async fn followings(&self, pn: u32) -> Result<(Vec<Following>, u32)> {
         let mid = self.my_mid()?;
         let d = self.http.get_json(FOLLOWINGS, params!["vmid" => mid, "pn" => pn, "ps" => 50], false).await?;

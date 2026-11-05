@@ -2,10 +2,10 @@
 
 use rubi_model::NoticeKind;
 
-use crate::{FfiChatMessage, FfiChatSessions, FfiNoticeKind, FfiNoticePage, FfiUnread, Res, RubiCore};
+use crate::{FfiChatMessage, FfiChatSessions, FfiNoticeKind, FfiNoticePage, FfiUnread, MessagesService, Res};
 
 #[uniffi::export(async_runtime = "tokio")]
-impl RubiCore {
+impl MessagesService {
     pub async fn unread(&self) -> Res<FfiUnread> {
         Ok(self.messages.unread().await?.into())
     }
@@ -33,8 +33,7 @@ impl RubiCore {
     /// Sends video `bvid` to `talker_mid`: as B站's share card when the server takes it, else
     /// as its title and link. True when it went as a card.
     pub async fn share_video_to(&self, talker_mid: u64, bvid: String) -> Res<bool> {
-        let card = self.videos.card(&bvid).await?;
-        Ok(self.messages.share_video(talker_mid, &card).await?)
+        Ok(self.messages.share_video(talker_mid, &bvid).await?)
     }
 
     pub async fn send_message(&self, talker_mid: u64, text: String) -> Res<()> {

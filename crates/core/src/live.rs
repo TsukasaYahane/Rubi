@@ -4,7 +4,7 @@
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
 
-use rubi_api::{BEST_LIVE_QN, ChannelJoin, LiveApi, LiveSocket, event_of};
+use rubi_api::{BEST_LIVE_QN, ChannelJoin, ChannelOpener, ChannelStream, LiveApi, event_of};
 use rubi_model::{LiveArea, LiveCategory, LiveEvent, LivePlay, LiveRoom};
 
 use crate::error::{CoreError, Result};
@@ -45,13 +45,14 @@ pub struct LiveBatch {
 
 pub struct Live {
     api: Arc<dyn LiveApi>,
+    channels: Arc<dyn ChannelOpener>,
     rules: Arc<dyn RuleSource>,
     areas: Mutex<Option<Vec<LiveArea>>>,
 }
 
 impl Live {
-    pub(crate) fn new(api: Arc<dyn LiveApi>, rules: Arc<dyn RuleSource>) -> Self {
-        Self { api, rules, areas: Mutex::new(None) }
+    pub(crate) fn new(api: Arc<dyn LiveApi>, channels: Arc<dyn ChannelOpener>, rules: Arc<dyn RuleSource>) -> Self {
+        Self { api, channels, rules, areas: Mutex::new(None) }
     }
 
     pub async fn recommended(&self) -> Result<Vec<LiveRoom>> {
@@ -97,7 +98,7 @@ impl Live {
         let server = self.api.danmu_server(room_id).await?;
         let (uid, buvid) = self.api.identity();
         let join = ChannelJoin { room_id, uid, buvid: &buvid, token: &server.token };
-        let socket = LiveSocket::open(&server.urls, &join).await?;
+        let socket = self.channels.open(&server.urls, &join).await?;
         let keywords = self.rules.danmaku_options().keywords.clone();
         Ok(LiveChannel {
             socket: tokio::sync::Mutex::new(Some(socket)),
@@ -110,7 +111,7 @@ impl Live {
 /// An open room channel. Read it in a loop with [`next`](Self::next); switches can change while
 /// it runs, and [`close`](Self::close) ends a read that is waiting.
 pub struct LiveChannel {
-    socket: tokio::sync::Mutex<Option<LiveSocket>>,
+    socket: tokio::sync::Mutex<Option<Box<dyn ChannelStream>>>,
     sorter: Mutex<Sorter>,
     /// Set by `close`: a waiting `next` gives up the socket at once instead of holding it until
     /// the room says something.

@@ -7,21 +7,34 @@ use rubi_core::{DanmakuSession, SteinSession};
 use rubi_model::{Danmaku, VideoRef};
 
 use crate::{
-    FfiDanmaku, FfiDanmakuSet, FfiLane, FfiPlacement, FfiPlayback, FfiResumePoint, FfiSteinNode, FfiVideoCard,
-    FfiVideoDetail, FfiVideoRef, Res, RubiCore,
+    DanmakuService, FfiDanmaku, FfiDanmakuSet, FfiLane, FfiPlacement, FfiPlayback, FfiResumePoint, FfiSteinNode,
+    FfiVideoCard, FfiVideoDetail, FfiVideoRef, Res, RubiCore, SteinService, VideosService,
 };
 
-#[uniffi::export(async_runtime = "tokio")]
+#[uniffi::export]
 impl RubiCore {
     /// Frees what watching videos piled up: cached cards and comment roots. Call when the user
     /// leaves the video pages, or when the system asks for memory.
     pub fn release_caches(&self) {
-        self.videos.forget_shown();
-        self.comments.forget();
+        self.videos.videos.forget_shown();
+        self.comments.comments.forget();
     }
+}
 
+#[uniffi::export(async_runtime = "tokio")]
+impl VideosService {
     pub async fn video(&self, bvid: String) -> Res<FfiVideoCard> {
         Ok(FfiVideoCard::of(&self.videos.card(&bvid).await?, None))
+    }
+
+    /// Whether `bvid` is a portrait video, when a list it was shown in said (no request).
+    pub fn video_portrait(&self, bvid: String) -> Option<bool> {
+        self.videos.known_portrait(&bvid)
+    }
+
+    /// Whether `bvid` is a portrait video, looking it up when no list said (before opening it).
+    pub async fn video_portrait_lookup(&self, bvid: String) -> Res<bool> {
+        Ok(self.videos.portrait(&bvid).await?)
     }
 
     /// Full details for the player page (always fresh, with tags).
@@ -73,12 +86,18 @@ impl RubiCore {
     pub async fn playback_part(&self, bvid: String, cid: u64, qn: u32) -> Res<FfiPlayback> {
         Ok(self.videos.playback_part(&bvid, cid, qn).await?.into())
     }
+}
 
+#[uniffi::export(async_runtime = "tokio")]
+impl SteinService {
     /// The story of an interactive video starting at part `cid`; `None` for ordinary videos.
     pub async fn stein_open(&self, bvid: String, cid: u64) -> Res<Option<Arc<FfiStein>>> {
         Ok(self.stein.open(&bvid, cid).await?.map(|s| Arc::new(FfiStein(s))))
     }
+}
 
+#[uniffi::export(async_runtime = "tokio")]
+impl DanmakuService {
     /// Posts a danmaku at `progress_ms` and returns it, ready to add to the shown set.
     /// `mode`: 1 scroll, 4 bottom, 5 top; `color` is 0xRRGGBB. Login required.
     pub async fn send_danmaku(

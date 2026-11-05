@@ -1,5 +1,10 @@
 package dev.rubi.app.ui
 
+import kotlinx.coroutines.CoroutineScope
+import dev.rubi.core.PlayQueueService
+import dev.rubi.core.HistoryService
+import dev.rubi.core.DanmakuService
+import dev.rubi.app.data.CoreSettings
 import androidx.compose.runtime.rememberUpdatedState
 import dev.rubi.app.playback.LocalMedia
 import android.os.SystemClock
@@ -14,7 +19,6 @@ import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.LifecycleEventObserver
 import androidx.lifecycle.compose.LocalLifecycleOwner
 import androidx.media3.common.Player
-import dev.rubi.app.RubiApp
 import dev.rubi.app.data.PlaybackPrefs
 import dev.rubi.core.FfiDanmakuSet
 import kotlinx.coroutines.delay
@@ -32,13 +36,13 @@ private const val HEARTBEAT_S = 15
  * applies at once).
  */
 @Composable
-fun PlayerPageLifecycle(app: RubiApp) {
+fun PlayerPageLifecycle(settings: CoreSettings) {
     val media = LocalMedia.current
     val ctx = LocalContext.current
     val activity = remember(ctx) { ctx.activity() }
     DisposableEffect(Unit) {
         media.pip.onPlayer = true
-        media.pip.autoEnter = PlaybackPrefs.autoPip(app.settings)
+        media.pip.autoEnter = PlaybackPrefs.autoPip(settings)
         activity?.let(media.pip::sync)
         onDispose {
             media.pip.onPlayer = false
@@ -51,7 +55,7 @@ fun PlayerPageLifecycle(app: RubiApp) {
     val lifecycle = LocalLifecycleOwner.current.lifecycle
     DisposableEffect(lifecycle) {
         val observer = LifecycleEventObserver { _, event ->
-            if (event == Lifecycle.Event.ON_STOP && !PlaybackPrefs.backgroundPlay(app.settings)) {
+            if (event == Lifecycle.Event.ON_STOP && !PlaybackPrefs.backgroundPlay(settings)) {
                 media.player.get().pause()
             }
         }
@@ -66,7 +70,7 @@ fun PlayerPageLifecycle(app: RubiApp) {
  * carries this part's own progress.
  */
 @Composable
-fun ReportWatching(app: RubiApp, bvid: String, cid: ULong?) {
+fun ReportWatching(history: HistoryService, appScope: CoroutineScope, bvid: String, cid: ULong?) {
     val media = LocalMedia.current
     val watched = remember { longArrayOf(0L, 0L) } // played s, real s
     LaunchedEffect(cid) {
@@ -75,14 +79,14 @@ fun ReportWatching(app: RubiApp, bvid: String, cid: ULong?) {
         val started = SystemClock.elapsedRealtime()
         watched[0] = 0L
         watched[1] = 0L
-        runCatching { app.core.reportWatch(bvid, part, 0u, 0u, 1u) }
+        runCatching { history.reportWatch(bvid, part, 0u, 0u, 1u) }
         var tick = 0
         while (true) {
             delay(1_000)
             if (player.isPlaying) watched[0] = player.currentPosition / 1000
             watched[1] = (SystemClock.elapsedRealtime() - started) / 1000
             if (++tick % HEARTBEAT_S == 0 && player.isPlaying) {
-                runCatching { app.core.reportWatch(bvid, part, watched[0].toULong(), watched[1].toULong(), 0u) }
+                runCatching { history.reportWatch(bvid, part, watched[0].toULong(), watched[1].toULong(), 0u) }
             }
         }
     }
@@ -92,7 +96,7 @@ fun ReportWatching(app: RubiApp, bvid: String, cid: ULong?) {
             if (part != null) {
                 val played = watched[0].toULong()
                 val real = watched[1].toULong()
-                app.scope.launch { runCatching { app.core.reportWatch(bvid, part, played, real, 2u) } }
+                appScope.launch { runCatching { history.reportWatch(bvid, part, played, real, 2u) } }
             }
         }
     }
@@ -118,7 +122,7 @@ fun OnPlaybackEnded(enabled: Boolean, onEnded: () -> Unit) {
 
 /** Opened from the play list: when the video ends, the list's next one (by its mode) follows. */
 @Composable
-fun ContinuePlaylistOnEnd(app: RubiApp, nav: Nav, bvid: String, enabled: Boolean) {
+fun ContinuePlaylistOnEnd(playQueue: PlayQueueService, nav: Nav, bvid: String, enabled: Boolean) {
     val media = LocalMedia.current
     val scope = rememberCoroutineScope()
     DisposableEffect(enabled) {
@@ -128,7 +132,7 @@ fun ContinuePlaylistOnEnd(app: RubiApp, nav: Nav, bvid: String, enabled: Boolean
             override fun onPlaybackStateChanged(state: Int) {
                 if (state != Player.STATE_ENDED) return
                 scope.launch {
-                    val next = offMain { runCatching { app.core.playlistNext(bvid) }.getOrNull() } ?: return@launch
+                    val next = offMain { runCatching { playQueue.playlistNext(bvid) }.getOrNull() } ?: return@launch
                     if (next.bvid == bvid) {
                         player.seekTo(0)
                         player.play()
@@ -149,7 +153,7 @@ fun ContinuePlaylistOnEnd(app: RubiApp, nav: Nav, bvid: String, enabled: Boolean
  * and what went wrong (and whether some danmaku were already shown).
  */
 suspend fun loadDanmakuNearFirst(
-    app: RubiApp,
+    danmakuService: DanmakuService,
     cid: ULong,
     durationMs: UInt,
     positionMs: Long,
@@ -159,7 +163,7 @@ suspend fun loadDanmakuNearFirst(
     runCatching {
         // Closed when done (or cancelled): the session holds every loaded danmaku in the core,
         // and left to the garbage collector each video entered again kept another copy.
-        app.core.danmakuSession(cid, durationMs).use { session ->
+        danmakuService.danmakuSession(cid, durationMs).use { session ->
             val total = session.segmentCount()
             val here = session.segmentAt(positionMs.toUInt())
             val order = (1u..total).sortedBy { kotlin.math.abs(it.toInt() - here.toInt()) }

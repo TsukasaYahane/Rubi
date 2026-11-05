@@ -1,11 +1,12 @@
 //! 关注: followed UPs' videos and posts.
 
 use crate::{
-    FfiDynamic, FfiDynamicPage, FfiFollowPage, FfiFollowedUp, FfiFollowing, FfiFollowings, FfiVideoCard, Res, RubiCore,
+    FfiDynamic, FfiDynamicPage, FfiFollowPage, FfiFollowedUp, FfiFollowing, FfiFollowings, FfiVideoCard,
+    FollowingService, Res,
 };
 
 #[uniffi::export(async_runtime = "tokio")]
-impl RubiCore {
+impl FollowingService {
     /// One page of followed UPs' videos; pass `next` back for the following page.
     pub async fn followed_feed(&self, offset: Option<String>) -> Res<FfiFollowPage> {
         let page = self.following.videos(offset.as_deref()).await?;

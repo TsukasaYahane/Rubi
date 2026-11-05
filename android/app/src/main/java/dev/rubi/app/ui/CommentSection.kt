@@ -1,5 +1,7 @@
 package dev.rubi.app.ui
 
+import dev.rubi.core.FollowingService
+import dev.rubi.core.CommentsService
 import dev.rubi.core.FfiMention
 import dev.rubi.core.RubiException
 import androidx.compose.ui.platform.LocalClipboard
@@ -63,7 +65,6 @@ import androidx.compose.ui.unit.sp
 import androidx.compose.ui.viewinterop.AndroidView
 import androidx.media3.ui.PlayerView
 import dev.rubi.app.R
-import dev.rubi.app.RubiApp
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.LifecycleEventObserver
 import androidx.lifecycle.compose.LocalLifecycleOwner
@@ -95,7 +96,7 @@ private const val COMMENT_LINES = 6
  */
 @Composable
 internal fun CommentSection(
-    app: RubiApp,
+    commentsService: CommentsService, following: FollowingService,
     area: FfiCommentArea,
     focus: FfiCommentRef?,
     onOpenVideo: (FfiVideoLink) -> Unit,
@@ -116,7 +117,7 @@ internal fun CommentSection(
 
     LaunchedEffect(area, focus) {
         if (focus == null) return@LaunchedEffect
-        runCatching { app.core.focusThread(area, focus) }
+        runCatching { commentsService.focusThread(area, focus) }
             .onSuccess { focusThread = it; onFocusShown() }
             .onFailure { focusNote = "无法定位到消息里的评论（可能已被删除或折叠）" }
     }
@@ -125,7 +126,7 @@ internal fun CommentSection(
     // (B站 answers those with HTTP 412). The first page also brings the pinned comments.
     val paged = remember(area) {
         Paged<FfiCommentThread, String>(scope, key = { it.rootRpid }, minGapMs = COMMENT_PAGE_GAP_MS) { at ->
-            val page = app.core.comments(area, byTime, at)
+            val page = commentsService.comments(area, byTime, at)
             if (at == null) {
                 pinned = page.pinned
                 hiddenPinned = page.hiddenPinned
@@ -171,7 +172,7 @@ internal fun CommentSection(
                 val want = !was
                 likeOverride[row.rpid] = want to if (want) count + 1u else count - minOf(count, 1uL)
                 scope.launch {
-                    runCatching { app.core.likeComment(area, row.rpid, want) }
+                    runCatching { commentsService.likeComment(area, row.rpid, want) }
                         .onSuccess { say(if (want) "已点赞" else "已取消点赞") }
                         .onFailure {
                             likeOverride[row.rpid] = was to count
@@ -198,7 +199,7 @@ internal fun CommentSection(
         val (row, root) = replyFor ?: return
         sending = true
         scope.launch {
-            runCatching { app.core.replyComment(area, root, row.rpid, text, mentioned) }
+            runCatching { commentsService.replyComment(area, root, row.rpid, text, mentioned) }
                 .onSuccess { r ->
                     // Replies to a reply say whom they answer, as the list shows them; B站's own
                     // "回复 @name :" lead-in is dropped so it is not shown twice.
@@ -215,7 +216,7 @@ internal fun CommentSection(
     fun post(text: String, mentioned: List<FfiMention>) {
         sending = true
         scope.launch {
-            runCatching { app.core.replyComment(area, 0u, 0u, text, mentioned) }
+            runCatching { commentsService.replyComment(area, 0u, 0u, text, mentioned) }
                 .onSuccess { r ->
                     paged.prepend(FfiCommentThread(r.rpid, listOf(r), 0u, 0u))
                     posting = false
@@ -227,14 +228,14 @@ internal fun CommentSection(
     }
 
     if (posting) {
-        PostComposer(areaNoun(area), sending, postError, remember { mentionsOf(app) }, onDismiss = { posting = false }, onSend = ::post)
+        PostComposer(areaNoun(area), sending, postError, remember { mentionsOf(following) }, onDismiss = { posting = false }, onSend = ::post)
     }
     menuFor?.let { (row, root) ->
         val (liked, likes) = likeOf(row)
         CommentMenu(row, liked, likes, onDismiss = { menuFor = null }) { act(row, root, it) }
     }
     replyFor?.let { (row, _) ->
-        ReplyComposer(row.name, sending, replyError, remember(row.rpid) { mentionsOf(app) }, onDismiss = { replyFor = null }, onSend = ::send)
+        ReplyComposer(row.name, sending, replyError, remember(row.rpid) { mentionsOf(following) }, onDismiss = { replyFor = null }, onSend = ::send)
     }
 
     Column(Modifier.padding(horizontal = 16.dp)) {
@@ -302,7 +303,7 @@ internal fun CommentSection(
                     else {
                         if (thread.hidden > 0u) add("再看 5 条 · 剩 ${thread.hidden}" to {
                             scope.launch {
-                                runCatching { app.core.commentThread(area, thread.rootRpid, shown + 5u) }
+                                runCatching { commentsService.commentThread(area, thread.rootRpid, shown + 5u) }
                                     .onSuccess { replaceThread(it) }
                             }
                             Unit
@@ -421,6 +422,6 @@ private fun CommentRow(
 }
 
 /** Who a comment can @: the people the account follows (friends included), by name. */
-private fun mentionsOf(app: RubiApp) = Mentions { app.core.allFollowings().ups.map { FfiMention(it.name, it.mid) } }
+private fun mentionsOf(following: FollowingService) = Mentions { following.allFollowings().ups.map { FfiMention(it.name, it.mid) } }
 
 private val REPLY_LEAD = Regex("""^回复 @[^:：]+[:：]\s*""")

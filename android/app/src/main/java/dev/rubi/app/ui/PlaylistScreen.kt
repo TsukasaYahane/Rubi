@@ -1,5 +1,8 @@
 package dev.rubi.app.ui
 
+import dev.rubi.core.PlaylistsService
+import dev.rubi.core.PlayQueueService
+import android.content.Context
 import dev.rubi.app.playback.LocalMedia
 import android.widget.Toast
 import androidx.compose.foundation.background
@@ -46,7 +49,6 @@ import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
-import dev.rubi.app.RubiApp
 import dev.rubi.app.ui.theme.LocalMetro
 import dev.rubi.app.ui.theme.MetroType
 import dev.rubi.core.FfiPlaylist
@@ -65,11 +67,11 @@ const val DEFAULT_PLAYLIST = 1L
 private const val MAX_NAME = 20
 
 /** Adds `card` to 默认 (the quick long-press add) and says how it went. */
-fun addToPlaylist(app: RubiApp, scope: CoroutineScope, card: FfiVideoCard) {
+fun addToPlaylist(playlists: PlaylistsService, context: Context, scope: CoroutineScope, card: FfiVideoCard) {
     scope.launch {
-        val msg = runCatching { if (offMain { app.core.playlistAdd(DEFAULT_PLAYLIST, card.bvid) }) "已加入「默认」播放列表" else "已在「默认」播放列表中" }
+        val msg = runCatching { if (offMain { playlists.playlistAdd(DEFAULT_PLAYLIST, card.bvid) }) "已加入「默认」播放列表" else "已在「默认」播放列表中" }
             .getOrElse { "加入失败：${it.message}" }
-        Toast.makeText(app, msg, Toast.LENGTH_SHORT).show()
+        Toast.makeText(context, msg, Toast.LENGTH_SHORT).show()
     }
 }
 
@@ -86,7 +88,7 @@ private var shownList = DEFAULT_PLAYLIST
 private enum class ListSheet { None, Create, Rename, Delete }
 
 @Composable
-fun PlaylistScreen(app: RubiApp, nav: Nav) {
+fun PlaylistScreen(playlists: PlaylistsService, playQueue: PlayQueueService, nav: Nav) {
     val c = LocalMetro.current
     val scope = rememberCoroutineScope()
     val listening = LocalMedia.current.listening
@@ -100,13 +102,13 @@ fun PlaylistScreen(app: RubiApp, nav: Nav) {
     val audioPlaying by listening.playing
 
     LaunchedEffect(version, current) {
-        lists = offMain { runCatching { app.core.playlists() }.getOrDefault(emptyList()) }
+        lists = offMain { runCatching { playlists.playlists() }.getOrDefault(emptyList()) }
         // A list deleted elsewhere (or from an older run) falls back to 默认.
         if (lists.isNotEmpty() && lists.none { it.id == current }) current = DEFAULT_PLAYLIST
         shownList = current
         val id = current
-        items = offMain { runCatching { app.core.playlistItems(id) }.getOrDefault(emptyList()) }
-        mode = offMain { runCatching { app.core.playlistMode() }.getOrDefault(FfiPlaylistMode.SEQUENTIAL) }
+        items = offMain { runCatching { playlists.playlistItems(id) }.getOrDefault(emptyList()) }
+        mode = offMain { runCatching { playlists.playlistMode() }.getOrDefault(FfiPlaylistMode.SEQUENTIAL) }
     }
     /** An edit of the stored lists, off the main thread; the page reads them again after. */
     fun change(block: suspend () -> Unit) {
@@ -118,10 +120,10 @@ fun PlaylistScreen(app: RubiApp, nav: Nav) {
     /** The first item of the list shown, for 播放全部 / 听全部. */
     fun first(then: (FfiVideoCard) -> Unit) {
         val id = current
-        scope.launch { offMain { runCatching { app.core.playlistFirst(id) }.getOrNull() }?.let(then) }
+        scope.launch { offMain { runCatching { playQueue.playlistFirst(id) }.getOrNull() }?.let(then) }
     }
     fun play(card: FfiVideoCard) {
-        app.core.playlistPlay(current)
+        playQueue.playlistPlay(current)
         nav.push(Screen.Player(card.bvid, card.title, fromPlaylist = true))
     }
     val list = lists.firstOrNull { it.id == current }
@@ -144,7 +146,7 @@ fun PlaylistScreen(app: RubiApp, nav: Nav) {
                         fontSize = 15.sp,
                         fontWeight = if (m == mode) FontWeight.SemiBold else FontWeight.Normal,
                         color = if (m == mode) c.fg else c.fg2,
-                        modifier = Modifier.heightIn(min = 40.dp).clickable { change { app.core.setPlaylistMode(m) } }.padding(top = 10.dp),
+                        modifier = Modifier.heightIn(min = 40.dp).clickable { change { playlists.setPlaylistMode(m) } }.padding(top = 10.dp),
                     )
                 }
             }
@@ -160,7 +162,7 @@ fun PlaylistScreen(app: RubiApp, nav: Nav) {
                     TextAction("重命名", onClick = { sheet = ListSheet.Rename }, dim = true)
                     TextAction("删除列表", onClick = { sheet = ListSheet.Delete }, dim = true)
                 } else if (items.isNotEmpty()) {
-                    TextAction("清空", onClick = { change { app.core.playlistClear(current) } }, dim = true)
+                    TextAction("清空", onClick = { change { playlists.playlistClear(current) } }, dim = true)
                 }
             }
             hearing?.let { now ->
@@ -188,9 +190,9 @@ fun PlaylistScreen(app: RubiApp, nav: Nav) {
                             VideoRow(card, "${if (hearing?.bvid == card.bvid) "▶ 正在听 · " else ""}${formatDuration(card.durationS)}") { play(card) }
                         }
                         Column(Modifier.width(44.dp), horizontalAlignment = Alignment.CenterHorizontally) {
-                            if (i > 0) RowAction("↑") { change { app.core.playlistMove(current, i.toUInt(), (i - 1).toUInt()) } }
-                            if (i < items.lastIndex) RowAction("↓") { change { app.core.playlistMove(current, i.toUInt(), (i + 1).toUInt()) } }
-                            RowAction("✕") { change { app.core.playlistRemove(current, card.bvid) } }
+                            if (i > 0) RowAction("↑") { change { playlists.playlistMove(current, i.toUInt(), (i - 1).toUInt()) } }
+                            if (i < items.lastIndex) RowAction("↓") { change { playlists.playlistMove(current, i.toUInt(), (i + 1).toUInt()) } }
+                            RowAction("✕") { change { playlists.playlistRemove(current, card.bvid) } }
                         }
                     }
                 }
@@ -206,7 +208,7 @@ fun PlaylistScreen(app: RubiApp, nav: Nav) {
                     onCancel = { sheet = ListSheet.None },
                 ) { name ->
                     val id = current
-                    runCatching { offMain { if (renaming) id.also { app.core.playlistRename(it, name) } else app.core.playlistCreate(name) } }
+                    runCatching { offMain { if (renaming) id.also { playlists.playlistRename(it, name) } else playlists.playlistCreate(name) } }
                         .map { current = it; sheet = ListSheet.None; version++; null }
                         .getOrElse { it.message ?: "操作失败" }
                 }
@@ -216,7 +218,7 @@ fun PlaylistScreen(app: RubiApp, nav: Nav) {
                     Text("删除「${l.name}」？里面的 ${l.count} 个视频会一起移出。", fontSize = 14.sp, color = c.fg)
                     Row(Modifier.padding(top = 10.dp), horizontalArrangement = Arrangement.spacedBy(18.dp), verticalAlignment = Alignment.CenterVertically) {
                         SmallButton("删除", LiveRed) {
-                            change { app.core.playlistDelete(l.id) }
+                            change { playlists.playlistDelete(l.id) }
                             current = DEFAULT_PLAYLIST
                             sheet = ListSheet.None
                         }
@@ -235,7 +237,7 @@ fun PlaylistScreen(app: RubiApp, nav: Nav) {
  */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-fun PlaylistPickSheet(app: RubiApp, bvid: String, onDismiss: () -> Unit) {
+fun PlaylistPickSheet(playlists: PlaylistsService, bvid: String, onDismiss: () -> Unit) {
     val c = LocalMetro.current
     val scope = rememberCoroutineScope()
     var lists by remember { mutableStateOf(emptyList<FfiPlaylist>()) }
@@ -243,8 +245,8 @@ fun PlaylistPickSheet(app: RubiApp, bvid: String, onDismiss: () -> Unit) {
     var version by remember { mutableStateOf(0) }
     var problem by remember { mutableStateOf<String?>(null) }
     LaunchedEffect(version) {
-        lists = offMain { runCatching { app.core.playlists() }.getOrDefault(emptyList()) }
-        holding = offMain { runCatching { app.core.playlistsWith(bvid).toSet() }.getOrDefault(emptySet()) }
+        lists = offMain { runCatching { playlists.playlists() }.getOrDefault(emptyList()) }
+        holding = offMain { runCatching { playlists.playlistsWith(bvid).toSet() }.getOrDefault(emptySet()) }
     }
     ModalBottomSheet(onDismissRequest = onDismiss, containerColor = c.bg2, shape = RectangleShape, dragHandle = null) {
         Column(Modifier.padding(16.dp)) {
@@ -254,7 +256,7 @@ fun PlaylistPickSheet(app: RubiApp, bvid: String, onDismiss: () -> Unit) {
                 Row(
                     Modifier.fillMaxWidth().clickable {
                         scope.launch {
-                            runCatching { offMain { if (on) app.core.playlistRemove(l.id, bvid) else app.core.playlistAdd(l.id, bvid) } }
+                            runCatching { offMain { if (on) playlists.playlistRemove(l.id, bvid) else playlists.playlistAdd(l.id, bvid) } }
                                 .onFailure { problem = "操作失败：${it.message}" }
                             version++
                         }
@@ -271,7 +273,7 @@ fun PlaylistPickSheet(app: RubiApp, bvid: String, onDismiss: () -> Unit) {
                 NameField(name, "新列表名称", Modifier.weight(1f)) { name = it; problem = null }
                 SmallButton("新建并加入", null) {
                     scope.launch {
-                        runCatching { offMain { app.core.playlistAdd(app.core.playlistCreate(name), bvid) } }
+                        runCatching { offMain { playlists.playlistAdd(playlists.playlistCreate(name), bvid) } }
                             .onSuccess { name = ""; version++ }
                             .onFailure { problem = it.message }
                     }

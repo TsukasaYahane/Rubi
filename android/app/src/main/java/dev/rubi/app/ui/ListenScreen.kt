@@ -1,5 +1,7 @@
 package dev.rubi.app.ui
 
+import dev.rubi.core.PlaylistsService
+import dev.rubi.core.ListeningService
 import dev.rubi.app.ui.theme.MetroType
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.platform.LocalDensity
@@ -60,7 +62,6 @@ import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import coil3.compose.AsyncImage
-import dev.rubi.app.RubiApp
 import dev.rubi.app.ui.theme.LocalMetro
 import dev.rubi.core.FfiPlaylistMode
 import dev.rubi.core.FfiVideoCard
@@ -80,7 +81,7 @@ private fun modeLabel(m: FfiPlaylistMode) = when (m) {
  * play list page or from the playback notification. Every shape is square-cornered.
  */
 @Composable
-fun ListenScreen(app: RubiApp, nav: Nav) {
+fun ListenScreen(playlists: PlaylistsService, listeningService: ListeningService, nav: Nav) {
     val c = LocalMetro.current
     val listening = LocalMedia.current.listening
     val now by listening.current
@@ -94,13 +95,13 @@ fun ListenScreen(app: RubiApp, nav: Nav) {
     // While the bar is held: the fraction under the finger, applied on release.
     var dragging by remember { mutableStateOf<Float?>(null) }
 
-    LaunchedEffect(Unit) { mode = offMain { runCatching { app.core.playlistMode() }.getOrDefault(FfiPlaylistMode.SEQUENTIAL) } }
+    LaunchedEffect(Unit) { mode = offMain { runCatching { playlists.playlistMode() }.getOrDefault(FfiPlaylistMode.SEQUENTIAL) } }
     // Read again with each item: following 相关推荐, more are added as it goes.
     LaunchedEffect(now?.bvid) {
-        items = offMain { runCatching { app.core.listeningItems() }.getOrDefault(emptyList()) }
+        items = offMain { runCatching { listeningService.listeningItems() }.getOrDefault(emptyList()) }
         if (related) {
             delay(2_000)
-            items = offMain { runCatching { app.core.listeningItems() }.getOrDefault(items) }
+            items = offMain { runCatching { listeningService.listeningItems() }.getOrDefault(items) }
         }
     }
     LaunchedEffect(Unit) {
@@ -219,7 +220,7 @@ fun ListenScreen(app: RubiApp, nav: Nav) {
                 if (related) Box(Modifier.size(48.dp))
                 else IconButton(48.dp, onClick = {
                     val m = MODE_ORDER[(MODE_ORDER.indexOf(mode) + 1) % MODE_ORDER.size]
-                    if (runCatching { app.core.setPlaylistMode(m) }.isSuccess) mode = m
+                    if (runCatching { playlists.setPlaylistMode(m) }.isSuccess) mode = m
                 }) { Icon(24.dp, c.fg) { modeIcon(it, mode) } }
                 IconButton(52.dp, onClick = { listening.previous() }) { Icon(26.dp, c.fg) { skip(it, forward = false) } }
                 IconButton(72.dp, background = c.accent, onClick = { listening.toggle() }) {

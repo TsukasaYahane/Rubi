@@ -57,6 +57,10 @@ impl<
 {
 }
 
+/// A pull to refresh fetches a source again only after this many seconds, however often the
+/// user pulls.
+const MANUAL_REFRESH_FLOOR_S: u64 = 5;
+
 #[derive(Debug, Clone, Default)]
 pub struct RefreshReport {
     pub fetched: Vec<(SourceKind, usize)>,
@@ -203,10 +207,20 @@ impl<S: AppStore> FeedService<S> {
     /// Fetches from every source that is not cooling down, all at once, and adds what survives
     /// the filters to the candidate pool.
     pub async fn refresh(&self, want_per_source: usize) -> Result<RefreshReport> {
+        let cooldown = Duration::from_secs(self.config.feed_settings().min_source_interval_s);
+        self.fetch(want_per_source, cooldown).await
+    }
+
+    /// [`refresh`](Self::refresh) asked for by the user (pull to refresh): every source is
+    /// fetched again unless it was fetched in the last few seconds.
+    pub async fn refresh_now(&self, want_per_source: usize) -> Result<RefreshReport> {
+        self.fetch(want_per_source, Duration::from_secs(MANUAL_REFRESH_FLOOR_S)).await
+    }
+
+    async fn fetch(&self, want_per_source: usize, cooldown: Duration) -> Result<RefreshReport> {
         let _single = self.refreshing.lock().await;
         self.update_seeds()?;
         let settings = self.config.feed_settings();
-        let cooldown = Duration::from_secs(settings.min_source_interval_s);
         let mut report = RefreshReport::default();
 
         let due: Vec<&Arc<dyn Source>> = {
@@ -456,6 +470,10 @@ impl<S: AppStore> FeedbackSink for FeedService<S> {
 impl<S: AppStore> HomeFeed for FeedService<S> {
     async fn refresh(&self, want_per_source: usize) -> Result<RefreshReport> {
         FeedService::refresh(self, want_per_source).await
+    }
+
+    async fn refresh_now(&self, want_per_source: usize) -> Result<RefreshReport> {
+        FeedService::refresh_now(self, want_per_source).await
     }
 
     fn new_session(&self) {

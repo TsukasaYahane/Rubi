@@ -1,5 +1,7 @@
 package dev.rubi.app.ui
 
+import dev.rubi.core.VideosService
+import dev.rubi.app.data.UiPrefs
 import android.content.ClipboardManager
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
@@ -30,7 +32,6 @@ import androidx.compose.ui.unit.sp
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.compose.LocalLifecycleOwner
 import coil3.compose.AsyncImage
-import dev.rubi.app.RubiApp
 import dev.rubi.app.ui.theme.LocalMetro
 import dev.rubi.core.FfiVideoCard
 import kotlinx.coroutines.Dispatchers
@@ -48,7 +49,7 @@ private const val OWN_LABEL = "Rubi"
  * b23.tv) is offered as a strip along the bottom: 打开 or ✕. The same text is offered once.
  */
 @Composable
-fun ClipboardPrompt(app: RubiApp, nav: Nav, modifier: Modifier) {
+fun ClipboardPrompt(videos: VideosService, uiPrefs: UiPrefs, nav: Nav, modifier: Modifier) {
     val c = LocalMetro.current
     val ctx = LocalContext.current
     val lifecycle = LocalLifecycleOwner.current.lifecycle
@@ -62,9 +63,9 @@ fun ClipboardPrompt(app: RubiApp, nav: Nav, modifier: Modifier) {
             val clip = runCatching { ctx.getSystemService(ClipboardManager::class.java).primaryClip }.getOrNull() ?: return@collect
             if (clip.description?.label == OWN_LABEL || clip.itemCount == 0) return@collect
             val text = clip.getItemAt(0).coerceToText(ctx)?.toString()?.trim().orEmpty()
-            if (text.isEmpty() || text == app.ui.lastClipboard) return@collect
-            app.ui.lastClipboard = text
-            offer = withContext(Dispatchers.IO) { app.core.videoInText(text.take(2_000)) }
+            if (text.isEmpty() || text == uiPrefs.lastClipboard) return@collect
+            uiPrefs.lastClipboard = text
+            offer = withContext(Dispatchers.IO) { videos.videoInText(text.take(2_000)) }
         }
     }
     LaunchedEffect(offer) {

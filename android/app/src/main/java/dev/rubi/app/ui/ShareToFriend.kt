@@ -1,5 +1,7 @@
 package dev.rubi.app.ui
 
+import dev.rubi.core.MessagesService
+import dev.rubi.core.FollowingService
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
@@ -31,7 +33,6 @@ import androidx.compose.ui.graphics.RectangleShape
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
-import dev.rubi.app.RubiApp
 import dev.rubi.app.ui.theme.LocalMetro
 import dev.rubi.app.ui.theme.MetroType
 import dev.rubi.core.RubiException
@@ -48,7 +49,7 @@ private data class Friend(val mid: ULong, val name: String, val from: String)
  */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-fun ShareToFriendSheet(app: RubiApp, bvid: String, title: String, onDismiss: () -> Unit, done: (String) -> Unit) {
+fun ShareToFriendSheet(following: FollowingService, messages: MessagesService, bvid: String, title: String, onDismiss: () -> Unit, done: (String) -> Unit) {
     val c = LocalMetro.current
     val scope = rememberCoroutineScope()
     var people by remember { mutableStateOf<List<Friend>?>(null) }
@@ -59,8 +60,8 @@ fun ShareToFriendSheet(app: RubiApp, bvid: String, title: String, onDismiss: () 
     LaunchedEffect(Unit) {
         people = runCatching {
             withContext(Dispatchers.IO) {
-                val chats = app.core.chatSessions().sessions.map { Friend(it.talkerMid, it.name, "最近聊天") }
-                val follows = runCatching { app.core.allFollowings().ups }.getOrDefault(emptyList())
+                val chats = messages.chatSessions().sessions.map { Friend(it.talkerMid, it.name, "最近聊天") }
+                val follows = runCatching { following.allFollowings().ups }.getOrDefault(emptyList())
                     .filter { f -> chats.none { it.mid == f.mid } }
                     .map { Friend(it.mid, it.name, "关注") }
                 chats + follows
@@ -107,7 +108,7 @@ fun ShareToFriendSheet(app: RubiApp, bvid: String, title: String, onDismiss: () 
                         var sent = 0
                         var asLink = false
                         for (mid in targets) {
-                            runCatching { withContext(Dispatchers.IO) { app.core.shareVideoTo(mid, bvid) } }
+                            runCatching { withContext(Dispatchers.IO) { messages.shareVideoTo(mid, bvid) } }
                                 .onSuccess { card -> sent++; if (!card) asLink = true }
                                 .onFailure { failed = it }
                         }

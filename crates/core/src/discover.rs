@@ -3,7 +3,7 @@
 
 use std::sync::Arc;
 
-use rubi_api::{FeedApi, HotWord, SearchApi, SearchOrder, UserHits};
+use rubi_api::{FeedApi, HotWord, PgcHit, PgcSearch, SearchApi, SearchOrder, UserHits};
 use rubi_model::{FeedbackEvent, Signal, VideoCard, now_secs};
 
 use crate::error::Result;
@@ -68,6 +68,21 @@ impl Discover {
             at: now_secs(),
         })?;
         Ok(found)
+    }
+
+    /// 影视 works the term names (番剧 first, then 电影 / 纪录片 / 电视剧), at most `limit`. A
+    /// kind that fails to load is left out rather than failing the search.
+    pub async fn search_pgc(&self, keyword: &str, limit: usize) -> Result<Vec<PgcHit>> {
+        let (bangumi, film) =
+            tokio::join!(self.search.pgc(keyword, PgcSearch::Bangumi), self.search.pgc(keyword, PgcSearch::Film),);
+        let mut out: Vec<PgcHit> = Vec::new();
+        for h in bangumi.unwrap_or_default().into_iter().chain(film.unwrap_or_default()) {
+            if !out.iter().any(|o| o.season_id == h.season_id) {
+                out.push(h);
+            }
+        }
+        out.truncate(limit);
+        Ok(out)
     }
 
     /// UPs whose name or alias fits, without those the rule table blocks.

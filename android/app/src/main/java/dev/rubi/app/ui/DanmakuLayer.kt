@@ -37,11 +37,11 @@ import coil3.request.SuccessResult
 import coil3.request.allowHardware
 import coil3.toBitmap
 import dev.rubi.app.data.DanmakuDisplay
+import dev.rubi.core.DanmakuService
 import dev.rubi.core.FfiDanmaku
 import dev.rubi.core.FfiDanmakuSet
 import dev.rubi.core.FfiLane
 import dev.rubi.core.FfiPlacement
-import dev.rubi.core.RubiCore
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 
@@ -75,12 +75,12 @@ private fun segments(text: String, emotes: Map<String, String>): List<Seg>? {
 
 /**
  * Draws danmaku over the player. Rust assigns tracks once per video and display setting
- * ([RubiCore.layoutDanmaku], with widths measured here by [Paint]); this only positions what
+ * ([DanmakuService.layoutDanmaku], with widths measured here by [Paint]); this only positions what
  * is on screen at the current time. `[xxx]` tokens of the global emote set are drawn as images.
  */
 @Composable
 fun DanmakuLayer(
-    core: RubiCore,
+    danmaku: DanmakuService,
     set: FfiDanmakuSet,
     display: DanmakuDisplay,
     modifier: Modifier = Modifier,
@@ -116,7 +116,7 @@ fun DanmakuLayer(
                     }?.toFloat() ?: paint.measureText(d.content)
                     px / screen.density
                 }
-                core.layoutDanmaku(shown, widths, widthDp, fontSp, tracks.toUInt(), scrollMs.toUInt())
+                danmaku.layoutDanmaku(shown, widths, widthDp, fontSp, tracks.toUInt(), scrollMs.toUInt())
             }
         }
 

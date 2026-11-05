@@ -2,10 +2,10 @@
 
 use rubi_model::DownloadState;
 
-use crate::{FfiDownload, FfiDownloadState, FfiLocalCopy, FfiVideoCard, Res, RubiCore};
+use crate::{DownloadsService, FfiDownload, FfiDownloadState, FfiLocalCopy, FfiVideoCard, Res};
 
 #[uniffi::export(async_runtime = "tokio")]
-impl RubiCore {
+impl DownloadsService {
     /// Every download, newest first, with live progress.
     pub fn downloads(&self) -> Res<Vec<FfiDownload>> {
         Ok(self

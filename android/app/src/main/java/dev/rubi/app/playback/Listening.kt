@@ -4,9 +4,11 @@ import android.os.SystemClock
 import android.util.Log
 import androidx.compose.runtime.mutableStateOf
 import androidx.media3.common.Player
+import dev.rubi.core.VideosService
+import dev.rubi.core.DiscoverService
+import dev.rubi.core.ListeningService
 import dev.rubi.core.FfiPlayback
 import dev.rubi.core.FfiVideoCard
-import dev.rubi.core.RubiCore
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -37,19 +39,26 @@ interface ListenSource {
     suspend fun audio(bvid: String): FfiPlayback
 }
 
-/** [ListenSource] over the core, resolved on first use (the core may still be opening). */
-class CoreListenSource(private val core: () -> RubiCore) : ListenSource {
-    override suspend fun start(list: Long, bvid: String) = core().listenFrom(list, bvid)
-    override suspend fun startRelated(bvid: String) = core().listenRelated(bvid)
-    override suspend fun jump(bvid: String) = core().listenJump(bvid)
-    override fun next(byUser: Boolean) = core().listenNext(byUser)
-    override fun previous() = core().listenPrevious()
-    override fun stop() = core().listenStop()
-    override fun relatedLeft() = core().relatedLeft()
-    override suspend fun relatedOf(bvid: String) = core().related(bvid).map { it.bvid }
-    override suspend fun append(bvids: List<String>) = core().listenAppend(bvids)
+/**
+ * [ListenSource] over the core's 听视频 queue, 相关推荐 and streams, each resolved on first
+ * use (the core may still be opening).
+ */
+class CoreListenSource(
+    private val queue: () -> ListeningService,
+    private val discover: () -> DiscoverService,
+    private val videos: () -> VideosService,
+) : ListenSource {
+    override suspend fun start(list: Long, bvid: String) = queue().listenFrom(list, bvid)
+    override suspend fun startRelated(bvid: String) = queue().listenRelated(bvid)
+    override suspend fun jump(bvid: String) = queue().listenJump(bvid)
+    override fun next(byUser: Boolean) = queue().listenNext(byUser)
+    override fun previous() = queue().listenPrevious()
+    override fun stop() = queue().listenStop()
+    override fun relatedLeft() = queue().relatedLeft()
+    override suspend fun relatedOf(bvid: String) = discover().related(bvid).map { it.bvid }
+    override suspend fun append(bvids: List<String>) = queue().listenAppend(bvids)
     // Audio streams are the same at any quality; ask for the lowest.
-    override suspend fun audio(bvid: String) = core().playback(bvid, 16u)
+    override suspend fun audio(bvid: String) = videos().playback(bvid, 16u)
 }
 
 /**

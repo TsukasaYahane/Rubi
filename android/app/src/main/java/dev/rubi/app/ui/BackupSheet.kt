@@ -1,5 +1,7 @@
 package dev.rubi.app.ui
 
+import dev.rubi.core.PreferencesService
+import android.content.Context
 import android.net.Uri
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
@@ -24,7 +26,6 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.RectangleShape
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
-import dev.rubi.app.RubiApp
 import dev.rubi.app.ui.theme.LocalMetro
 import dev.rubi.app.ui.theme.MetroType
 import kotlinx.coroutines.Dispatchers
@@ -42,7 +43,7 @@ import java.util.Locale
  */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-fun BackupSheet(app: RubiApp, onDismiss: () -> Unit, onDone: (String) -> Unit) {
+fun BackupSheet(preferences: PreferencesService, context: Context, onDismiss: () -> Unit, onDone: (String) -> Unit) {
     val c = LocalMetro.current
     val scope = rememberCoroutineScope()
     var withHistory by remember { mutableStateOf(false) }
@@ -54,10 +55,10 @@ fun BackupSheet(app: RubiApp, onDismiss: () -> Unit, onDone: (String) -> Unit) {
         scope.launch {
             note = runCatching {
                 withContext(Dispatchers.IO) {
-                    val tmp = File.createTempFile("rubi-export", ".zip", app.cacheDir)
+                    val tmp = File.createTempFile("rubi-export", ".zip", context.cacheDir)
                     try {
-                        app.core.exportTo(tmp.absolutePath, withHistory)
-                        app.contentResolver.openOutputStream(uri)!!.use { out -> tmp.inputStream().use { it.copyTo(out) } }
+                        preferences.exportTo(tmp.absolutePath, withHistory)
+                        context.contentResolver.openOutputStream(uri)!!.use { out -> tmp.inputStream().use { it.copyTo(out) } }
                     } finally {
                         tmp.delete()
                     }
@@ -72,8 +73,8 @@ fun BackupSheet(app: RubiApp, onDismiss: () -> Unit, onDone: (String) -> Unit) {
         scope.launch {
             runCatching {
                 withContext(Dispatchers.IO) {
-                    val tmp = File.createTempFile("rubi-import", ".zip", app.cacheDir)
-                    app.contentResolver.openInputStream(uri)!!.use { input -> tmp.outputStream().use { input.copyTo(it) } }
+                    val tmp = File.createTempFile("rubi-import", ".zip", context.cacheDir)
+                    context.contentResolver.openInputStream(uri)!!.use { input -> tmp.outputStream().use { input.copyTo(it) } }
                     tmp
                 }
             }.onSuccess { pending = it }.onFailure { note = "读取文件失败：${it.message}" }
@@ -112,7 +113,7 @@ fun BackupSheet(app: RubiApp, onDismiss: () -> Unit, onDone: (String) -> Unit) {
                 Row(horizontalArrangement = Arrangement.spacedBy(20.dp), verticalAlignment = Alignment.CenterVertically) {
                     AccentButton("确认导入") {
                         scope.launch {
-                            note = runCatching { withContext(Dispatchers.IO) { app.core.importFrom(file.absolutePath) }; "已导入" }
+                            note = runCatching { withContext(Dispatchers.IO) { preferences.importFrom(file.absolutePath) }; "已导入" }
                                 .getOrElse { "导入失败：${it.message}" }
                             file.delete()
                             pending = null

@@ -56,6 +56,32 @@ pub struct UserHit {
     pub live_room: u64,
 }
 
+/// A 番剧 / 电影 / 纪录片 / 电视剧 the search term names, to show above the videos.
+#[derive(Debug, Clone, Default, PartialEq)]
+pub struct PgcHit {
+    pub season_id: u64,
+    pub title: String,
+    pub cover: String,
+    /// 番剧, 国创, 电影, 纪录片, 电视剧…
+    pub kind: String,
+    /// 会员专享, 独家… (empty when none).
+    pub badge: String,
+    /// Score out of 10 as B站 shows it ("9.7"), empty when unrated.
+    pub score: String,
+    /// 全12话, 更新至第5集…
+    pub index_show: String,
+    pub styles: String,
+}
+
+/// Which 影视 a search looks in.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum PgcSearch {
+    /// 番剧 and 国创.
+    Bangumi,
+    /// 电影, 纪录片, 电视剧 and the like.
+    Film,
+}
+
 /// One page of UPs and whether more follow.
 #[derive(Debug, Clone, Default)]
 pub struct UserHits {
@@ -70,6 +96,8 @@ pub trait SearchApi: Send + Sync {
     async fn users(&self, keyword: &str, page: u32) -> Result<UserHits>;
     /// Trending search words, unfiltered.
     async fn hot_words(&self, limit: u32) -> Result<Vec<HotWord>>;
+    /// 影视 works whose title fits, best match first.
+    async fn pgc(&self, keyword: &str, kind: PgcSearch) -> Result<Vec<PgcHit>>;
 }
 
 pub struct WebSearch {
@@ -167,6 +195,35 @@ pub(crate) fn card_of_search(v: &Value) -> VideoCard {
     }
 }
 
+/// `search/type?search_type=media_bangumi` / `media_ft`.
+pub(crate) fn pgc_hits_of(d: &Value) -> Vec<PgcHit> {
+    d["result"]
+        .as_array()
+        .map(|l| {
+            l.iter()
+                .map(|v| {
+                    let score = v["media_score"]["score"].as_f64().filter(|s| *s > 0.0);
+                    PgcHit {
+                        season_id: u64_of(&v["season_id"]),
+                        title: strip_markup(v["title"].as_str().unwrap_or_default()),
+                        cover: image_of(&v["cover"]),
+                        kind: str_of(&v["season_type_name"]),
+                        badge: v["badges"]
+                            .as_array()
+                            .and_then(|b| b.first())
+                            .map(|b| str_of(&b["text"]))
+                            .unwrap_or_default(),
+                        score: score.map(|s| format!("{s:.1}")).unwrap_or_default(),
+                        index_show: str_of(&v["index_show"]),
+                        styles: str_of(&v["styles"]),
+                    }
+                })
+                .filter(|h| h.season_id > 0)
+                .collect()
+        })
+        .unwrap_or_default()
+}
+
 /// `search/type?search_type=bili_user`.
 pub(crate) fn users_of(d: &Value, page: u32) -> UserHits {
     let users: Vec<UserHit> = d["result"]
@@ -205,6 +262,16 @@ impl SearchApi for WebSearch {
         Ok(users_of(&d, page.max(1)))
     }
 
+    async fn pgc(&self, keyword: &str, kind: PgcSearch) -> Result<Vec<PgcHit>> {
+        let search_type = match kind {
+            PgcSearch::Bangumi => "media_bangumi",
+            PgcSearch::Film => "media_ft",
+        };
+        let p = params!["search_type" => search_type, "keyword" => keyword, "page" => 1];
+        let d = self.http.get_json(SEARCH_TYPE, p, true).await?;
+        Ok(pgc_hits_of(&d))
+    }
+
     async fn hot_words(&self, limit: u32) -> Result<Vec<HotWord>> {
         let words = |list: &Value| -> Vec<HotWord> {
             list.as_array()
@@ -225,6 +292,24 @@ impl SearchApi for WebSearch {
 mod tests {
     use super::*;
     use serde_json::json;
+
+    #[test]
+    fn parses_pgc_hits() {
+        let d = json!({ "result": [
+            { "season_id": 33415, "title": "<em class=\"keyword\">进击的巨人</em> 最终季", "cover": "//i0.hdslb.com/a.jpg",
+              "season_type_name": "番剧", "badges": [{ "text": "会员专享" }], "media_score": { "score": 9.7 },
+              "index_show": "全16话", "styles": "热血/奇幻" },
+            { "season_id": 0, "title": "无效" }
+        ]});
+        let hits = pgc_hits_of(&d);
+        assert_eq!(hits.len(), 1);
+        let h = &hits[0];
+        assert_eq!(
+            (h.title.as_str(), h.badge.as_str(), h.score.as_str(), h.kind.as_str()),
+            ("进击的巨人 最终季", "会员专享", "9.7", "番剧")
+        );
+        assert!(h.cover.starts_with("https:"));
+    }
 
     #[test]
     fn parses_search_result() {

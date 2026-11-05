@@ -1,5 +1,6 @@
 package dev.rubi.app.ui
 
+import dev.rubi.core.FollowingService
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
@@ -33,7 +34,6 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import coil3.compose.AsyncImage
-import dev.rubi.app.RubiApp
 import dev.rubi.app.ui.theme.LocalMetro
 import dev.rubi.core.FfiFollowedUp
 import dev.rubi.core.FfiFollowing
@@ -44,7 +44,7 @@ import dev.rubi.core.FfiFollowings
  * they have been quiet. Searchable; picking one goes back to 关注 showing that UP's posts.
  */
 @Composable
-fun FollowingsScreen(app: RubiApp, nav: Nav, follow: FollowState) {
+fun FollowingsScreen(following: FollowingService, nav: Nav, follow: FollowState) {
     val c = LocalMetro.current
     var all by remember { mutableStateOf<FfiFollowings?>(null) }
     var error by remember { mutableStateOf<Throwable?>(null) }
@@ -52,7 +52,7 @@ fun FollowingsScreen(app: RubiApp, nav: Nav, follow: FollowState) {
     var query by remember { mutableStateOf("") }
     LaunchedEffect(round) {
         error = null
-        runCatching { app.core.allFollowings() }.onSuccess { all = it }.onFailure { error = it }
+        runCatching { following.allFollowings() }.onSuccess { all = it }.onFailure { error = it }
     }
 
     Column(Modifier.fillMaxSize()) {

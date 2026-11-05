@@ -34,6 +34,12 @@ impl Home {
         self.feed.refresh(per_source).await
     }
 
+    /// Fills the pool afresh for a pull to refresh: sources are fetched again even while they
+    /// would otherwise be cooling down.
+    pub async fn refresh_now(&self, per_source: usize) -> Result<RefreshReport> {
+        self.feed.refresh_now(per_source).await
+    }
+
     /// Call before rebuilding the list (pull to refresh) so earlier cards may come back.
     pub fn new_session(&self) {
         self.feed.new_session();

@@ -1,7 +1,13 @@
 package dev.rubi.app.ui
 
+import androidx.compose.runtime.derivedStateOf
+import androidx.compose.ui.unit.Dp
 import kotlinx.coroutines.flow.first
+import androidx.compose.runtime.withFrameNanos
+import androidx.compose.ui.layout.layout
+import androidx.compose.ui.draw.clipToBounds
 import androidx.compose.runtime.snapshotFlow
+import dev.rubi.core.FfiDanmaku
 import dev.rubi.core.FfiResumePoint
 import dev.rubi.core.FfiCommentArea
 import dev.rubi.app.playback.LocalMedia
@@ -32,6 +38,9 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.wrapContentSize
 import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.layout.fillMaxHeight
+import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.lazy.LazyListScope
 import androidx.compose.foundation.lazy.items
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
@@ -61,7 +70,6 @@ import androidx.compose.ui.unit.sp
 import androidx.compose.ui.viewinterop.AndroidView
 import androidx.media3.ui.PlayerView
 import dev.rubi.app.R
-import dev.rubi.app.RubiApp
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.LifecycleEventObserver
 import androidx.lifecycle.compose.LocalLifecycleOwner
@@ -92,7 +100,7 @@ private const val TABS_INDEX = 2
 @OptIn(ExperimentalFoundationApi::class)
 @Composable
 fun PlayerScreen(
-    app: RubiApp,
+    deps: VideoPageDeps,
     nav: Nav,
     bvid: String,
     title: String,
@@ -101,13 +109,29 @@ fun PlayerScreen(
     startMs: Long = 0L,
     episode: ULong? = null,
     episodeCid: ULong = 0uL,
+    normal: Boolean = false,
 ) {
+    val home = deps.home
+    val videosService = deps.videos
+    val danmakuService = deps.danmaku
+    val steinService = deps.stein
+    val comments = deps.comments
+    val discover = deps.discover
+    val following = deps.following
+    val historyService = deps.history
+    val playQueue = deps.playQueue
+    val downloads = deps.downloads
+    val pgc = deps.pgc
+    val seasons = deps.seasons
+    val uiPrefs = deps.ui
+    val settings = deps.settings
+    val appScope = deps.appScope
     val flights = LocalCardFlights.current
     /** Streams at `qn`: a 专区 episode's (if the account may watch it), else the video's. */
     suspend fun streamsAt(qn: UInt, part: ULong?) = when {
-        episode != null -> app.core.pgcPlay(episode, episodeCid, qn)
-        part != null -> app.core.playbackPart(bvid, part, qn)
-        else -> app.core.playback(bvid, qn)
+        episode != null -> pgc.pgcPlay(episode, episodeCid, qn)
+        part != null -> videosService.playbackPart(bvid, part, qn)
+        else -> videosService.playback(bvid, qn)
     }
     val c = LocalMetro.current
     val ctx = LocalContext.current
@@ -116,12 +140,19 @@ fun PlayerScreen(
     var danmaku by remember { mutableStateOf<FfiDanmakuSet?>(null) }
     var error by remember { mutableStateOf<String?>(null) }
     var tab by remember { mutableStateOf(if (focus != null) 1 else 0) }
-    // 推荐 / 评论 switch like any pivot.
-    val tabSlide = rememberPivotSlide(tab)
-    val tabTurns = LocalPageTurns.current
-    var display by remember { mutableStateOf(DanmakuDisplay.load(app.settings)) }
+    var commentsOpened by remember { mutableStateOf(tab == 1) }
+    LaunchedEffect(tab) { if (tab == 1) commentsOpened = true }
+    // Where each tab was scrolled to (item and offset), to return there: in the page, and in
+    // the side pane on a wide screen.
+    val tabAt = remember { arrayOfNulls<Pair<Int, Int>>(2) }
+    val sideAt = remember { arrayOfNulls<Pair<Int, Int>>(2) }
+    var display by remember { mutableStateOf(DanmakuDisplay.load(settings)) }
+    // 画面: how the picture fills the frame (kept), and a pinch zoom on top (this video only).
+    var videoScale by remember { mutableStateOf(VideoScale.entries.getOrElse(uiPrefs.videoScale) { VideoScale.Fit }) }
+    val zoom = remember { VideoZoom() }
     var dmProblem by remember { mutableStateOf<String?>(null) }
-    var dmSheet by remember { mutableStateOf(false) }
+    // 设置 open: both parts on the video page, one of them from fullscreen's two buttons.
+    var settingsSheet by remember { mutableStateOf<SettingsPart?>(null) }
     var detail by remember { mutableStateOf<FfiVideoDetail?>(null) }
     var detailOpen by remember { mutableStateOf(false) }
     var fullscreen by remember { mutableStateOf(false) }
@@ -143,24 +174,27 @@ fun PlayerScreen(
     }
     /** The part the current story node plays; its question waits until that part is loaded. */
     var nodeCid by remember { mutableStateOf<ULong?>(null) }
-    val holdSpeed = remember { PlaybackPrefs.longPressSpeed(app.settings) }
+    val holdSpeed = remember { PlaybackPrefs.longPressSpeed(settings) }
     val inPip by media.pip.active
     // Fullscreen and picture-in-picture both show the video alone.
     val compact = fullscreen || inPip
     val activity = remember(ctx) { ctx.activity() }
-    PlayerPageLifecycle(app)
+    PlayerPageLifecycle(settings)
     val listState = rememberLazyListState()
+    // 宽屏 held sideways: 推荐 / 评论 have a pane (and a scroll) of their own.
+    val sideList = rememberLazyListState()
+    val twoPane = LocalScreenLayout.current.twoPane
     val scope = rememberCoroutineScope()
     // Where each part was left, so going back to one carries on from there.
     val partPositions = remember { mutableStateMapOf<ULong, Long>() }
-    var autoNext by remember { mutableStateOf(app.ui.autoNext) }
+    var autoNext by remember { mutableStateOf(uiPrefs.autoNext) }
     // Playing an offline copy (离线缓存).
     var offline by remember { mutableStateOf(false) }
     // 继续观看: where the user stopped last time, shown for a few seconds; playback starts at 0.
     var resume by remember { mutableStateOf<FfiResumePoint?>(null) }
     LaunchedEffect(bvid) {
         // Opened at a set point (from 听视频) or from the play list: nothing to offer.
-        if (startMs == 0L && !fromPlaylist) resume = app.core.resumePoint(bvid)
+        if (startMs == 0L && !fromPlaylist) resume = videosService.resumePoint(bvid)
     }
 
     /** Switches to part `i` of the video, remembering where the current one was left. */
@@ -171,14 +205,21 @@ fun PlayerScreen(
         partCid = part.cid
     }
 
-    LaunchedEffect(bvid) { detail = runCatching { app.core.videoDetail(bvid) }.getOrNull() }
+    LaunchedEffect(bvid) {
+        detail = runCatching { videosService.videoDetail(bvid) }.getOrNull()
+        // A portrait video the list could not tell about: on to the 竖屏 feed from here.
+        val d = detail
+        if (d != null && d.portrait && Screen.Player(bvid, title, focus, fromPlaylist, startMs, episode, episodeCid, normal).feedable) {
+            nav.replaceTop(Screen.VerticalFeed(VerticalFeedState(videosService, discover, bvid, media.player.get().currentPosition, display.enabled)))
+        }
+    }
 
     // Recording the click is bookkeeping; never let it delay playback.
-    LaunchedEffect(bvid) { runCatching { app.core.record(bvid, FfiSignal.Click) } }
+    LaunchedEffect(bvid) { runCatching { home.record(bvid, FfiSignal.Click) } }
 
-    ReportWatching(app, bvid, cid)
+    ReportWatching(historyService, appScope, bvid, cid)
     // Interactive videos follow their own story instead of the list.
-    ContinuePlaylistOnEnd(app, nav, bvid, enabled = fromPlaylist && stein == null)
+    ContinuePlaylistOnEnd(playQueue, nav, bvid, enabled = fromPlaylist && stein == null)
     // 自动连播: the next part, then the next video of the 合集 (the play list has its own order).
     OnPlaybackEnded(enabled = autoNext && !fromPlaylist && stein == null) {
         val d = detail ?: return@OnPlaybackEnded
@@ -199,10 +240,10 @@ fun PlayerScreen(
         dmProblem = null
         runCatching {
             val t0 = SystemClock.elapsedRealtime()
-            val qn = PlaybackPrefs.preferredQuality(app.settings)
+            val qn = PlaybackPrefs.preferredQuality(settings)
             val part = partCid
             // 离线缓存: a finished copy plays from its files, network or not.
-            val local = if (part == null && episode == null) offMain { runCatching { app.core.downloadLocal(bvid) }.getOrNull() } else null
+            val local = if (part == null && episode == null) offMain { runCatching { downloads.downloadLocal(bvid) }.getOrNull() } else null
             // 卡牌 / 书页: the video starts once the card has finished turning into this page.
             snapshotFlow { flights.flight }.first { it == null }
             if (local != null) {
@@ -215,16 +256,16 @@ fun PlayerScreen(
             if (local == null) media.player.play(pb, title, if (part == null) startMs else partPositions[part] ?: 0L)
             cid = pb.cid
             val durationMs = if (part == null) {
-                val v = app.core.video(bvid).also { video = it }
+                val v = videosService.video(bvid).also { video = it }
                 // Interactive videos start their story here; ordinary videos answer null.
-                stein = runCatching { app.core.steinOpen(bvid, pb.cid) }.getOrNull()
+                stein = runCatching { steinService.steinOpen(bvid, pb.cid) }.getOrNull()
                 steinNode = stein?.node()
                 nodeCid = pb.cid
                 maxOf(v.durationS.toULong() * 1000u, pb.durationMs).toUInt()
             } else {
                 pb.durationMs.toUInt()
             }
-            loadDanmakuNearFirst(app, pb.cid, durationMs, media.player.get().currentPosition) { set, problem ->
+            loadDanmakuNearFirst(danmakuService, pb.cid, durationMs, media.player.get().currentPosition) { set, problem ->
                 if (set != null) danmaku = set
                 dmProblem = problem
             }
@@ -237,7 +278,47 @@ fun PlayerScreen(
     FullscreenMode(fullscreen)
     BackHandler(enabled = fullscreen) { fullscreen = false }
 
-    Column(Modifier.fillMaxSize()) {
+    // 发弹幕, from the fullscreen bar or the one under the video: at the current position.
+    val sendDanmaku: suspend (String, UByte, UInt) -> FfiDanmaku = { text, mode, color ->
+        val id = cid ?: throw IllegalStateException("视频还没加载完")
+        val at = media.player.get().currentPosition.toUInt()
+        danmakuService.sendDanmaku(bvid, id, at, text, mode, color)
+    }
+    // Shown at once: the next segment fetch would not include it yet.
+    val showSent: (FfiDanmaku) -> Unit = { dm ->
+        danmaku = danmaku?.let { it.copy(items = it.items + dm) } ?: FfiDanmakuSet(listOf(dm), emptyList(), emptyList())
+    }
+
+    // 推荐 or 评论, in the page's list on a phone or in the side pane on a wide screen. `toTop`
+    // brings the list back to where the tabs are.
+    // Both stay composed once opened (one item, the other measured but not shown), so switching
+    // shows what was loaded instead of loading it again. 评论 loads the first time it is opened.
+    // `minHeight` keeps the tabs able to sit at the top of the page while the shown tab is still
+    // short (评论 loading the first time), so switching never drops the page back to the details.
+    fun LazyListScope.tabContent(minHeight: Dp, toTop: () -> Unit) {
+        item(key = "tab-content") {
+            Column(Modifier.heightIn(min = minHeight)) {
+                Box(Modifier.shownIf(tab == 0)) { RelatedList(home, discover, nav, bvid) }
+                if (commentsOpened) video?.let { v ->
+                    // Opened from a notice: bring the comment list up under the player.
+                    Box(Modifier.shownIf(tab == 1)) {
+                        CommentSection(
+                            comments, following,
+                            remember(v.aid) { FfiCommentArea(1u, v.aid) },
+                            focus,
+                            onOpenVideo = { link -> nav.openVideo(scope, videosService, link.video, link.title) },
+                            onOpenArticle = { link -> nav.push(Screen.Article(link)) },
+                        ) { toTop() }
+                    }
+                }
+            }
+        }
+    }
+
+    // The video side keeps one slot in every mode (the left pane on a wide screen), so the
+    // PlayerView survives switching to fullscreen.
+    Row(Modifier.fillMaxSize()) {
+    Column(Modifier.weight(if (twoPane && !compact) 0.62f else 1f).fillMaxHeight()) {
         if (!compact) Row(Modifier.fillMaxWidth().padding(start = 4.dp, end = 16.dp), verticalAlignment = Alignment.CenterVertically) {
             Box(Modifier.size(44.dp).clickable { nav.pop() }, contentAlignment = Alignment.Center) { GlyphIcon(Glyph.Back) }
             // Several videos deep: straight back to where the chain started (首页 when it began
@@ -254,14 +335,14 @@ fun PlayerScreen(
                 color = if (display.enabled) c.fg else c.fg2,
                 modifier = Modifier.size(52.dp, 44.dp).wrapContentSize(Alignment.CenterEnd).clickable {
                     display = display.copy(enabled = !display.enabled)
-                    runCatching { DanmakuDisplay.save(app.settings, display) }
+                    runCatching { DanmakuDisplay.save(settings, display) }
                 },
             )
             Text(
                 "设置",
                 style = MetroType.meta.copy(fontSize = 12.sp),
                 color = c.fg,
-                modifier = Modifier.size(44.dp, 44.dp).wrapContentSize(Alignment.CenterEnd).clickable { dmSheet = true },
+                modifier = Modifier.size(44.dp, 44.dp).wrapContentSize(Alignment.CenterEnd).clickable { settingsSheet = SettingsPart.Both },
             )
             playback?.let { p ->
                 Text(
@@ -297,7 +378,9 @@ fun PlayerScreen(
                         media.pip.videoAt(a, r.left.toInt(), r.top.toInt(), r.right.toInt(), r.bottom.toInt())
                     }
                 }
-                .background(Color.Black),
+                .background(Color.Black)
+                .clipToBounds()
+                .pinchToZoom(zoom),
         ) {
             AndroidView(
                 factory = {
@@ -315,14 +398,17 @@ fun PlayerScreen(
                     it.setFullscreenButtonState(fullscreen)
                     // The small window has no room for controls; the system draws its own.
                     it.useController = !inPip
+                    it.resizeMode = videoScale.resizeMode()
                 },
-                modifier = Modifier.fillMaxSize(),
+                modifier = Modifier.fillMaxSize().zoomedBy(zoom),
             )
             val set = danmaku
             // No danmaku in the small window: too little room to read them.
-            if (display.enabled && set != null && !inPip) DanmakuLayer(app.core, set, display, Modifier.fillMaxSize())
+            if (display.enabled && set != null && !inPip) DanmakuLayer(danmakuService, set, display, Modifier.fillMaxSize())
             // Only while the controls are hidden: their buttons must get their own taps.
-            if (fullscreen && !inPip && !controlsVisible) FullscreenGestures(media.player.get(), playerView, holdSpeed, gestures)
+            // Swipes for progress, brightness and volume, and double-tap to pause, in either mode.
+            if (!inPip && !controlsVisible) FullscreenGestures(media.player.get(), playerView, holdSpeed, gestures)
+            if (!inPip) ZoomReset(zoom, Modifier.align(Alignment.TopEnd))
             val session = stein
             val node = steinNode
             if (session != null && node != null && !inPip) {
@@ -368,25 +454,21 @@ fun PlayerScreen(
                     onExit = { fullscreen = false },
                     onToggleDanmaku = {
                         display = display.copy(enabled = !display.enabled)
-                        runCatching { DanmakuDisplay.save(app.settings, display) }
+                        runCatching { DanmakuDisplay.save(settings, display) }
                     },
-                    onSettings = { dmSheet = true },
+                    onSettings = { settingsSheet = SettingsPart.Danmaku },
+                    onPlaySettings = { settingsSheet = SettingsPart.Play },
                     quality = playback?.let(::qualityLabel).orEmpty(),
                     onQuality = { qualitySheet = true },
-                    send = { text, mode, color ->
-                        val id = cid ?: throw IllegalStateException("视频还没加载完")
-                        val at = media.player.get().currentPosition.toUInt()
-                        app.core.sendDanmaku(bvid, id, at, text, mode, color)
-                    },
-                    // Show it at once: the next segment fetch would not include it yet.
-                    onSent = { dm ->
-                        danmaku = danmaku?.let { it.copy(items = it.items + dm) } ?: FfiDanmakuSet(listOf(dm), emptyList(), emptyList())
-                    },
+                    send = sendDanmaku,
+                    onSent = showSent,
                     modifier = Modifier.align(Alignment.TopStart),
                 )
             }
         }
         if (compact) return@Column
+        // 发弹幕 without going fullscreen.
+        DanmakuSendBar(sendDanmaku, showSent)
         danmaku?.jumpMarks?.takeIf { it.isNotEmpty() }?.let { marks ->
             // One line that scrolls sideways, however many marks there are.
             Row(
@@ -409,14 +491,29 @@ fun PlayerScreen(
                 }
             }
         }
+        // The list's own height: the tab shown is never shorter (see tabContent). Read through
+        // derivedStateOf so scrolling does not recompose the page.
+        val viewportPx by remember { derivedStateOf { listState.layoutInfo.viewportSize.height } }
+        val pageHeight = with(LocalDensity.current) { viewportPx.toDp() }
+        // Scrolled into the tabs: each one comes back where it was left (or at its top). Above
+        // them, the page stays where it is.
         fun switchTab(picked: Int) {
             scope.launch {
+                val inTabs = listState.firstVisibleItemIndex >= TABS_INDEX
+                if (inTabs) tabAt[tab] = listState.firstVisibleItemIndex to listState.firstVisibleItemScrollOffset
                 tab = picked
-                if (listState.firstVisibleItemIndex >= TABS_INDEX) listState.scrollToItem(TABS_INDEX)
+                if (inTabs) {
+                    // After the shown tab has been laid out: restored against the other, shorter,
+                    // one the position would be cut short.
+                    repeat(2) { withFrameNanos { } }
+                    val back = tabAt[picked]
+                    if (back != null) listState.scrollToItem(back.first, back.second) else listState.scrollToItem(TABS_INDEX)
+                }
             }
         }
-        // A sideways swipe anywhere on the page moves between 推荐 and 评论.
-        LazyColumn(Modifier.weight(1f).swipeTabs(tab, 2, ::switchTab), state = listState) {
+        // A sideways swipe anywhere on the page moves between 推荐 and 评论 (in their own pane on a
+        // wide screen).
+        LazyColumn(Modifier.weight(1f).then(if (twoPane) Modifier else Modifier.swipeTabs(tab, 2, ::switchTab)), state = listState) {
             item(key = "head") {
                 Column(Modifier.padding(start = 16.dp, end = 16.dp, top = 16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
                     Text(video?.title ?: title, style = MetroType.title, color = c.fg)
@@ -439,7 +536,7 @@ fun PlayerScreen(
                 Column(Modifier.padding(horizontal = 16.dp, vertical = 8.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
                     detail?.let {
                         // 专区 episodes are never cached offline here: only official clients may.
-                        key(it.bvid) { VideoActions(app, nav, it, offline = episode == null) }
+                        key(it.bvid) { VideoActions(deps.actionRow, nav, it, offline = episode == null) }
                         VideoDetailBlock(it, detailOpen) { detailOpen = !detailOpen }
                     }
                     // 分P and 合集 (interactive videos use parts as their story, so not there).
@@ -459,16 +556,16 @@ fun PlayerScreen(
                             }
                             // Played from a list: its 播放队列 stands in for the 合集.
                             if (fromPlaylist) {
-                                QueueBlock(app, bvid) { v -> nav.replaceTop(Screen.Player(v.bvid, v.title, fromPlaylist = true)) }
+                                QueueBlock(playQueue, bvid) { v -> nav.replaceTop(Screen.Player(v.bvid, v.title, fromPlaylist = true)) }
                             } else {
                                 d.season?.let { s ->
-                                    SeasonBlock(s, bvid, subscribe = { SeasonSubscribeButton(app, nav, s.id) }) { ep -> nav.replaceTop(Screen.Player(ep.bvid, ep.title)) }
+                                    SeasonBlock(s, bvid, subscribe = { SeasonSubscribeButton(seasons, nav, s.id) }) { ep -> nav.replaceTop(Screen.Player(ep.bvid, ep.title)) }
                                 }
                             }
                             // A list plays on by its own order.
                             if (!fromPlaylist) AutoNextRow(autoNext) {
                                 autoNext = !autoNext
-                                app.ui.autoNext = autoNext
+                                uiPrefs.autoNext = autoNext
                             }
                         }
                     }
@@ -476,39 +573,49 @@ fun PlayerScreen(
                     danmaku?.removed?.takeIf { it.isNotEmpty() }?.let { Meta("已过滤 · " + it.joinToString(" · ")) }
                 }
             }
-            // Pinned under the player while scrolling. Tapping the active tab returns to the top;
-            // tapping the other one switches and keeps the bar where it is.
-            stickyHeader(key = "tabs") {
-                Box(Modifier.fillMaxWidth().background(c.bg)) {
-                    Pivot(listOf("推荐", "评论"), tab, { picked ->
-                        if (picked == tab) scope.launch { listState.animateScrollToItem(0) } else tabTurns.switch(picked > tab) { switchTab(picked) }
-                    }, MetroType.section)
-                }
-            }
-            if (tab == 0) {
-                item(key = "related") { Box(Modifier.pivotSlide(tabSlide)) { RelatedList(app, nav, bvid) } }
-            } else {
-                video?.let { v ->
-                    item(key = "comments") {
-                        // Opened from a notice: bring the comment list up under the player.
-                        Box(Modifier.pivotSlide(tabSlide)) { CommentSection(
-                            app,
-                            remember(v.aid) { FfiCommentArea(1u, v.aid) },
-                            focus,
-                            onOpenVideo = { link -> nav.openVideo(scope, app, link.video, link.title) },
-                            onOpenArticle = { link -> nav.push(Screen.Article(link)) },
-                        ) { scope.launch { listState.scrollToItem(TABS_INDEX) } } }
+            if (!twoPane) {
+                // Pinned under the player while scrolling. Tapping the active tab returns to the top;
+                // tapping the other one switches and keeps the bar where it is.
+                // 推荐 / 评论 switch at once, without the page motion.
+                stickyHeader(key = "tabs") {
+                    Box(Modifier.fillMaxWidth().background(c.bg)) {
+                        Pivot(listOf("推荐", "评论"), tab, { picked ->
+                            if (picked == tab) scope.launch { listState.animateScrollToItem(0) } else switchTab(picked)
+                        }, MetroType.section)
                     }
                 }
+                tabContent(pageHeight) { scope.launch { listState.scrollToItem(TABS_INDEX) } }
             }
         }
+    }
+    if (twoPane && !compact) {
+        Box(Modifier.fillMaxHeight().width(1.dp).background(c.line))
+        // The side pane's own tabs, each back where it was left.
+        fun switchSide(picked: Int) {
+            scope.launch {
+                sideAt[tab] = sideList.firstVisibleItemIndex to sideList.firstVisibleItemScrollOffset
+                tab = picked
+                repeat(2) { withFrameNanos { } }
+                val back = sideAt[picked] ?: (0 to 0)
+                sideList.scrollToItem(back.first, back.second)
+            }
+        }
+        Column(Modifier.weight(0.38f).fillMaxHeight().swipeTabs(tab, 2, ::switchSide)) {
+            Pivot(listOf("推荐", "评论"), tab, { picked ->
+                if (picked == tab) scope.launch { sideList.animateScrollToItem(0) } else switchSide(picked)
+            }, MetroType.section)
+            LazyColumn(Modifier.weight(1f), state = sideList) {
+                tabContent(0.dp) { scope.launch { sideList.scrollToItem(0) } }
+            }
+        }
+    }
     }
 
     val current = playback
     if (qualitySheet && current != null) {
         QualitySheet(current.accept, current.quality, onDismiss = { qualitySheet = false }, side = fullscreen) { q ->
             qualitySheet = false
-            PlaybackPrefs.setPreferredQuality(app.settings, q.qn)
+            PlaybackPrefs.setPreferredQuality(settings, q.qn)
             scope.launch {
                 // Same video, other streams: carry on from where it was.
                 val at = media.player.get().currentPosition
@@ -519,15 +626,25 @@ fun PlayerScreen(
         }
     }
 
-    if (dmSheet) {
+    settingsSheet?.let { part ->
         DanmakuSettingsSheet(
             display = display,
             onChange = {
                 display = it
-                runCatching { DanmakuDisplay.save(app.settings, it) }
+                runCatching { DanmakuDisplay.save(settings, it) }
             },
-            onDismiss = { dmSheet = false },
+            onDismiss = { settingsSheet = null },
             side = fullscreen,
+            play = if (part == SettingsPart.Danmaku) null else PlayControls(
+                speed = media.player.get().playbackParameters.speed,
+                onSpeed = { media.player.get().setPlaybackSpeed(it) },
+                scale = videoScale,
+                onScale = {
+                    videoScale = it
+                    uiPrefs.videoScale = it.ordinal
+                },
+            ),
+            danmaku = part != SettingsPart.Play,
         )
     }
 }
@@ -536,7 +653,7 @@ fun PlayerScreen(
 private fun qualityLabel(p: FfiPlayback): String = p.accept.firstOrNull { it.qn == p.quality }?.label ?: "${p.quality}"
 
 /** Why a video cannot be opened, in words: deleted, hidden or region-locked videos say so. */
-private fun playbackError(e: Throwable): String {
+internal fun playbackError(e: Throwable): String {
     val msg = e.message.orEmpty()
     return when {
         listOf("62002", "62004", "62012", "-404").any { it in msg } -> "这个视频已失效或不可见"
@@ -545,3 +662,12 @@ private fun playbackError(e: Throwable): String {
         else -> "无法播放：$msg"
     }
 }
+
+/** Measured (so it keeps its state and size ready) but neither shown nor taking room when hidden. */
+private fun Modifier.shownIf(shown: Boolean): Modifier = layout { measurable, constraints ->
+    val placeable = measurable.measure(constraints)
+    if (shown) layout(placeable.width, placeable.height) { placeable.place(0, 0) } else layout(placeable.width, 0) {}
+}
+
+/** Which part of the player's settings is open. */
+private enum class SettingsPart { Both, Play, Danmaku }

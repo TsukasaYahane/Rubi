@@ -1,5 +1,7 @@
 package dev.rubi.app.ui
 
+import dev.rubi.core.HomeService
+import dev.rubi.core.DiscoverService
 import android.os.SystemClock
 import android.util.Log
 import android.content.Intent
@@ -7,6 +9,7 @@ import android.net.Uri
 import android.view.LayoutInflater
 import android.view.View
 import androidx.activity.compose.BackHandler
+import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.heightIn
@@ -56,7 +59,6 @@ import androidx.compose.ui.unit.sp
 import androidx.compose.ui.viewinterop.AndroidView
 import androidx.media3.ui.PlayerView
 import dev.rubi.app.R
-import dev.rubi.app.RubiApp
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.LifecycleEventObserver
 import androidx.lifecycle.compose.LocalLifecycleOwner
@@ -81,22 +83,44 @@ import kotlinx.coroutines.withContext
 
 /** 推荐 under the player: related videos, or the local pool when that fails. */
 @Composable
-internal fun RelatedList(app: RubiApp, nav: Nav, current: String) {
+internal fun RelatedList(home: HomeService, discover: DiscoverService, nav: Nav, current: String) {
     val c = LocalMetro.current
     val cards = remember { mutableStateListOf<FfiVideoCard>() }
     var note by remember { mutableStateOf("") }
     LaunchedEffect(current) {
-        runCatching { app.core.related(current) }
+        runCatching { discover.related(current) }
             .onSuccess { list -> cards.addAll(list.filter { it.bvid != current }) }
             .onFailure { e ->
                 // Fall back to the local pool so the tab is never empty.
                 note = "相关推荐加载失败，显示本地推荐：${e.message}"
-                val page = withContext(Dispatchers.IO) { runCatching { app.core.nextPage(6u) }.getOrDefault(emptyList()) }
+                val page = withContext(Dispatchers.IO) { runCatching { home.nextPage(6u) }.getOrDefault(emptyList()) }
                 cards.addAll(page.filter { it.bvid != current })
             }
     }
-    Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(24.dp)) {
-        if (note.isNotEmpty()) Text(note, color = c.fg2, fontSize = 12.sp)
-        cards.forEach { card -> VideoCardView(card, big = false, onOpen = { nav.push(Screen.Player(card.bvid, card.title)) }) }
+    val layout = LocalScreenLayout.current
+    val open = { card: FfiVideoCard -> nav.push(Screen.Player(card.bvid, card.title)) }
+    when {
+        // The side pane (宽屏 held sideways): small rows, as many as fit.
+        layout.twoPane -> Column(Modifier.padding(vertical = 8.dp)) {
+            if (note.isNotEmpty()) Text(note, color = c.fg2, fontSize = 12.sp, modifier = Modifier.padding(horizontal = 16.dp))
+            cards.forEach { card -> VideoRow(card, "${formatCount(card.views)} 播放 · ${formatAge(card.pubdate)}") { open(card) } }
+        }
+        // A wide page (宽屏 upright): three cards to a row instead of one across the screen.
+        layout.wide -> Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(20.dp)) {
+            if (note.isNotEmpty()) Text(note, color = c.fg2, fontSize = 12.sp)
+            cards.chunked(RELATED_ROW).forEach { row ->
+                Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                    row.forEach { card -> Box(Modifier.weight(1f)) { VideoCardView(card, big = false, onOpen = { open(card) }) } }
+                    repeat(RELATED_ROW - row.size) { Spacer(Modifier.weight(1f)) }
+                }
+            }
+        }
+        else -> Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(24.dp)) {
+            if (note.isNotEmpty()) Text(note, color = c.fg2, fontSize = 12.sp)
+            cards.forEach { card -> VideoCardView(card, big = false, onOpen = { open(card) }) }
+        }
     }
 }
+
+/** Related cards to a row on a wide page held upright. */
+private const val RELATED_ROW = 3

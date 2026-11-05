@@ -1,6 +1,6 @@
 //! 合集 subscriptions.
 
-use crate::{FfiVideoCard, Res, RubiCore};
+use crate::{FfiVideoCard, Res, SeasonsService};
 
 /// A subscribed 合集 under 我的 › 订阅的合集.
 #[derive(Debug, Clone, uniffi::Record)]
@@ -22,7 +22,7 @@ pub struct FfiSeasonPage {
 }
 
 #[uniffi::export(async_runtime = "tokio")]
-impl RubiCore {
+impl SeasonsService {
     pub async fn season_subscriptions(&self) -> Res<Vec<FfiSeasonSub>> {
         Ok(self
             .seasons

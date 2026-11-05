@@ -49,8 +49,11 @@ class DownloadService : Service() {
         val core = (application as RubiApp).core
         val manager = getSystemService(NotificationManager::class.java)
         while (true) {
-            val active = runCatching { core.downloads() }.getOrDefault(emptyList())
+            val active = runCatching { core.downloads().downloads() }.getOrDefault(emptyList())
                 .filter { it.state == FfiDownloadState.RUNNING || it.state == FfiDownloadState.QUEUED }
+            // Copies asked to be saved as MP4 / audio go out as each one finishes.
+            val app = application as RubiApp
+            MediaExport.exportFinished(app.core.downloads(), app.ui, app).forEach(::tell)
             if (active.isEmpty()) break
             val done = active.sumOf { it.doneBytes }
             val total = active.sumOf { maxOf(it.totalBytes, it.doneBytes) }
@@ -80,6 +83,10 @@ class DownloadService : Service() {
             .setOngoing(true)
             .setContentIntent(open)
             .build()
+    }
+
+    private fun tell(message: String) {
+        android.widget.Toast.makeText(this, message, android.widget.Toast.LENGTH_SHORT).show()
     }
 
     private fun channel() {

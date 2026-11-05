@@ -1,5 +1,8 @@
 package dev.rubi.app.ui
 
+import dev.rubi.core.SpaceService
+import dev.rubi.core.FollowingService
+import dev.rubi.core.ActionsService
 import dev.rubi.core.FfiDynamicKind
 import androidx.compose.ui.graphics.Color
 import androidx.compose.foundation.border
@@ -44,7 +47,6 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import coil3.compose.AsyncImage
-import dev.rubi.app.RubiApp
 import dev.rubi.app.ui.theme.LocalMetro
 import dev.rubi.app.ui.theme.MetroType
 import dev.rubi.core.FfiUpOrder
@@ -70,7 +72,7 @@ private const val UP_PAGE_GAP_MS = 1_000L
  * Each tab loads when first opened.
  */
 @Composable
-fun UpScreen(app: RubiApp, nav: Nav, mid: ULong, name: String) {
+fun UpScreen(following: FollowingService, spaceService: SpaceService, actions: ActionsService, nav: Nav, mid: ULong, name: String) {
     val c = LocalMetro.current
     val scope = rememberCoroutineScope()
     var profile by remember { mutableStateOf<FfiUpProfile?>(null) }
@@ -89,33 +91,33 @@ fun UpScreen(app: RubiApp, nav: Nav, mid: ULong, name: String) {
     val uploads = remember(mid) {
         Paged<FfiVideoCard, UInt>(scope, key = { it.bvid }, minGapMs = UP_PAGE_GAP_MS) { pn ->
             val at = pn ?: 1u
-            val got = app.core.upVideos(mid, at, order)
+            val got = spaceService.upVideos(mid, at, order)
             Page(got.items, if (got.hasMore) at + 1u else null, got.hiddenCharging)
         }
     }
 
     val posts = remember(mid) {
         Paged<FfiDynamic, String>(scope, key = { it.id }, minGapMs = UP_PAGE_GAP_MS) { at ->
-            app.core.upDynamics(mid, at).let { Page(it.items, it.next) }
+            following.upDynamics(mid, at).let { Page(it.items, it.next) }
         }
     }
     val articles = remember(mid) {
         Paged<FfiUpArticle, UInt>(scope, key = { it.cvid }, minGapMs = UP_PAGE_GAP_MS) { pn ->
             val at = pn ?: 1u
-            val got = app.core.upArticles(mid, at)
+            val got = spaceService.upArticles(mid, at)
             Page(got.items, if (got.hasMore) at + 1u else null)
         }
     }
     val foundPosts = remember(mid) {
         Paged<FfiDynamic, String>(scope, key = { it.id }, minGapMs = UP_PAGE_GAP_MS) { at ->
             val page = at?.toUIntOrNull() ?: 1u
-            app.core.upSearchPosts(mid, searched, page).let { Page(it.items, it.next) }
+            following.upSearchPosts(mid, searched, page).let { Page(it.items, it.next) }
         }
     }
     val foundVideos = remember(mid) {
         Paged<FfiVideoCard, UInt>(scope, key = { it.bvid }, minGapMs = UP_PAGE_GAP_MS) { pn ->
             val at = pn ?: 1u
-            val got = app.core.upSearchVideos(mid, searched, at)
+            val got = spaceService.upSearchVideos(mid, searched, at)
             Page(got.items, if (got.hasMore) at + 1u else null, got.hiddenCharging)
         }
     }
@@ -134,7 +136,7 @@ fun UpScreen(app: RubiApp, nav: Nav, mid: ULong, name: String) {
         }
     }
 
-    LaunchedEffect(mid, nav.stack.size) { profile = runCatching { app.core.upProfile(mid) }.getOrNull() ?: profile }
+    LaunchedEffect(mid, nav.stack.size) { profile = runCatching { spaceService.upProfile(mid) }.getOrNull() ?: profile }
     LaunchedEffect(uploads, order) { uploads.reset() }
     when {
         searched.isNotEmpty() -> if (found == 1) LoadMoreNearEnd(grid, foundVideos) else LoadMoreNearEnd(grid, foundPosts)
@@ -153,7 +155,7 @@ fun UpScreen(app: RubiApp, nav: Nav, mid: ULong, name: String) {
         val on = !p.followed
         profile = p.copy(followed = on, fans = if (on) p.fans + 1u else p.fans - minOf(p.fans, 1uL))
         scope.launch {
-            runCatching { app.core.followMid(mid, p.name, on) }
+            runCatching { actions.followMid(mid, p.name, on) }
                 .onSuccess { note = if (on) "已关注" else "已取消关注" }
                 .onFailure {
                     profile = p
@@ -171,7 +173,7 @@ fun UpScreen(app: RubiApp, nav: Nav, mid: ULong, name: String) {
             }
         }
         LazyVerticalGrid(
-            columns = GridCells.Fixed(2),
+            columns = GridCells.Fixed(LocalScreenLayout.current.gridColumns(2)),
             state = grid,
             contentPadding = PaddingValues(start = 16.dp, end = 16.dp, bottom = 28.dp),
             horizontalArrangement = Arrangement.spacedBy(12.dp),

@@ -3,7 +3,7 @@
 use rubi_core::{DEFAULT_PLAYLIST, TEMP_PLAYLIST};
 use rubi_model::VideoCard;
 
-use crate::{FfiPlaylistMode, FfiVideoCard, Res, RubiCore};
+use crate::{FfiPlaylistMode, FfiVideoCard, ListeningService, PlayQueueService, PlaylistsService, Res};
 
 fn card(c: Option<VideoCard>) -> Option<FfiVideoCard> {
     c.map(|c| FfiVideoCard::of(&c, None))
@@ -30,7 +30,7 @@ pub struct FfiPlaylist {
 }
 
 #[uniffi::export(async_runtime = "tokio")]
-impl RubiCore {
+impl PlaylistsService {
     /// Every play list, 默认 first.
     pub fn playlists(&self) -> Res<Vec<FfiPlaylist>> {
         Ok(self
@@ -87,25 +87,28 @@ impl RubiCore {
     pub fn set_playlist_mode(&self, mode: FfiPlaylistMode) -> Res<()> {
         Ok(self.playlists.set_mode(mode.into())?)
     }
+}
 
+#[uniffi::export(async_runtime = "tokio")]
+impl PlayQueueService {
     /// Makes `list` the one whose next item follows a video that ends (a video picked from it).
     pub fn playlist_play(&self, list: i64) {
-        self.playlists.play(list);
+        self.play_queue.play(list);
     }
 
     /// Where 播放全部 / 听全部 starts.
     pub fn playlist_first(&self, list: i64) -> Res<Option<FfiVideoCard>> {
-        Ok(card(self.playlists.first(list)?))
+        Ok(card(self.play_queue.first(list)?))
     }
 
     /// What plays after `current` ended on the video page; `None` stops.
     pub fn playlist_next(&self, current: String) -> Res<Option<FfiVideoCard>> {
-        Ok(card(self.playlists.next_after(&current)?))
+        Ok(card(self.play_queue.next_after(&current)?))
     }
 
     /// The list being played, for the 播放队列.
     pub fn playing_list(&self) -> Res<FfiPlayingList> {
-        let (id, name, items) = self.playlists.playing()?;
+        let (id, name, items) = self.play_queue.playing()?;
         Ok(FfiPlayingList {
             id,
             name,
@@ -117,67 +120,69 @@ impl RubiCore {
     /// Plays videos already shown (a 收藏夹, 稍后再看) as a list that is not kept; returns
     /// the first to play.
     pub async fn play_temp(&self, name: String, bvids: Vec<String>) -> Res<Option<FfiVideoCard>> {
-        Ok(card(self.playlists.play_temp(&name, &bvids).await?))
+        Ok(card(self.play_queue.play_temp(&name, &bvids).await?))
     }
 
     /// Adds later pages to the list being played through.
     pub async fn extend_temp(&self, bvids: Vec<String>) {
-        self.playlists.extend_temp(&bvids).await;
+        self.play_queue.extend_temp(&bvids).await;
     }
 
     /// The video page playing the temporary list closed.
     pub fn drop_temp(&self) {
-        self.playlists.drop_temp();
+        self.play_queue.drop_temp();
     }
+}
 
+#[uniffi::export(async_runtime = "tokio")]
+impl ListeningService {
     // ----- 听视频 -----
-
     /// Starts hearing one video, then its 相关推荐 as they are added.
     pub async fn listen_related(&self, bvid: String) -> Res<FfiVideoCard> {
-        Ok(FfiVideoCard::of(&self.playlists.listen_related(&bvid).await?, None))
+        Ok(FfiVideoCard::of(&self.listening.start_related(&bvid).await?, None))
     }
 
     /// When following 相关推荐: how many are left after the one heard; `None` otherwise.
     pub fn related_left(&self) -> Option<u32> {
-        self.playlists.related_left().map(|n| n as u32)
+        self.listening.related_left().map(|n| n as u32)
     }
 
     /// Adds 相关推荐 to come after what is heard.
     pub async fn listen_append(&self, bvids: Vec<String>) {
-        self.playlists.listen_append(&bvids).await;
+        self.listening.append(&bvids).await;
     }
 
     /// What is being heard; `None` when not listening.
     pub fn listening(&self) -> Option<FfiVideoCard> {
-        card(self.playlists.listening())
+        card(self.listening.current())
     }
 
     /// Starts hearing `list` from `bvid`.
     pub async fn listen_from(&self, list: i64, bvid: String) -> Res<FfiVideoCard> {
-        Ok(FfiVideoCard::of(&self.playlists.listen_from(list, &bvid).await?, None))
+        Ok(FfiVideoCard::of(&self.listening.start(list, &bvid).await?, None))
     }
 
     /// Switches to `bvid` picked from the list.
     pub async fn listen_jump(&self, bvid: String) -> Res<FfiVideoCard> {
-        Ok(FfiVideoCard::of(&self.playlists.listen_jump(&bvid).await?, None))
+        Ok(FfiVideoCard::of(&self.listening.jump(&bvid).await?, None))
     }
 
     /// 下一首 (`by_user`) or after an item ended by itself; `None` means listening stopped.
     pub fn listen_next(&self, by_user: bool) -> Res<Option<FfiVideoCard>> {
-        Ok(card(self.playlists.listen_next(by_user)?))
+        Ok(card(self.listening.next(by_user)?))
     }
 
     /// 上一首 (in shuffle, back through what was heard).
     pub fn listen_previous(&self) -> Res<Option<FfiVideoCard>> {
-        Ok(card(self.playlists.listen_previous()?))
+        Ok(card(self.listening.previous()?))
     }
 
     /// The list being heard, for the 听视频 page.
     pub fn listening_items(&self) -> Res<Vec<FfiVideoCard>> {
-        Ok(self.playlists.listening_items()?.iter().map(|c| FfiVideoCard::of(c, None)).collect())
+        Ok(self.listening.items()?.iter().map(|c| FfiVideoCard::of(c, None)).collect())
     }
 
     pub fn listen_stop(&self) {
-        self.playlists.listen_stop();
+        self.listening.stop();
     }
 }

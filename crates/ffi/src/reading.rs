@@ -2,10 +2,10 @@
 
 use rubi_model::ArticleBlock;
 
-use crate::{FfiArticle, FfiArticleBlock, FfiCommentArea, FfiPicture, Res, RubiCore};
+use crate::{FfiArticle, FfiArticleBlock, FfiCommentArea, FfiPicture, ReadingService, Res};
 
 #[uniffi::export(async_runtime = "tokio")]
-impl RubiCore {
+impl ReadingService {
     /// Opens a 专栏 / 图文 link (`opus/ID`, `read/cvN`, or a bare id) for reading.
     pub async fn article(&self, link: String) -> Res<FfiArticle> {
         let a = self.reading.open(&link).await?;

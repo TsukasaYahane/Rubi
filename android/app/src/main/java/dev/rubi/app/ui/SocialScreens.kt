@@ -1,6 +1,15 @@
 package dev.rubi.app.ui
 
+import dev.rubi.core.VideosService
+import dev.rubi.core.PgcService
+import dev.rubi.core.MessagesService
+import dev.rubi.core.EsportsService
+import dev.rubi.core.DiscoverService
+import dev.rubi.core.FfiPgcHit
 import dev.rubi.core.FfiUserHit
+import androidx.compose.runtime.key
+import androidx.compose.foundation.layout.fillMaxHeight
+import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.border
 import kotlinx.coroutines.withContext
 import kotlinx.coroutines.Job
@@ -8,7 +17,6 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.CoroutineScope
 import dev.rubi.core.FfiMatch
-import dev.rubi.core.RubiCore
 import androidx.compose.ui.platform.LocalFocusManager
 import androidx.compose.ui.platform.LocalSoftwareKeyboardController
 import androidx.compose.foundation.lazy.LazyListState
@@ -48,7 +56,6 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
-import dev.rubi.app.RubiApp
 import dev.rubi.app.ui.theme.LocalMetro
 import dev.rubi.app.ui.theme.MetroType
 import dev.rubi.core.FfiChatMessage
@@ -87,7 +94,7 @@ internal fun MetroField(value: String, onChange: (String) -> Unit, hint: String,
  * One search page's state, kept by its [Screen.Search] entry: opening a result disposes the
  * page, and coming back must show the same results at the same place.
  */
-class SearchState(private val core: RubiCore) {
+class SearchState(private val discover: DiscoverService, private val esports: EsportsService) {
     var query by mutableStateOf("")
     var hot by mutableStateOf(emptyList<String>())
     var hotHidden by mutableStateOf(0u)
@@ -100,18 +107,22 @@ class SearchState(private val core: RubiCore) {
     /** UPs whose name or alias fits; 综合 shows the first few. */
     val users = Paged<FfiUserHit, UInt>(key = { it.mid }, minGapMs = 800L) { pn ->
         val at = pn ?: 1u
-        val r = withContext(Dispatchers.IO) { core.searchUsers(searched, at) }
+        val r = withContext(Dispatchers.IO) { discover.searchUsers(searched, at) }
         Page(r.users, if (r.hasMore) at + 1u else null)
     }
     /** Matches the term is about (a team, an event), shown above the videos. */
     var matches by mutableStateOf(emptyList<FfiMatch>())
+    /** 番剧 / 电影 / 纪录片 / 电视剧 the term names, shown first. */
+    var pgc by mutableStateOf(emptyList<FfiPgcHit>())
+    /** 影视 beyond the first three unfolded. */
+    var pgcOpen by mutableStateOf(false)
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Main)
     private var matchJob: Job? = null
 
     /** Result pages; one that comes back empty (all filtered) still moves on, up to B站's 50. */
     val results = Paged<FfiVideoCard, UInt>(key = { it.bvid }) { pn ->
         val at = pn ?: 1u
-        val r = core.search(searched, at)
+        val r = discover.search(searched, at)
         val more = (r.cards.isNotEmpty() || r.hidden > 0u) && at < MAX_SEARCH_PAGES
         Page(r.cards, if (more) at + 1u else null, r.hidden)
     }
@@ -122,16 +133,41 @@ class SearchState(private val core: RubiCore) {
         results.reset()
         users.reset()
         matches = emptyList()
+        pgc = emptyList()
+        pgcOpen = false
         matchJob?.cancel()
         matchJob = scope.launch {
-            matches = runCatching { withContext(Dispatchers.IO) { core.esportsRelated(term) } }.getOrDefault(emptyList())
+            launch { pgc = runCatching { withContext(Dispatchers.IO) { discover.searchPgc(term) } }.getOrDefault(emptyList()) }
+            matches = runCatching { withContext(Dispatchers.IO) { esports.esportsRelated(term) } }.getOrDefault(emptyList())
         }
     }
 }
 
 private const val MAX_SEARCH_PAGES = 50u
 
+/** 影视 works shown before the fold. */
+private const val PGC_SHOWN = 3
+
 private val SEARCH_TABS = listOf("综合", "视频", "UP 主")
+
+/**
+ * A 影视 work found by the search: poster with its 会员 / 付费 mark, title, kind and score, and
+ * the way into its episodes.
+ */
+@Composable
+private fun PgcHitCard(h: FfiPgcHit, onOpen: () -> Unit) {
+    val c = LocalMetro.current
+    Row(Modifier.fillMaxWidth().clickable(onClick = onOpen), horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+        Poster(h.cover, h.badge, 84.dp)
+        Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(4.dp)) {
+            Text(h.title, fontSize = 15.sp, color = c.fg, maxLines = 2, overflow = TextOverflow.Ellipsis)
+            Meta(listOf(h.kind, h.indexShow).filter { it.isNotBlank() }.joinToString(" · "))
+            if (h.score.isNotEmpty()) Text("★ ${h.score}", fontSize = 13.sp, color = Color(0xFFFFB020))
+            if (h.styles.isNotBlank()) Meta(h.styles)
+            Text("进入剧集页 ›", fontSize = 13.sp, color = c.accent, modifier = Modifier.padding(top = 2.dp))
+        }
+    }
+}
 
 /** A found UP: face, name, fans and uploads, 直播中 when on air; tap for their space. */
 @Composable
@@ -155,7 +191,7 @@ private fun UserRow(u: FfiUserHit, nav: Nav) {
 }
 
 @Composable
-fun SearchScreen(app: RubiApp, nav: Nav, state: SearchState) {
+fun SearchScreen(discover: DiscoverService, esportsService: EsportsService, pgcService: PgcService, nav: Nav, state: SearchState) {
     val c = LocalMetro.current
     val scope = rememberCoroutineScope()
     val keyboard = LocalSoftwareKeyboardController.current
@@ -165,7 +201,7 @@ fun SearchScreen(app: RubiApp, nav: Nav, state: SearchState) {
     var matchNote by remember { mutableStateOf<String?>(null) }
 
     LaunchedEffect(Unit) {
-        if (state.hot.isEmpty()) runCatching { app.core.hotWords() }.onSuccess { state.hot = it.words; state.hotHidden = it.hidden }
+        if (state.hot.isEmpty()) runCatching { discover.hotWords() }.onSuccess { state.hot = it.words; state.hotHidden = it.hidden }
     }
     fun search(q: String) {
         // The search is under way: put the keyboard away and leave the field.
@@ -231,14 +267,30 @@ fun SearchScreen(app: RubiApp, nav: Nav, state: SearchState) {
                     }
                 }
             } else {
-                // 综合: matches and the best-fitting UPs above the videos.
+                // 综合: the 影视 work and matches the term names, then the best-fitting UPs, above the videos.
+                if (state.tab == 0 && state.pgc.isNotEmpty()) {
+                    item(key = "pgc") {
+                        Column(Modifier.padding(horizontal = 16.dp, vertical = 6.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                            Meta("影视")
+                            // The first three; the rest fold away behind a line that opens them.
+                            val shown = if (state.pgcOpen) state.pgc else state.pgc.take(PGC_SHOWN)
+                            shown.forEach { h ->
+                                PgcHitCard(h) { nav.push(Screen.PgcSeason(h.seasonId, h.title, PgcSeasonState(pgcService, h.seasonId))) }
+                            }
+                            val more = state.pgc.size - PGC_SHOWN
+                            if (more > 0) {
+                                TextAction(if (state.pgcOpen) "收起 ▴" else "展开其余 $more 部 ▾", onClick = { state.pgcOpen = !state.pgcOpen }, dim = true)
+                            }
+                        }
+                    }
+                }
                 if (state.tab == 0 && state.matches.isNotEmpty()) {
                     item(key = "esports") {
                         Column(Modifier.padding(horizontal = 16.dp, vertical = 6.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
                             Meta("赛事 · ${state.matches.first().season}")
                             state.matches.forEach { m ->
                                 MatchCard(m) {
-                                    openMatch(m, nav, app.core, scope, changed = { n -> state.matches = state.matches.map { if (it.id == n.id) n else it } }, say = { matchNote = it })
+                                    openMatch(m, nav, esportsService, scope, changed = { n -> state.matches = state.matches.map { if (it.id == n.id) n else it } }, say = { matchNote = it })
                                 }
                             }
                             matchNote?.let { Meta(it, color = LiveRed) }
@@ -278,7 +330,7 @@ fun SearchScreen(app: RubiApp, nav: Nav, state: SearchState) {
 }
 
 @Composable
-fun InboxScreen(app: RubiApp, nav: Nav) {
+fun InboxScreen(videos: VideosService, messages: MessagesService, nav: Nav) {
     val c = LocalMetro.current
     val scope = rememberCoroutineScope()
     // Kept in Nav: opening a video disposes this page, and coming back must land on the same tab.
@@ -286,23 +338,28 @@ fun InboxScreen(app: RubiApp, nav: Nav) {
     var notices by remember { mutableStateOf(emptyList<FfiNotice>()) }
     var sessions by remember { mutableStateOf(emptyList<FfiChatSession>()) }
     var note by remember { mutableStateOf("") }
+    // 宽屏 held sideways: 私信 opens the chat beside the list instead of on a page of its own.
+    val twoPane = LocalScreenLayout.current.twoPane
+    var picked by remember { mutableStateOf<FfiChatSession?>(null) }
+    val chatting = if (twoPane && tab == 3) picked ?: sessions.firstOrNull() else null
 
     LaunchedEffect(tab) {
         note = ""
         runCatching {
             if (tab < 3) {
                 val kind = listOf(FfiNoticeKind.REPLY, FfiNoticeKind.AT, FfiNoticeKind.LIKE)[tab]
-                notices = app.core.notices(kind, null).items
+                notices = messages.notices(kind, null).items
                 note = "仅显示真人互动"
             } else {
-                val s = app.core.chatSessions()
+                val s = messages.chatSessions()
                 sessions = s.sessions
                 note = "已过滤营销私信 ${s.hidden} 个（未关注账号的推广卡片）"
             }
         }.onFailure { note = if (it is RubiException.NotLoggedIn) "登录后可查看消息" else "加载失败：${it.message}" }
     }
 
-    Column(Modifier.fillMaxSize()) {
+    Row(Modifier.fillMaxSize()) {
+    Column(Modifier.weight(if (twoPane && tab == 3) 0.36f else 1f).fillMaxHeight()) {
         PageHeader(nav, "消息")
         val turns = LocalPageTurns.current
         Pivot(listOf("回复", "@我", "赞", "私信"), tab, { i -> if (i != tab) turns.switch(i > tab) { tab = i } }, MetroType.section)
@@ -312,7 +369,7 @@ fun InboxScreen(app: RubiApp, nav: Nav) {
                 items(notices, key = { it.id.toString() }) { n ->
                     val video = n.video
                     val open = Modifier.let { m ->
-                        if (video == null) m else m.clickable { nav.openVideo(scope, app, video, n.context, focus = n.comment, onError = { note = it }) }
+                        if (video == null) m else m.clickable { nav.openVideo(scope, videos, video, n.context, focus = n.comment, onError = { note = it }) }
                     }
                     Column(open.fillMaxWidth().padding(horizontal = 16.dp, vertical = 12.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
                         Text(n.from, fontSize = 15.sp, fontWeight = FontWeight.SemiBold, color = c.fg)
@@ -327,7 +384,10 @@ fun InboxScreen(app: RubiApp, nav: Nav) {
             } else {
                 items(sessions, key = { it.talkerMid.toString() }) { s ->
                     Row(
-                        Modifier.fillMaxWidth().clickable { nav.push(Screen.Chat(s.talkerMid, s.name)) }.padding(16.dp, 12.dp),
+                        Modifier.fillMaxWidth()
+                            .then(if (chatting?.talkerMid == s.talkerMid) Modifier.background(c.accent.copy(alpha = 0.12f)) else Modifier)
+                            .clickable { if (twoPane) picked = s else nav.push(Screen.Chat(s.talkerMid, s.name)) }
+                            .padding(16.dp, 12.dp),
                         verticalAlignment = Alignment.Top,
                     ) {
                         Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(4.dp)) {
@@ -342,6 +402,15 @@ fun InboxScreen(app: RubiApp, nav: Nav) {
                 }
             }
         }
+    }
+    if (twoPane && tab == 3) {
+        Box(Modifier.fillMaxHeight().width(1.dp).background(c.line))
+        Box(Modifier.weight(0.64f).fillMaxHeight()) {
+            val s = chatting
+            if (s == null) Meta("没有私信", Modifier.padding(16.dp))
+            else key(s.talkerMid) { ChatScreen(videos, messages, nav, s.talkerMid, s.name, inPane = true) }
+        }
+    }
     }
 }
 
@@ -367,7 +436,7 @@ private fun SharedVideoCard(video: FfiSharedVideo, onOpen: () -> Unit) {
 }
 
 @Composable
-fun ChatScreen(app: RubiApp, nav: Nav, mid: ULong, name: String) {
+fun ChatScreen(videos: VideosService, messagesService: MessagesService, nav: Nav, mid: ULong, name: String, inPane: Boolean = false) {
     val c = LocalMetro.current
     val scope = rememberCoroutineScope()
     var messages by remember { mutableStateOf(emptyList<FfiChatMessage>()) }
@@ -378,10 +447,10 @@ fun ChatScreen(app: RubiApp, nav: Nav, mid: ULong, name: String) {
     LaunchedEffect(messages.size) { if (messages.isNotEmpty()) list.scrollToItem(messages.lastIndex) }
 
     suspend fun reload() {
-        runCatching { app.core.chatMessages(mid) }
+        runCatching { messagesService.chatMessages(mid) }
             .onSuccess { msgs ->
                 messages = msgs
-                msgs.lastOrNull()?.let { runCatching { app.core.markRead(mid, it.seqno) } }
+                msgs.lastOrNull()?.let { runCatching { messagesService.markRead(mid, it.seqno) } }
             }
             .onFailure { note = "加载失败：${it.message}" }
     }
@@ -389,7 +458,9 @@ fun ChatScreen(app: RubiApp, nav: Nav, mid: ULong, name: String) {
 
     Column(Modifier.fillMaxSize()) {
         Row(Modifier.fillMaxWidth().height(56.dp).padding(start = 4.dp, end = 16.dp), verticalAlignment = Alignment.CenterVertically) {
-            Box(Modifier.size(44.dp).clickable { nav.pop() }, contentAlignment = Alignment.Center) { GlyphIcon(Glyph.Back) }
+            // Beside the list (宽屏) there is no page to go back from.
+            if (inPane) Box(Modifier.size(12.dp))
+            else Box(Modifier.size(44.dp).clickable { nav.pop() }, contentAlignment = Alignment.Center) { GlyphIcon(Glyph.Back) }
             Text(name, fontSize = 18.sp, fontWeight = FontWeight.SemiBold, color = c.fg, modifier = Modifier.weight(1f))
             Meta("私信")
         }
@@ -398,7 +469,7 @@ fun ChatScreen(app: RubiApp, nav: Nav, mid: ULong, name: String) {
                 val shared = m.video
                 Column(Modifier.fillMaxWidth(), horizontalAlignment = if (m.fromMe) Alignment.End else Alignment.Start) {
                     if (shared != null && shared.title.isNotEmpty()) {
-                        SharedVideoCard(shared) { nav.openVideo(scope, app, shared.video, shared.title, onError = { note = it }) }
+                        SharedVideoCard(shared) { nav.openVideo(scope, videos, shared.video, shared.title, onError = { note = it }) }
                     } else {
                         EmoteText(
                             m.text,
@@ -409,7 +480,7 @@ fun ChatScreen(app: RubiApp, nav: Nav, mid: ULong, name: String) {
                         )
                         // A BV / av id mentioned in plain text.
                         if (shared != null) {
-                            TextAction("▷ 打开视频", onClick = { nav.openVideo(scope, app, shared.video, "", onError = { note = it }) })
+                            TextAction("▷ 打开视频", onClick = { nav.openVideo(scope, videos, shared.video, "", onError = { note = it }) })
                         }
                     }
                 }
@@ -421,7 +492,7 @@ fun ChatScreen(app: RubiApp, nav: Nav, mid: ULong, name: String) {
             val send = {
                 val text = draft.trim()
                 if (text.isNotEmpty()) scope.launch {
-                    runCatching { app.core.sendMessage(mid, text) }
+                    runCatching { messagesService.sendMessage(mid, text) }
                         .onSuccess { draft = ""; reload() }
                         .onFailure { note = "发送失败：${it.message}" }
                 }

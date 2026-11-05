@@ -1,5 +1,10 @@
 package dev.rubi.app.ui
 
+import dev.rubi.core.VideosService
+import dev.rubi.core.ReadingService
+import dev.rubi.core.FollowingService
+import dev.rubi.core.CommentsService
+import dev.rubi.app.data.UiPrefs
 import android.content.Intent
 import android.net.Uri
 import android.widget.Toast
@@ -39,7 +44,6 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import coil3.compose.AsyncImage
-import dev.rubi.app.RubiApp
 import dev.rubi.app.ui.theme.LocalMetro
 import dev.rubi.core.FfiArticle
 import dev.rubi.core.FfiArticleBlock
@@ -55,7 +59,7 @@ private const val MAX_SP = 22
  * there, opens the original in the browser or copies its link.
  */
 @Composable
-fun ArticleScreen(app: RubiApp, nav: Nav, link: String) {
+fun ArticleScreen(videos: VideosService, commentsService: CommentsService, following: FollowingService, reading: ReadingService, uiPrefs: UiPrefs, nav: Nav, link: String) {
     val c = LocalMetro.current
     val ctx = LocalContext.current
     val clipboard = LocalClipboard.current
@@ -63,17 +67,17 @@ fun ArticleScreen(app: RubiApp, nav: Nav, link: String) {
     var article by remember { mutableStateOf<FfiArticle?>(null) }
     var error by remember { mutableStateOf<Throwable?>(null) }
     var round by remember { mutableStateOf(0) }
-    var size by remember { mutableStateOf(app.ui.articleSp.coerceIn(MIN_SP, MAX_SP)) }
+    var size by remember { mutableStateOf(uiPrefs.articleSp.coerceIn(MIN_SP, MAX_SP)) }
     var viewer by remember { mutableStateOf<Pair<List<FfiPicture>, Int>?>(null) }
     val list = rememberLazyListState()
 
     LaunchedEffect(link, round) {
         error = null
-        runCatching { app.core.article(link) }.onSuccess { article = it }.onFailure { error = it }
+        runCatching { reading.article(link) }.onSuccess { article = it }.onFailure { error = it }
     }
     fun resize(by: Int) {
         size = (size + by).coerceIn(MIN_SP, MAX_SP)
-        app.ui.articleSp = size
+        uiPrefs.articleSp = size
     }
     val pageUrl = article?.let { "https://www.bilibili.com/opus/${it.id}" }
 
@@ -125,10 +129,10 @@ fun ArticleScreen(app: RubiApp, nav: Nav, link: String) {
                 item(key = "comments-title") { SectionTitle("评论") }
                 item(key = "comments") {
                     CommentSection(
-                        app,
+                        commentsService, following,
                         area,
                         focus = null,
-                        onOpenVideo = { v -> nav.openVideo(scope, app, v.video, v.title) },
+                        onOpenVideo = { v -> nav.openVideo(scope, videos, v.video, v.title) },
                         onOpenArticle = { nav.push(Screen.Article(it)) },
                         onFocusShown = {},
                     )

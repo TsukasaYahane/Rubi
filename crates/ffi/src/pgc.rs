@@ -1,6 +1,6 @@
 //! 影视专区: 番剧, 电影, 纪录片, 电视剧.
 
-use crate::{FfiPlayback, Res, RubiCore};
+use crate::{FfiPlayback, PgcService, Res};
 
 #[derive(Debug, Clone, uniffi::Record)]
 pub struct FfiPgcZone {
@@ -89,7 +89,7 @@ pub struct FfiPgcDetail {
 }
 
 #[uniffi::export(async_runtime = "tokio")]
-impl RubiCore {
+impl PgcService {
     /// The four 专区, in order.
     pub fn pgc_zones(&self) -> Vec<FfiPgcZone> {
         rubi_core::PGC_ZONES.iter().map(|(n, t)| FfiPgcZone { name: (*n).to_owned(), season_type: *t }).collect()

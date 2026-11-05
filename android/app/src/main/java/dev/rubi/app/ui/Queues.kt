@@ -36,12 +36,12 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import coil3.compose.AsyncImage
-import dev.rubi.app.RubiApp
 import dev.rubi.app.ui.theme.LocalMetro
+import dev.rubi.core.SeasonsService
+import dev.rubi.core.PlayQueueService
 import dev.rubi.core.FfiPlayingList
 import dev.rubi.core.FfiSeasonSub
 import dev.rubi.core.FfiVideoCard
-import dev.rubi.core.RubiCore
 import dev.rubi.core.RubiException
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -69,11 +69,11 @@ object TempPlay {
      * Starts `bvids` under `name`. `page` reads page n (from 2) of the rest, if any, and says
      * whether more follow; those join the list while it plays.
      */
-    fun start(app: RubiApp, nav: Nav, name: String, bvids: List<String>, page: (suspend (Int) -> Pair<List<String>, Boolean>)? = null) {
+    fun start(playQueue: PlayQueueService, nav: Nav, name: String, bvids: List<String>, page: (suspend (Int) -> Pair<List<String>, Boolean>)? = null) {
         loading?.cancel()
         loading = scope.launch {
             val first = try {
-                app.core.playTemp(name, bvids)
+                playQueue.playTemp(name, bvids)
             } catch (e: CancellationException) {
                 throw e
             } catch (e: Exception) {
@@ -85,25 +85,25 @@ object TempPlay {
             var pn = 2
             while (pn <= MAX_PAGES) {
                 val (more, hasMore) = runCatching { withContext(Dispatchers.IO) { page(pn) } }.getOrNull() ?: break
-                app.core.extendTemp(more)
+                playQueue.extendTemp(more)
                 if (!hasMore || more.isEmpty()) break
                 pn++
             }
         }
     }
 
-    fun stop(core: RubiCore) {
+    fun stop(queue: PlayQueueService) {
         loading?.cancel()
         loading = null
-        core.dropTemp()
+        queue.dropTemp()
     }
 }
 
 /** Drops the temporary list once no video page playing a list is left in the back stack. */
 @Composable
-fun dropTempWhenDone(app: RubiApp, nav: Nav) {
+fun dropTempWhenDone(playQueue: PlayQueueService, nav: Nav) {
     val playingList = nav.stack.any { it is Screen.Player && it.fromPlaylist }
-    LaunchedEffect(playingList) { if (!playingList) TempPlay.stop(app.core) }
+    LaunchedEffect(playingList) { if (!playingList) TempPlay.stop(playQueue) }
 }
 
 /**
@@ -111,12 +111,12 @@ fun dropTempWhenDone(app: RubiApp, nav: Nav) {
  * comes next; unfolded, every video with the playing one marked.
  */
 @Composable
-fun QueueBlock(app: RubiApp, currentBvid: String, onPick: (FfiVideoCard) -> Unit) {
+fun QueueBlock(playQueue: PlayQueueService, currentBvid: String, onPick: (FfiVideoCard) -> Unit) {
     val c = LocalMetro.current
     var queue by remember { mutableStateOf<FfiPlayingList?>(null) }
     var open by remember { mutableStateOf(false) }
     // Read again when unfolded: a 收藏夹 keeps loading while it plays.
-    LaunchedEffect(currentBvid, open) { queue = runCatching { withContext(Dispatchers.IO) { app.core.playingList() } }.getOrNull() }
+    LaunchedEffect(currentBvid, open) { queue = runCatching { withContext(Dispatchers.IO) { playQueue.playingList() } }.getOrNull() }
     val q = queue ?: return
     val all = q.items
     val at = all.indexOfFirst { it.bvid == currentBvid }
@@ -157,12 +157,12 @@ fun QueueBlock(app: RubiApp, currentBvid: String, onPick: (FfiVideoCard) -> Unit
 
 /** 订阅 / 已订阅 on a 合集; guests are sent to log in. */
 @Composable
-fun SeasonSubscribeButton(app: RubiApp, nav: Nav, seasonId: ULong) {
+fun SeasonSubscribeButton(seasons: SeasonsService, nav: Nav, seasonId: ULong) {
     val c = LocalMetro.current
     val scope = rememberCoroutineScope()
     var on by remember(seasonId) { mutableStateOf<Boolean?>(null) }
     var busy by remember { mutableStateOf(false) }
-    LaunchedEffect(seasonId) { on = runCatching { app.core.seasonSubscribed(seasonId) }.getOrDefault(false) }
+    LaunchedEffect(seasonId) { on = runCatching { seasons.seasonSubscribed(seasonId) }.getOrDefault(false) }
     val subscribed = on == true
     Text(
         if (subscribed) "已订阅" else "+ 订阅",
@@ -172,7 +172,7 @@ fun SeasonSubscribeButton(app: RubiApp, nav: Nav, seasonId: ULong) {
             .clickable(enabled = on != null && !busy) {
                 busy = true
                 scope.launch {
-                    runCatching { app.core.subscribeSeason(seasonId, !subscribed) }
+                    runCatching { seasons.subscribeSeason(seasonId, !subscribed) }
                         .onSuccess { on = !subscribed }
                         .onFailure { if (it is RubiException.NotLoggedIn) nav.push(Screen.Login) }
                     busy = false
@@ -194,7 +194,7 @@ class SeasonSubsState {
  * several to unsubscribe together.
  */
 @Composable
-fun SeasonSubsScreen(app: RubiApp, nav: Nav, state: SeasonSubsState) {
+fun SeasonSubsScreen(seasons: SeasonsService, nav: Nav, state: SeasonSubsState) {
     val c = LocalMetro.current
     val scope = rememberCoroutineScope()
     var editing by remember { mutableStateOf(false) }
@@ -202,7 +202,7 @@ fun SeasonSubsScreen(app: RubiApp, nav: Nav, state: SeasonSubsState) {
     var note by remember { mutableStateOf("") }
     var busy by remember { mutableStateOf(false) }
     suspend fun load() {
-        runCatching { app.core.seasonSubscriptions() }.onSuccess { state.subs = it; state.error = null }.onFailure { state.error = it }
+        runCatching { seasons.seasonSubscriptions() }.onSuccess { state.subs = it; state.error = null }.onFailure { state.error = it }
     }
     // Read again on return: opening a season clears its new count.
     LaunchedEffect(Unit) { load() }
@@ -210,12 +210,9 @@ fun SeasonSubsScreen(app: RubiApp, nav: Nav, state: SeasonSubsState) {
     Column(Modifier.fillMaxSize()) {
         Row(verticalAlignment = Alignment.CenterVertically) {
             Column(Modifier.weight(1f)) { PageHeader(nav, "订阅的合集") }
-            Text(
-                if (editing) "完成" else "编辑",
-                fontSize = 14.sp,
-                color = c.fg,
-                modifier = Modifier.clickable { editing = !editing; picked.clear(); note = "" }.padding(horizontal = 16.dp, vertical = 10.dp),
-            )
+            Box(Modifier.padding(end = 12.dp)) {
+                IconAction(if (editing) LineIcon.Clear else LineIcon.Edit, if (editing) "完成" else "编辑") { editing = !editing; picked.clear(); note = "" }
+            }
         }
         val subs = state.subs
         val e = state.error
@@ -234,7 +231,7 @@ fun SeasonSubsScreen(app: RubiApp, nav: Nav, state: SeasonSubsState) {
                 Row(
                     Modifier.fillMaxWidth().clickable {
                         if (editing) { if (on) picked.remove(s.id) else picked.add(s.id) }
-                        else nav.push(Screen.SeasonVideos(s.upMid, s.id, s.title, SeasonVideosState(app.core, s.upMid, s.id)))
+                        else nav.push(Screen.SeasonVideos(s.upMid, s.id, s.title, SeasonVideosState(seasons, s.upMid, s.id)))
                     }.padding(horizontal = 16.dp, vertical = 8.dp),
                     verticalAlignment = Alignment.CenterVertically,
                     horizontalArrangement = Arrangement.spacedBy(12.dp),
@@ -258,13 +255,13 @@ fun SeasonSubsScreen(app: RubiApp, nav: Nav, state: SeasonSubsState) {
             Row(Modifier.padding(horizontal = 16.dp, vertical = 10.dp), verticalAlignment = Alignment.CenterVertically) {
                 Meta("已选 ${picked.size}", Modifier.weight(1f))
                 val some = picked.isNotEmpty() && !busy
-                SmallButton("取消订阅", if (some) LiveRed else c.fg2) {
-                    if (!some) return@SmallButton
+                IconAction(LineIcon.Delete, "取消订阅", if (some) LiveRed else c.fg2) {
+                    if (!some) return@IconAction
                     busy = true
                     val ids = picked.toList()
                     scope.launch {
                         var failed: Throwable? = null
-                        for (id in ids) runCatching { app.core.subscribeSeason(id, false) }.onFailure { failed = it }
+                        for (id in ids) runCatching { seasons.subscribeSeason(id, false) }.onFailure { failed = it }
                         note = failed?.let { "有的没取消成功：${errorText(it)}" } ?: "已取消订阅 ${ids.size} 个合集"
                         picked.clear()
                         load()
@@ -277,26 +274,27 @@ fun SeasonSubsScreen(app: RubiApp, nav: Nav, state: SeasonSubsState) {
 }
 
 /** A subscribed season's videos, kept with the page in the back stack. */
-class SeasonVideosState(core: RubiCore, upMid: ULong, seasonId: ULong) {
+class SeasonVideosState(seasons: SeasonsService, upMid: ULong, seasonId: ULong) {
     val pager = Paged<FfiVideoCard, UInt>(key = { it.bvid }) { pn ->
         val at = pn ?: 1u
-        val page = core.seasonVideos(upMid, seasonId, at)
+        val page = seasons.seasonVideos(upMid, seasonId, at)
         Page(page.cards, if (page.hasMore) at + 1u else null)
     }
     val list = LazyListState()
 }
 
 @Composable
-fun SeasonVideosScreen(app: RubiApp, nav: Nav, seasonId: ULong, title: String, state: SeasonVideosState) {
+fun SeasonVideosScreen(seasons: SeasonsService, nav: Nav, seasonId: ULong, title: String, state: SeasonVideosState) {
     val pager = state.pager
     LoadMoreNearEnd(state.list, pager)
     Column(Modifier.fillMaxSize()) {
         Row(verticalAlignment = Alignment.Bottom) {
             Column(Modifier.weight(1f)) { PageHeader(nav, title) }
-            Box(Modifier.padding(end = 16.dp, bottom = 10.dp)) { SeasonSubscribeButton(app, nav, seasonId) }
+            Box(Modifier.padding(end = 16.dp, bottom = 10.dp)) { SeasonSubscribeButton(seasons, nav, seasonId) }
         }
+        val rowColumns = LocalScreenLayout.current.rowColumns()
         LazyColumn(Modifier.weight(1f), state = state.list, contentPadding = PaddingValues(bottom = 24.dp)) {
-            items(pager.items, key = { it.bvid }) { card ->
+            gridItems(pager.items, rowColumns, key = { it.bvid }) { card ->
                 VideoRow(card, "${formatCount(card.views)} 播放 · ${formatAge(card.pubdate)}") { nav.push(Screen.Player(card.bvid, card.title)) }
             }
             listFooter(nav, pager)

@@ -3,7 +3,7 @@
 use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
 
-use rubi_api::{DynamicApi, FeedApi, LibraryApi};
+use rubi_api::{DynamicApi, FeedApi, FollowingsApi};
 use rubi_model::{Dynamic, FollowedUp, Following as FollowedAccount, FollowingUp, VideoCard, now_secs};
 
 use crate::error::Result;
@@ -38,7 +38,7 @@ pub struct FollowedPage {
 pub struct Following {
     feed: Arc<dyn FeedApi>,
     dynamics: Arc<dyn DynamicApi>,
-    library: Arc<dyn LibraryApi>,
+    followings: Arc<dyn FollowingsApi>,
     rules: Arc<dyn RuleSource>,
     feedback: Arc<dyn FeedbackSink>,
     cards: Arc<CardCache>,
@@ -48,12 +48,12 @@ impl Following {
     pub(crate) fn new(
         feed: Arc<dyn FeedApi>,
         dynamics: Arc<dyn DynamicApi>,
-        library: Arc<dyn LibraryApi>,
+        followings: Arc<dyn FollowingsApi>,
         rules: Arc<dyn RuleSource>,
         feedback: Arc<dyn FeedbackSink>,
         cards: Arc<CardCache>,
     ) -> Self {
-        Self { feed, dynamics, library, rules, feedback, cards }
+        Self { feed, dynamics, followings, rules, feedback, cards }
     }
 
     /// One page of videos from followed UPs, filtered like every list.
@@ -143,7 +143,7 @@ impl Following {
     async fn following_list(&self) -> Result<Vec<FollowedAccount>> {
         let mut all = Vec::new();
         for pn in 1..=MAX_FOLLOWING_PAGES {
-            let (page, total) = self.library.followings(pn).await?;
+            let (page, total) = self.followings.followings(pn).await?;
             let done = page.is_empty();
             all.extend(page);
             if done || all.len() as u32 >= total {

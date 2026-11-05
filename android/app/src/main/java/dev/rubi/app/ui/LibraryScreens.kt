@@ -1,5 +1,16 @@
 package dev.rubi.app.ui
 
+import dev.rubi.core.PlayQueueService
+import dev.rubi.core.FavoritesService
+import androidx.compose.runtime.key
+import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.layout.fillMaxHeight
+import androidx.compose.foundation.lazy.grid.rememberLazyGridState
+import androidx.compose.foundation.lazy.grid.items
+import androidx.compose.foundation.lazy.grid.GridCells
+import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
+import androidx.compose.foundation.lazy.grid.GridItemSpan
+import androidx.compose.foundation.lazy.grid.LazyGridScope
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.border
 import androidx.compose.foundation.layout.Spacer
@@ -40,35 +51,43 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import coil3.compose.AsyncImage
-import dev.rubi.app.RubiApp
 import dev.rubi.app.ui.theme.LocalMetro
 import dev.rubi.app.ui.theme.MetroType
+import dev.rubi.core.WatchLaterService
+import dev.rubi.core.HistoryService
 import dev.rubi.core.FfiFavFolder
 import dev.rubi.core.FfiHistoryItem
 import dev.rubi.core.FfiVideoCard
 import dev.rubi.core.RubiException
-import dev.rubi.core.RubiCore
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.launch
 
 /** Status rows at the end of a list: loading, error with 重试, empty or 没有更多了. */
 internal fun <T, C> LazyListScope.listFooter(nav: Nav, paged: Paged<T, C>) {
-    val error = paged.error
     // No key: a keyed footer is what the list would hold on to while the first page is
     // inserted above it, opening the list at the bottom instead of the newest entry.
-    item {
-        Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
-            when {
-                error != null -> {
-                    Meta(errorText(error))
-                    if (error is RubiException.NotLoggedIn) AccentButton("登录") { nav.push(Screen.Login) }
-                    else TextAction("重试", onClick = paged::retry)
-                }
-                paged.loading -> Meta("加载中…")
-                paged.items.isEmpty() -> Meta("这里还是空的")
-                paged.ended -> Meta("没有更多了")
+    item { PagedStatus(nav, paged) }
+}
+
+/** [listFooter] for a grid: the whole width of the last line. */
+internal fun <T, C> LazyGridScope.gridFooter(nav: Nav, paged: Paged<T, C>) {
+    item(span = { GridItemSpan(maxLineSpan) }) { PagedStatus(nav, paged) }
+}
+
+@Composable
+private fun <T, C> PagedStatus(nav: Nav, paged: Paged<T, C>) {
+    val error = paged.error
+    Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
+        when {
+            error != null -> {
+                Meta(errorText(error))
+                if (error is RubiException.NotLoggedIn) AccentButton("登录") { nav.push(Screen.Login) }
+                else TextAction("重试", onClick = paged::retry)
             }
+            paged.loading -> Meta("加载中…")
+            paged.items.isEmpty() -> Meta("这里还是空的")
+            paged.ended -> Meta("没有更多了")
         }
     }
 }
@@ -77,17 +96,17 @@ internal fun <T, C> LazyListScope.listFooter(nav: Nav, paged: Paged<T, C>) {
  * 历史记录 as loaded and scrolled, kept with the page in the back stack: coming back from a video
  * shows the same list; it is read afresh only when the page is opened again.
  */
-class HistoryState(core: RubiCore) {
+class HistoryState(history: HistoryService) {
     val pager = Paged<FfiHistoryItem, String>(key = { it.card.bvid + it.viewedAt }) { cursor ->
-        val page = core.history(cursor)
+        val page = history.history(cursor)
         Page(page.items, page.cursor)
     }
     val list = LazyListState()
 }
 
 /** 稍后再看, kept the same way as [HistoryState]. */
-class WatchLaterState(core: RubiCore) {
-    val pager = Paged<FfiHistoryItem, Unit>(key = { it.card.bvid }) { Page(core.watchLaterList(), null) }
+class WatchLaterState(watchLater: WatchLaterService) {
+    val pager = Paged<FfiHistoryItem, Unit>(key = { it.card.bvid }) { Page(watchLater.watchLaterList(), null) }
     val list = LazyListState()
 }
 
@@ -99,8 +118,9 @@ fun HistoryScreen(nav: Nav, state: HistoryState) {
 
     Column(Modifier.fillMaxSize()) {
         PageHeader(nav, "历史记录")
+        val rowColumns = LocalScreenLayout.current.rowColumns()
         LazyColumn(Modifier.weight(1f), state = list, contentPadding = PaddingValues(bottom = 24.dp)) {
-            items(pager.items, key = { it.card.bvid + it.viewedAt }) { h ->
+            gridItems(pager.items, rowColumns, key = { it.card.bvid + it.viewedAt }) { h ->
                 val progress = when {
                     h.progressS < 0 -> "已看完"
                     h.progressS == 0L -> "刚开始"
@@ -118,7 +138,7 @@ fun HistoryScreen(nav: Nav, state: HistoryState) {
  * that is not kept. 管理 ticks videos to take out together, or clears the ones watched.
  */
 @Composable
-fun WatchLaterScreen(app: RubiApp, nav: Nav, state: WatchLaterState) {
+fun WatchLaterScreen(watchLater: WatchLaterService, playQueue: PlayQueueService, nav: Nav, state: WatchLaterState) {
     val c = LocalMetro.current
     val scope = rememberCoroutineScope()
     val pager = state.pager
@@ -144,21 +164,19 @@ fun WatchLaterScreen(app: RubiApp, nav: Nav, state: WatchLaterState) {
     Column(Modifier.fillMaxSize()) {
         Row(verticalAlignment = Alignment.CenterVertically) {
             Column(Modifier.weight(1f)) { PageHeader(nav, "稍后再看") }
-            Text(
-                if (managing) "完成" else "管理",
-                fontSize = 14.sp,
-                color = c.fg,
-                modifier = Modifier.clickable { managing = !managing; picked.clear(); note = "" }.padding(horizontal = 16.dp, vertical = 10.dp),
-            )
+            Box(Modifier.padding(end = 12.dp)) {
+                IconAction(if (managing) LineIcon.Clear else LineIcon.Edit, if (managing) "完成" else "管理") { managing = !managing; picked.clear(); note = "" }
+            }
         }
         Meta("${pager.items.size} 个视频" + if (managing) " · 已选 ${picked.size}" else "", Modifier.padding(horizontal = 16.dp))
         if (!managing && pager.items.isNotEmpty()) {
             Box(Modifier.padding(start = 16.dp, top = 8.dp, bottom = 4.dp)) {
-                AccentButton("▶ 全部播放") { TempPlay.start(app, nav, "稍后再看", pager.items.map { it.card.bvid }) }
+                AccentButton("▶ 全部播放") { TempPlay.start(playQueue, nav, "稍后再看", pager.items.map { it.card.bvid }) }
             }
         }
+        val rowColumns = LocalScreenLayout.current.rowColumns()
         LazyColumn(Modifier.weight(1f), state = state.list, contentPadding = PaddingValues(bottom = 24.dp)) {
-            items(pager.items, key = { it.card.bvid }) { h ->
+            gridItems(pager.items, rowColumns, key = { it.card.bvid }) { h ->
                 val card = h.card
                 val progress = when {
                     h.progressS < 0 -> "已看完"
@@ -184,7 +202,7 @@ fun WatchLaterScreen(app: RubiApp, nav: Nav, state: WatchLaterState) {
                             fontSize = 13.sp,
                             color = c.fg2,
                             modifier = Modifier.align(Alignment.BottomEnd).clickable {
-                                act("已移除「${card.title}」", { it.card.aid == card.aid }) { app.core.removeWatchLater(listOf(card.aid)) }
+                                act("已移除「${card.title}」", { it.card.aid == card.aid }) { watchLater.removeWatchLater(listOf(card.aid)) }
                             }.padding(horizontal = 16.dp, vertical = 10.dp),
                         )
                     }
@@ -197,17 +215,17 @@ fun WatchLaterScreen(app: RubiApp, nav: Nav, state: WatchLaterState) {
             Box(Modifier.fillMaxWidth().height(1.dp).background(c.line))
             Row(Modifier.padding(horizontal = 16.dp, vertical = 10.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                 val all = pager.items.isNotEmpty() && picked.size == pager.items.size
-                SmallButton(if (all) "取消全选" else "全选", null) {
+                IconAction(LineIcon.Check, if (all) "取消全选" else "全选") {
                     picked.clear()
                     if (!all) picked.addAll(pager.items.map { it.card.aid })
                 }
-                SmallButton("清除已看完", null) { act("已清除看完的视频", { it.progressS < 0 }) { app.core.clearWatchedLater() } }
+                IconAction(LineIcon.Clear, "清除已看完") { act("已清除看完的视频", { it.progressS < 0 }) { watchLater.clearWatchedLater() } }
                 Spacer(Modifier.weight(1f))
                 val some = picked.isNotEmpty() && !busy
-                SmallButton("删除 ${picked.size}", if (some) LiveRed else c.fg2) {
+                IconAction(LineIcon.Delete, "删除 ${picked.size}", if (some) LiveRed else c.fg2) {
                     if (some) {
                         val aids = picked.toList()
-                        act("已删除 ${aids.size} 个视频", { it.card.aid in aids }) { app.core.removeWatchLater(aids) }
+                        act("已删除 ${aids.size} 个视频", { it.card.aid in aids }) { watchLater.removeWatchLater(aids) }
                     }
                 }
             }
@@ -216,15 +234,20 @@ fun WatchLaterScreen(app: RubiApp, nav: Nav, state: WatchLaterState) {
 }
 
 @Composable
-fun FavFoldersScreen(app: RubiApp, nav: Nav) {
+fun FavFoldersScreen(favorites: FavoritesService, playQueue: PlayQueueService, nav: Nav) {
     val c = LocalMetro.current
     val scope = rememberCoroutineScope()
-    val pager = remember { Paged<FfiFavFolder, Unit>(scope, key = { it.id }) { Page(app.core.myFavFolders(), null) } }
+    val pager = remember { Paged<FfiFavFolder, Unit>(scope, key = { it.id }) { Page(favorites.myFavFolders(), null) } }
     LaunchedEffect(Unit) { pager.more() }
     // The folder being edited (null id: a new one), or null with the panel closed.
     var editing by remember { mutableStateOf<FolderDraft?>(null) }
+    // 宽屏 held sideways: the folder opens beside the list instead of on a page of its own.
+    val twoPane = LocalScreenLayout.current.twoPane
+    var picked by remember { mutableStateOf<FfiFavFolder?>(null) }
+    val open = if (twoPane) picked ?: pager.items.firstOrNull() else null
     Box(Modifier.fillMaxSize()) {
-        Column(Modifier.fillMaxSize()) {
+        Row(Modifier.fillMaxSize()) {
+        Column(Modifier.weight(if (twoPane) 0.3f else 1f).fillMaxHeight()) {
             PageHeader(nav, "收藏夹")
             Row(Modifier.padding(horizontal = 16.dp, vertical = 6.dp)) {
                 SmallButton("+ 新建收藏夹", c.accent) { editing = FolderDraft(null, "", "", false, false) }
@@ -232,7 +255,9 @@ fun FavFoldersScreen(app: RubiApp, nav: Nav) {
             LazyColumn(Modifier.weight(1f), contentPadding = PaddingValues(bottom = 24.dp)) {
                 items(pager.items, key = { it.id.toString() }) { f ->
                     Row(
-                        Modifier.fillMaxWidth().heightIn(min = 64.dp).clickable { nav.push(Screen.FavFolder(f.id, f.title)) }
+                        Modifier.fillMaxWidth().heightIn(min = 64.dp)
+                            .then(if (open?.id == f.id) Modifier.background(c.accent.copy(alpha = 0.12f)) else Modifier)
+                            .clickable { if (twoPane) picked = f else nav.push(Screen.FavFolder(f.id, f.title)) }
                             .padding(horizontal = 16.dp, vertical = 10.dp),
                         verticalAlignment = Alignment.CenterVertically,
                     ) {
@@ -240,20 +265,27 @@ fun FavFoldersScreen(app: RubiApp, nav: Nav) {
                             Text(f.title, style = MetroType.section, color = c.fg, maxLines = 1, overflow = TextOverflow.Ellipsis)
                             Meta("${f.count} 个视频 · ${if (f.private) "私密" else "公开"}${if (f.default) " · 默认" else ""}")
                         }
-                        TextAction("编辑", onClick = {
+                        IconAction(LineIcon.Edit, "编辑", c.fg2, onClick = {
                             val draft = FolderDraft(f.id, f.title, "", f.private, f.default)
                             editing = draft
                             // The list has no 简介; fetch it into the open panel.
                             scope.launch {
-                                runCatching { app.core.favFolderIntro(f.id) }.onSuccess { intro ->
+                                runCatching { favorites.favFolderIntro(f.id) }.onSuccess { intro ->
                                     if (editing?.id == f.id && editing?.intro.isNullOrEmpty()) editing = editing?.copy(intro = intro)
                                 }
                             }
-                        }, dim = true)
+                        })
                     }
                 }
                 listFooter(nav, pager)
             }
+        }
+        if (open != null) {
+            Box(Modifier.fillMaxHeight().width(1.dp).background(c.line))
+            Box(Modifier.weight(0.7f).fillMaxHeight()) {
+                key(open.id) { FavFolderScreen(favorites, playQueue, nav, open.id, open.title, inPane = true) }
+            }
+        }
         }
         editing?.let { d ->
             FolderPanel(
@@ -264,14 +296,14 @@ fun FavFoldersScreen(app: RubiApp, nav: Nav) {
                     scope.launch {
                         runCatching {
                             val id = d.id
-                            if (id == null) app.core.createFavFolder(d.title, d.intro, d.private) else app.core.editFavFolder(id, d.title, d.intro, d.private)
+                            if (id == null) favorites.createFavFolder(d.title, d.intro, d.private) else favorites.editFavFolder(id, d.title, d.intro, d.private)
                         }.onSuccess { editing = null; pager.reset() }.onFailure { done(writeError(it)) }
                     }
                 },
                 onDelete = { done ->
                     val id = d.id ?: return@FolderPanel
                     scope.launch {
-                        runCatching { app.core.deleteFavFolder(id) }.onSuccess { editing = null; pager.reset() }.onFailure { done(writeError(it)) }
+                        runCatching { favorites.deleteFavFolder(id) }.onSuccess { editing = null; pager.reset() }.onFailure { done(writeError(it)) }
                     }
                 },
             )
@@ -321,17 +353,17 @@ private fun androidx.compose.foundation.layout.BoxScope.FolderPanel(
 }
 
 @Composable
-fun FavFolderScreen(app: RubiApp, nav: Nav, id: ULong, title: String) {
+fun FavFolderScreen(favorites: FavoritesService, playQueue: PlayQueueService, nav: Nav, id: ULong, title: String, inPane: Boolean = false) {
     val c = LocalMetro.current
     val scope = rememberCoroutineScope()
     val pager = remember {
         Paged<FfiVideoCard, Int>(scope, key = { it.bvid.ifEmpty { it.aid.toString() } }) { pn ->
             val at = pn ?: 1
-            val page = app.core.favItems(id, at.toUInt())
+            val page = favorites.favItems(id, at.toUInt())
             Page(page.items, if (page.hasMore && page.items.isNotEmpty()) at + 1 else null)
         }
     }
-    val list = rememberLazyListState()
+    val list = rememberLazyGridState()
     LoadMoreNearEnd(list, pager)
     // 编辑: tick videos, then take them out or move / copy them to another folder.
     var editing by remember { mutableStateOf(false) }
@@ -358,13 +390,14 @@ fun FavFolderScreen(app: RubiApp, nav: Nav, id: ULong, title: String) {
     Box(Modifier.fillMaxSize()) {
         Column(Modifier.fillMaxSize()) {
             Row(verticalAlignment = Alignment.CenterVertically) {
-                Column(Modifier.weight(1f)) { PageHeader(nav, title) }
-                Text(
-                    if (editing) "完成" else "编辑",
-                    fontSize = 14.sp,
-                    color = c.fg,
-                    modifier = Modifier.clickable { editing = !editing; picked.clear(); note = "" }.padding(horizontal = 16.dp, vertical = 10.dp),
-                )
+                Column(Modifier.weight(1f)) {
+                    // Beside the folder list (宽屏) there is no page to go back from.
+                    if (inPane) Text(title, style = MetroType.pivot, color = c.fg, maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.padding(start = 16.dp, top = 8.dp))
+                    else PageHeader(nav, title)
+                }
+                Box(Modifier.padding(end = 12.dp)) {
+                    IconAction(if (editing) LineIcon.Clear else LineIcon.Edit, if (editing) "完成" else "编辑") { editing = !editing; picked.clear(); note = "" }
+                }
             }
             Meta(
                 "${pager.items.size} 个视频" + if (editing) " · 已选 ${picked.size}" else "",
@@ -374,8 +407,8 @@ fun FavFolderScreen(app: RubiApp, nav: Nav, id: ULong, title: String) {
                 Box(Modifier.padding(start = 16.dp, top = 8.dp, bottom = 4.dp)) {
                     // The whole folder as a list that is not kept; later pages join as they load.
                     AccentButton("▶ 一键播放") {
-                        TempPlay.start(app, nav, title, pager.items.map { it.bvid }) { pn ->
-                            val page = app.core.favItems(id, pn.toUInt())
+                        TempPlay.start(playQueue, nav, title, pager.items.map { it.bvid }) { pn ->
+                            val page = favorites.favItems(id, pn.toUInt())
                             page.items.map { it.bvid } to page.hasMore
                         }
                     }
@@ -390,7 +423,13 @@ fun FavFolderScreen(app: RubiApp, nav: Nav, id: ULong, title: String) {
                     }, dim = true)
                 }
             }
-            LazyColumn(Modifier.weight(1f), state = list, contentPadding = PaddingValues(bottom = 24.dp)) {
+            // Two columns on a wide screen.
+            LazyVerticalGrid(
+                columns = GridCells.Fixed(LocalScreenLayout.current.rowColumns()),
+                modifier = Modifier.weight(1f),
+                state = list,
+                contentPadding = PaddingValues(bottom = 24.dp),
+            ) {
                 items(pager.items, key = { it.bvid.ifEmpty { it.aid.toString() } }) { card ->
                     if (editing) {
                         val on = card.aid in picked
@@ -409,29 +448,29 @@ fun FavFolderScreen(app: RubiApp, nav: Nav, id: ULong, title: String) {
                         VideoRow(card, "${formatCount(card.views)} 播放 · ${formatAge(card.pubdate)}") { nav.push(Screen.Player(card.bvid, card.title)) }
                     }
                 }
-                listFooter(nav, pager)
+                gridFooter(nav, pager)
             }
             if (note.isNotEmpty()) Meta(note, Modifier.padding(horizontal = 16.dp, vertical = 4.dp), color = c.accent)
             if (editing) {
                 Box(Modifier.fillMaxWidth().height(1.dp).background(c.line))
                 Row(Modifier.padding(horizontal = 16.dp, vertical = 10.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                     val some = picked.isNotEmpty() && !busy
-                    SmallButton("移出收藏夹", if (some) LiveRed else c.fg2) {
+                    IconAction(LineIcon.Delete, "移出收藏夹", if (some) LiveRed else c.fg2) {
                         if (some) {
                             val aids = picked.toList()
-                            act("已移出 ${aids.size} 个视频") { app.core.removeFromFavFolder(id, aids) }
+                            act("已移出 ${aids.size} 个视频") { favorites.removeFromFavFolder(id, aids) }
                         }
                     }
-                    SmallButton("移动到…", null) { if (some) target = false }
-                    SmallButton("复制到…", null) { if (some) target = true }
+                    IconAction(LineIcon.Move, "移动到…", if (some) c.fg else c.fg2) { if (some) target = false }
+                    IconAction(LineIcon.Copy, "复制到…", if (some) c.fg else c.fg2) { if (some) target = true }
                 }
             }
         }
         target?.let { keep ->
-            FolderPicker(app, exclude = id, title = "${if (keep) "复制" else "移动"} ${picked.size} 个视频到", onDismiss = { target = null }) { to ->
+            FolderPicker(favorites, exclude = id, title = "${if (keep) "复制" else "移动"} ${picked.size} 个视频到", onDismiss = { target = null }) { to ->
                 target = null
                 val aids = picked.toList()
-                act("已${if (keep) "复制" else "移动"} ${aids.size} 个视频到「${to.title}」") { app.core.transferFav(id, to.id, aids, keep) }
+                act("已${if (keep) "复制" else "移动"} ${aids.size} 个视频到「${to.title}」") { favorites.transferFav(id, to.id, aids, keep) }
             }
         }
     }
@@ -440,7 +479,7 @@ fun FavFolderScreen(app: RubiApp, nav: Nav, id: ULong, title: String) {
 /** The user's other folders, to move or copy videos into. */
 @Composable
 private fun androidx.compose.foundation.layout.BoxScope.FolderPicker(
-    app: RubiApp,
+    favorites: FavoritesService,
     exclude: ULong,
     title: String,
     onDismiss: () -> Unit,
@@ -448,7 +487,7 @@ private fun androidx.compose.foundation.layout.BoxScope.FolderPicker(
 ) {
     val c = LocalMetro.current
     var folders by remember { mutableStateOf<List<FfiFavFolder>?>(null) }
-    LaunchedEffect(Unit) { folders = runCatching { app.core.myFavFolders() }.getOrDefault(emptyList()).filter { it.id != exclude } }
+    LaunchedEffect(Unit) { folders = runCatching { favorites.myFavFolders() }.getOrDefault(emptyList()).filter { it.id != exclude } }
     BottomPanel {
         Text(title, fontSize = 14.sp, color = c.fg)
         val list = folders
@@ -479,7 +518,8 @@ internal fun VideoRow(card: FfiVideoCard, meta: String, onClick: () -> Unit) {
         horizontalArrangement = Arrangement.spacedBy(12.dp),
     ) {
         Box(Modifier.size(width = 136.dp, height = 76.dp).background(c.bg2)) {
-            AsyncImage(model = card.cover, contentDescription = null, contentScale = ContentScale.Crop, modifier = Modifier.fillMaxSize())
+            VideoCover(card.cover, card.portrait, Modifier.fillMaxSize())
+            ProbeLine(card.bvid, Modifier.align(Alignment.BottomStart))
             if (card.durationS > 0u) {
                 Text(
                     formatDuration(card.durationS),

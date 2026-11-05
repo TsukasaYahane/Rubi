@@ -1,5 +1,6 @@
 package dev.rubi.app.ui
 
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
@@ -26,14 +27,30 @@ import dev.rubi.app.data.DanmakuDisplay
 import dev.rubi.app.ui.theme.LocalMetro
 import dev.rubi.app.ui.theme.MetroType
 
-/** The player's 弹幕设置 sheet: changes apply immediately and are saved by the caller. */
+/**
+ * The player's settings: 播放设置 (when `play` is given) and 弹幕设置 (unless `danmaku` is off).
+ * The video page shows both under 设置; fullscreen has a button for each. Changes apply at once
+ * and are saved by the caller.
+ */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-fun DanmakuSettingsSheet(display: DanmakuDisplay, onChange: (DanmakuDisplay) -> Unit, onDismiss: () -> Unit, side: Boolean = false) {
+fun DanmakuSettingsSheet(
+    display: DanmakuDisplay,
+    onChange: (DanmakuDisplay) -> Unit,
+    onDismiss: () -> Unit,
+    side: Boolean = false,
+    play: PlayControls? = null,
+    danmaku: Boolean = true,
+) {
     val c = LocalMetro.current
     PlayerSheet(side, onDismiss) {
         Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
-            Text("弹幕设置", style = MetroType.section, color = c.fg)
+            play?.let { PlaySettings(it) }
+            if (!danmaku) {
+                Box(Modifier.padding(bottom = 8.dp))
+                return@Column
+            }
+            Text("弹幕设置", style = MetroType.section, color = c.fg, modifier = Modifier.padding(top = if (play != null) 10.dp else 0.dp))
 
             Choice(
                 "显示区域",
@@ -62,6 +79,31 @@ fun DanmakuSettingsSheet(display: DanmakuDisplay, onChange: (DanmakuDisplay) -> 
 }
 
 /** A row of mutually exclusive text options; the selected one is heavier. */
+/** 倍速 offered in 播放设置. */
+private val SPEEDS = listOf("0.5" to 0.5f, "0.75" to 0.75f, "1.0" to 1f, "1.25" to 1.25f, "1.5" to 1.5f, "2.0" to 2f)
+
+/** 播放设置: the speed and how the picture fills its frame, with what changes them. */
+class PlayControls(
+    val speed: Float,
+    val onSpeed: (Float) -> Unit,
+    val scale: VideoScale,
+    val onScale: (VideoScale) -> Unit,
+)
+
+/** 倍速 and 画面比例 (适应 / 拉伸 / 填充); pinching the picture zooms it further. */
+@Composable
+private fun PlaySettings(play: PlayControls) {
+    val c = LocalMetro.current
+    Text("播放设置", style = MetroType.section, color = c.fg)
+    Choice("倍速", SPEEDS, SPEEDS.minBy { kotlin.math.abs(it.second - play.speed) }.second, play.onSpeed)
+    Choice(
+        "画面比例",
+        VideoScale.entries.map { it.label to it.ordinal.toFloat() },
+        play.scale.ordinal.toFloat(),
+    ) { play.onScale(VideoScale.entries[it.toInt()]) }
+    Meta("双指可自由缩放、拖动画面，点「复原」恢复")
+}
+
 @Composable
 private fun Choice(label: String, options: List<Pair<String, Float>>, value: Float, onPick: (Float) -> Unit) {
     val c = LocalMetro.current

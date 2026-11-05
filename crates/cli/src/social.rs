@@ -102,7 +102,7 @@ pub async fn run(app: &Services, cmd: &str, args: &[String]) -> Res<bool> {
             }
         }
         "history" => {
-            let (items, _) = app.library.history(None).await?;
+            let (items, _) = app.history.page(None).await?;
             for h in items {
                 let p = if h.progress_s < 0 { "看完".to_string() } else { format!("{}s", h.progress_s) };
                 println!("{:<8} {}  [{}]", p, short(&h.card.title, 30), h.card.bvid);

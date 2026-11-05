@@ -23,6 +23,8 @@ pub struct FfiVideoCard {
     /// Short label of the strongest positive factor ("兴趣匹配", "关注 UP"…), empty for non-feed lists.
     pub reason: String,
     pub score: f32,
+    /// A portrait (taller than wide) video, where the list said; false when it did not.
+    pub portrait: bool,
 }
 
 impl FfiVideoCard {
@@ -41,6 +43,7 @@ impl FfiVideoCard {
             pubdate: c.pubdate,
             reason: score.map(reason_label).unwrap_or_default(),
             score: score.map_or(0.0, |s| s.total),
+            portrait: rubi_core::portrait_of(&c.raw).unwrap_or(false),
         }
     }
 }
@@ -86,6 +89,8 @@ pub struct FfiVideoDetail {
     /// 分P, in order; one entry for a single-part video.
     pub parts: Vec<FfiPart>,
     pub season: Option<FfiSeason>,
+    /// Taller than wide: opens in the 竖屏 feed.
+    pub portrait: bool,
 }
 
 #[derive(Debug, Clone, uniffi::Record)]
@@ -166,6 +171,7 @@ impl FfiVideoDetail {
                     })
                     .collect(),
             }),
+            portrait: rubi_core::portrait_of(&info.card.raw).unwrap_or(false),
         }
     }
 }

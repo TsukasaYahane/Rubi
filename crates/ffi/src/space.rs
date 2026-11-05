@@ -2,7 +2,7 @@
 
 use rubi_core::UpOrder;
 
-use crate::{FfiUpOrder, FfiUpProfile, FfiUpUploads, FfiVideoCard, Res, RubiCore};
+use crate::{FfiUpOrder, FfiUpProfile, FfiUpUploads, FfiVideoCard, Res, SpaceService};
 
 /// One 专栏 article in an UP's list.
 #[derive(Debug, Clone, uniffi::Record)]
@@ -23,7 +23,7 @@ pub struct FfiUpArticles {
 }
 
 #[uniffi::export(async_runtime = "tokio")]
-impl RubiCore {
+impl SpaceService {
     pub async fn up_profile(&self, mid: u64) -> Res<FfiUpProfile> {
         Ok(self.space.profile(mid).await?.into())
     }

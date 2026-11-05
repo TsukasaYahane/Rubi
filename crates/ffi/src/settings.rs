@@ -1,9 +1,9 @@
 //! Settings and backup.
 
-use crate::{Res, RubiCore};
+use crate::{PreferencesService, Res};
 
 #[uniffi::export]
-impl RubiCore {
+impl PreferencesService {
     /// The whole settings object (rules, weights, intervals) as JSON.
     pub fn settings_json(&self) -> Res<String> {
         Ok(serde_json::to_string(&self.preferences.settings())?)

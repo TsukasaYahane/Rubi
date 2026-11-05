@@ -1,6 +1,11 @@
 package dev.rubi.app.ui
 
+import dev.rubi.core.SpaceService
+import dev.rubi.core.ActionsService
+import dev.rubi.app.playback.MediaExport
+import dev.rubi.app.playback.ExportFormat
 import dev.rubi.app.rubiLink
+import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.horizontalScroll
 import dev.rubi.core.FfiUpProfile
@@ -48,7 +53,6 @@ import androidx.compose.ui.platform.LocalHapticFeedback
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
-import dev.rubi.app.RubiApp
 import dev.rubi.app.ui.theme.LocalMetro
 import dev.rubi.app.ui.theme.MetroType
 import dev.rubi.core.FfiFavFolder
@@ -61,17 +65,41 @@ import kotlinx.coroutines.launch
 
 private enum class ActionSheet { None, Coin, Favorite, Download, Playlists, Share, Card, Friend, Cast }
 
+/** A sheet to open as the row appears (the 竖屏 feed's 币 / 藏 / 分享 go straight to theirs). */
+enum class ActionOpen { Coin, Favorite, Share }
+
 /**
  * 赞 / 币 / 藏 / 稍后 / 关注 under the video title. Done actions are drawn in the accent colour;
  * every action needs a login, so a guest tap opens the login page instead. Long-pressing 赞 is
  * 一键三连 (like, two coins, default folder).
  */
 @Composable
-fun VideoActions(app: RubiApp, nav: Nav, d: FfiVideoDetail, offline: Boolean = true) {
+fun VideoActions(
+    deps: VideoActionDeps,
+    nav: Nav,
+    d: FfiVideoDetail,
+    offline: Boolean = true,
+    open: ActionOpen? = null,
+    // Told each time the account's relation to the video changes here (赞, 币, 藏), so a page
+    // showing it elsewhere (the 竖屏 feed's side column) stays the same.
+    onRelation: ((FfiVideoRelation) -> Unit)? = null,
+) {
+    val account = deps.account
+    val videos = deps.videos
+    val followingService = deps.following
+    val space = deps.space
+    val actionsService = deps.actions
+    val messages = deps.messages
+    val playlists = deps.playlists
+    val downloads = deps.downloads
+    val uiPrefs = deps.ui
+    val appearance = deps.appearance
+    val context = deps.context
     val scope = rememberCoroutineScope()
     val haptic = LocalHapticFeedback.current
     val media = LocalMedia.current
     var rel by remember { mutableStateOf<FfiVideoRelation?>(null) }
+    LaunchedEffect(rel) { rel?.let { onRelation?.invoke(it) } }
     var loggedIn by remember { mutableStateOf(false) }
     var likes by remember { mutableStateOf(d.likes) }
     var coins by remember { mutableStateOf(d.coins) }
@@ -79,14 +107,23 @@ fun VideoActions(app: RubiApp, nav: Nav, d: FfiVideoDetail, offline: Boolean = t
     var later by remember { mutableStateOf(false) }
     var confirmUnfollow by remember { mutableStateOf(false) }
     var note by remember { mutableStateOf("") }
-    var sheet by remember { mutableStateOf(ActionSheet.None) }
+    var sheet by remember {
+        mutableStateOf(
+            when (open) {
+                ActionOpen.Coin -> ActionSheet.Coin
+                ActionOpen.Favorite -> ActionSheet.Favorite
+                ActionOpen.Share -> ActionSheet.Share
+                null -> ActionSheet.None
+            },
+        )
+    }
     // Play lists are local: no login needed. How many lists hold this video.
     var listedIn by remember { mutableStateOf(0) }
-    LaunchedEffect(d.bvid, sheet) { listedIn = offMain { runCatching { app.core.playlistsWith(d.bvid).size }.getOrDefault(0) } }
+    LaunchedEffect(d.bvid, sheet) { listedIn = offMain { runCatching { playlists.playlistsWith(d.bvid).size }.getOrDefault(0) } }
     // 离线缓存 of this video: 离线 (none yet), 下载中, 已缓存…
     var downloadState by remember { mutableStateOf("离线") }
     LaunchedEffect(d.bvid, sheet) {
-        val mine = offMain { runCatching { app.core.downloads() }.getOrNull() }?.firstOrNull { it.card.bvid == d.bvid }
+        val mine = offMain { runCatching { downloads.downloads() }.getOrNull() }?.firstOrNull { it.card.bvid == d.bvid }
         downloadState = when (mine?.state) {
             null -> "离线"
             FfiDownloadState.DONE -> "已缓存"
@@ -98,8 +135,8 @@ fun VideoActions(app: RubiApp, nav: Nav, d: FfiVideoDetail, offline: Boolean = t
 
     // Re-checked when coming back from the login page.
     LaunchedEffect(d.bvid, nav.stack.size) {
-        loggedIn = runCatching { app.core.account().loggedIn }.getOrDefault(false)
-        if (loggedIn) rel = runCatching { app.core.relation(d.bvid) }.getOrNull()
+        loggedIn = runCatching { account.account().loggedIn }.getOrDefault(false)
+        if (loggedIn) rel = runCatching { actionsService.relation(d.bvid) }.getOrNull()
     }
 
     fun failed(e: Throwable) {
@@ -127,16 +164,16 @@ fun VideoActions(app: RubiApp, nav: Nav, d: FfiVideoDetail, offline: Boolean = t
         val on = !cur.followingUp
         rel = cur.copy(followingUp = on)
         scope.launch {
-            runCatching { app.core.followUp(d.bvid, on) }
+            runCatching { actionsService.followUp(d.bvid, on) }
                 .onSuccess { note = if (on) "已关注 ${d.upName}" else "已取消关注" }
                 .onFailure { rel = rel?.copy(followingUp = !on); failed(it) }
         }
     }
 
     Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
-        UpRow(app, nav, d, following = rel?.followingUp == true, confirming = confirmUnfollow, onFollow = ::toggleFollow)
+        UpRow(space, nav, d, following = rel?.followingUp == true, confirming = confirmUnfollow, onFollow = ::toggleFollow)
         // Swipe sideways for the rest of the actions.
-        Row(Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(30.dp)) {
+        Row(Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(if (LocalWordsUi.current) 30.dp else 22.dp)) {
             val r = rel
             val triple = {
                 act { cur ->
@@ -147,7 +184,7 @@ fun VideoActions(app: RubiApp, nav: Nav, d: FfiVideoDetail, offline: Boolean = t
                     haptic.performHapticFeedback(HapticFeedbackType.LongPress)
                     note = "一键三连中…"
                     scope.launch {
-                        runCatching { app.core.triple(d.bvid) }
+                        runCatching { actionsService.triple(d.bvid) }
                             .onSuccess { t ->
                                 val was = rel ?: cur
                                 if (t.liked && !was.liked) likes += 1u
@@ -172,13 +209,13 @@ fun VideoActions(app: RubiApp, nav: Nav, d: FfiVideoDetail, offline: Boolean = t
                     }
                 }
             }
-            Action("赞", formatCount(likes), r?.liked == true, Modifier, onLongClick = triple) {
+            Action(LineIcon.Like, "赞", formatCount(likes), r?.liked == true, Modifier, onLongClick = triple) {
                 act { cur ->
                     val on = !cur.liked
                     rel = cur.copy(liked = on)
                     likes = if (on) likes + 1u else likes - minOf(likes, 1uL)
                     scope.launch {
-                        runCatching { app.core.like(d.bvid, on) }.onFailure {
+                        runCatching { actionsService.like(d.bvid, on) }.onFailure {
                             rel = rel?.copy(liked = !on)
                             likes = d.likes
                             failed(it)
@@ -186,32 +223,32 @@ fun VideoActions(app: RubiApp, nav: Nav, d: FfiVideoDetail, offline: Boolean = t
                     }
                 }
             }
-            Action("币", formatCount(coins), (r?.coins ?: 0u) > 0u, Modifier) {
+            Action(LineIcon.Coin, "币", formatCount(coins), (r?.coins ?: 0u) > 0u, Modifier) {
                 act { cur -> if (cur.coins >= 2u) note = "已投满 2 枚硬币" else sheet = ActionSheet.Coin }
             }
-            Action("藏", formatCount(favorites), r?.favorited == true, Modifier) {
+            Action(LineIcon.Star, "藏", formatCount(favorites), r?.favorited == true, Modifier) {
                 act { sheet = ActionSheet.Favorite }
             }
-            Action("稍后", if (later) "已加入" else "再看", later, Modifier) {
+            Action(LineIcon.Later, "稍后", if (later) "已加入" else "再看", later, Modifier) {
                 act {
                     if (later) return@act
                     later = true
-                    scope.launch { runCatching { app.core.watchLater(d.bvid) }.onFailure { later = false; failed(it) } }
+                    scope.launch { runCatching { actionsService.watchLater(d.bvid) }.onFailure { later = false; failed(it) } }
                 }
             }
-            Action("列表", if (listedIn > 0) "已加入 $listedIn" else "加入", listedIn > 0, Modifier) {
+            Action(LineIcon.List, "列表", if (listedIn > 0) "已加入 $listedIn" else "加入", listedIn > 0, Modifier) {
                 sheet = ActionSheet.Playlists
             }
             // 听视频: on from where the video is, then its 相关推荐 one after another.
-            Action("听", "视频", false, Modifier) {
+            Action(LineIcon.Listen, "听", "视频", false, Modifier) {
                 val from = media.player.get().currentPosition
-                val card = FfiVideoCard(d.bvid, d.aid, d.title, "", d.upName, d.upMid, d.zone, d.durationS, d.views, d.danmaku, d.pubdate, "", 0f)
+                val card = FfiVideoCard(d.bvid, d.aid, d.title, "", d.upName, d.upMid, d.zone, d.durationS, d.views, d.danmaku, d.pubdate, "", 0f, d.portrait)
                 media.listening.startRelated(card, from)
                 nav.replaceTop(Screen.Listen)
             }
-            if (offline) Action("缓存", downloadState, downloadState != "离线", Modifier) { sheet = ActionSheet.Download }
-            Action("分享", "转发", false, Modifier) { sheet = ActionSheet.Share }
-            if (offline) Action("投屏", "电视", false, Modifier) { sheet = ActionSheet.Cast }
+            if (offline) Action(LineIcon.Cache, "缓存", downloadState, downloadState != "离线", Modifier) { sheet = ActionSheet.Download }
+            Action(LineIcon.Share, "分享", "转发", false, Modifier) { sheet = ActionSheet.Share }
+            if (offline) Action(LineIcon.Cast, "投屏", "电视", false, Modifier) { sheet = ActionSheet.Cast }
         }
         if (note.isNotEmpty()) Meta(note)
     }
@@ -220,7 +257,7 @@ fun VideoActions(app: RubiApp, nav: Nav, d: FfiVideoDetail, offline: Boolean = t
         ActionSheet.Coin -> CoinSheet(given = rel?.coins ?: 0u, liked = rel?.liked == true, onDismiss = { sheet = ActionSheet.None }) { n, alsoLike ->
             sheet = ActionSheet.None
             scope.launch {
-                runCatching { app.core.coin(d.bvid, n, alsoLike) }
+                runCatching { actionsService.coin(d.bvid, n, alsoLike) }
                     .onSuccess {
                         val likeNow = alsoLike && rel?.liked != true
                         rel = rel?.let { it.copy(coins = it.coins + n, liked = it.liked || alsoLike) }
@@ -231,11 +268,11 @@ fun VideoActions(app: RubiApp, nav: Nav, d: FfiVideoDetail, offline: Boolean = t
                     .onFailure { failed(it) }
             }
         }
-        ActionSheet.Favorite -> FavoriteSheet(app, d.bvid, onDismiss = { sheet = ActionSheet.None }) { add, remove, nowIn ->
+        ActionSheet.Favorite -> FavoriteSheet(actionsService, d.bvid, onDismiss = { sheet = ActionSheet.None }) { add, remove, nowIn ->
             sheet = ActionSheet.None
             if (add.isEmpty() && remove.isEmpty()) return@FavoriteSheet
             scope.launch {
-                runCatching { app.core.setFavorite(d.bvid, add, remove) }
+                runCatching { actionsService.setFavorite(d.bvid, add, remove) }
                     .onSuccess {
                         val was = rel?.favorited == true
                         rel = rel?.copy(favorited = nowIn)
@@ -246,14 +283,19 @@ fun VideoActions(app: RubiApp, nav: Nav, d: FfiVideoDetail, offline: Boolean = t
                     .onFailure { failed(it) }
             }
         }
-        ActionSheet.Playlists -> PlaylistPickSheet(app, d.bvid, onDismiss = { sheet = ActionSheet.None })
+        ActionSheet.Playlists -> PlaylistPickSheet(playlists, d.bvid, onDismiss = { sheet = ActionSheet.None })
         ActionSheet.Share -> ShareSheet(d, onCard = { sheet = ActionSheet.Card }, onFriend = { sheet = ActionSheet.Friend }, onDismiss = { sheet = ActionSheet.None }) { note = it }
-        ActionSheet.Cast -> CastSheet(app, d.bvid, null, d.title, onDismiss = { sheet = ActionSheet.None })
-        ActionSheet.Friend -> ShareToFriendSheet(app, d.bvid, d.title, onDismiss = { sheet = ActionSheet.None }) { note = it }
-        ActionSheet.Card -> ShareCardSheet(app, d, onDismiss = { sheet = ActionSheet.None }) { note = it }
-        ActionSheet.Download -> DownloadSheet(onDismiss = { sheet = ActionSheet.None }) { qn, label ->
+        ActionSheet.Cast -> CastSheet(videos, d.bvid, null, d.title, onDismiss = { sheet = ActionSheet.None })
+        ActionSheet.Friend -> ShareToFriendSheet(followingService, messages, d.bvid, d.title, onDismiss = { sheet = ActionSheet.None }) { note = it }
+        ActionSheet.Card -> ShareCardSheet(videos, appearance, d, onDismiss = { sheet = ActionSheet.None }) { note = it }
+        ActionSheet.Download -> DownloadSheet(onDismiss = { sheet = ActionSheet.None }) { qn, label, format ->
             sheet = ActionSheet.None
-            scope.launch { note = startDownload(app, d.bvid, qn, label) }
+            // Saved out as MP4 / audio once the copy finishes (at once if it already has).
+            if (format != ExportFormat.None) uiPrefs.pendingExports = uiPrefs.pendingExports + (d.bvid to format)
+            scope.launch {
+                note = startDownload(downloads, uiPrefs, context, d.bvid, qn, label)
+                if (format != ExportFormat.None) MediaExport.exportFinished(downloads, uiPrefs, context).lastOrNull()?.let { note = it }
+            }
         }
         ActionSheet.None -> Unit
     }
@@ -263,6 +305,7 @@ fun VideoActions(app: RubiApp, nav: Nav, d: FfiVideoDetail, offline: Boolean = t
 @OptIn(ExperimentalFoundationApi::class)
 @Composable
 private fun Action(
+    icon: LineIcon,
     label: String,
     value: String,
     done: Boolean,
@@ -271,17 +314,26 @@ private fun Action(
     onClick: () -> Unit,
 ) {
     val c = LocalMetro.current
+    if (LocalWordsUi.current) {
+        // 文字: the name large and light (heavier once done) over its count.
+        Column(
+            modifier.heightIn(min = 56.dp).combinedClickable(onLongClick = onLongClick, onClick = onClick).padding(vertical = 6.dp),
+            horizontalAlignment = Alignment.Start,
+        ) {
+            Text(label, fontSize = 20.sp, fontWeight = if (done) FontWeight.SemiBold else FontWeight.Light, color = if (done) c.accent else c.fg)
+            Text(value, fontSize = 13.sp, color = if (done) c.accent else c.fg2, maxLines = 1)
+        }
+        return
+    }
+    // Icon, name and count; done (liked, kept…) turns all three Cobalt, with no block behind.
+    val tint = if (done) c.accent else c.fg
     Column(
-        modifier.heightIn(min = 56.dp).combinedClickable(onLongClick = onLongClick, onClick = onClick).padding(vertical = 6.dp),
-        horizontalAlignment = Alignment.Start,
+        modifier.widthIn(min = 40.dp).heightIn(min = 56.dp).combinedClickable(onLongClick = onLongClick, onClick = onClick).padding(vertical = 6.dp),
+        horizontalAlignment = Alignment.CenterHorizontally,
     ) {
-        Text(
-            label,
-            fontSize = 20.sp,
-            fontWeight = if (done) FontWeight.SemiBold else FontWeight.Light,
-            color = if (done) c.accent else c.fg,
-        )
-        Text(value, fontSize = 13.sp, color = if (done) c.accent else c.fg2)
+        LineIconView(icon, tint)
+        Text(label, fontSize = 12.sp, color = tint, modifier = Modifier.padding(top = 4.dp))
+        Text(value, fontSize = 11.sp, color = if (done) c.accent else c.fg2, maxLines = 1)
     }
 }
 
@@ -321,7 +373,7 @@ private fun CoinSheet(given: UInt, liked: Boolean, onDismiss: () -> Unit, onConf
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 private fun FavoriteSheet(
-    app: RubiApp,
+    actions: ActionsService,
     bvid: String,
     onDismiss: () -> Unit,
     onConfirm: (List<ULong>, List<ULong>, Boolean) -> Unit,
@@ -331,7 +383,7 @@ private fun FavoriteSheet(
     var error by remember { mutableStateOf<String?>(null) }
     val picked = remember { mutableStateMapOf<ULong, Boolean>() }
     LaunchedEffect(bvid) {
-        runCatching { app.core.favFolders(bvid) }
+        runCatching { actions.favFolders(bvid) }
             .onSuccess { list -> folders = list; list.forEach { picked[it.id] = it.contains } }
             .onFailure { error = "收藏夹加载失败：${it.message}" }
     }
@@ -379,10 +431,10 @@ private fun Check(label: String, on: Boolean, onChange: (Boolean) -> Unit) {
  * face and fans come from the UP's card; the name shows at once.
  */
 @Composable
-private fun UpRow(app: RubiApp, nav: Nav, d: FfiVideoDetail, following: Boolean, confirming: Boolean, onFollow: () -> Unit) {
+private fun UpRow(space: SpaceService, nav: Nav, d: FfiVideoDetail, following: Boolean, confirming: Boolean, onFollow: () -> Unit) {
     val c = LocalMetro.current
     var profile by remember { mutableStateOf<FfiUpProfile?>(null) }
-    LaunchedEffect(d.upMid) { profile = runCatching { app.core.upProfile(d.upMid) }.getOrNull() }
+    LaunchedEffect(d.upMid) { profile = runCatching { space.upProfile(d.upMid) }.getOrNull() }
     Row(Modifier.fillMaxWidth().padding(bottom = 6.dp), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(10.dp)) {
         Row(
             Modifier.weight(1f).clickable { nav.push(Screen.Up(d.upMid, d.upName)) },

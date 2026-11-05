@@ -62,7 +62,8 @@
 - **开闭 + 合成复用**：过滤与打分都以小 trait 实现单元，经组合器拼装；新增能力 = 新增实现，不改旧代码。不使用继承式设计。
 - **依赖倒置 + 迪米特**：`recommend` 只依赖 `Source` / `Factor` 抽象，不认识具体 API；Kotlin 只依赖 `ffi` 生成接口。
 - 依赖一律构造函数注入（trait 对象或泛型），只在 `core::Services::open` 组装。
-- **单一职责 + 功能私有化**（2026-11-01 重构）：`core` 按领域拆成独立服务——`Account`、`Home`、`Videos`、`Danmakus`、`Stein`、`Comments`、`Discover`、`Following`、`Space`、`Actions`、`Library`、`Messages`、`Playlists`（含听视频队列）、`Preferences`（设置与备份）、`Emotes`。每个服务字段私有，只持有自己需要的 API trait；服务之间只经窄接口（`core/src/ports.rs`）协作：`RuleSource` / `FeedConfig`（规则表与编译好的过滤器，由 `SettingsService` 实现，规则只在改动时编译一次）、`FeedbackSink` / `HomeFeed` / `ProfileBackup`（由 `FeedService` 实现）、`VideoLookup` / `VideoStreams`（由 `Videos` 实现）、`LoginState`、`SettingsPort`、`PlaylistBackup`，服务看不到实现者的其余部分；仓储依赖用 store 的 trait，读改写在 store 内一次事务完成。卡片缓存 `CardCache`（不存原始 JSON）、评论根缓存都有上限；事件、曝光、已看表按时间 / 数量自动清理。设置在 JSON 上仍是一个平铺对象，Kotlin 只按键提交 merge patch（`patch_settings_json`），互不覆盖。（2026-11-03 架构审查后修订）
+- **单一职责 + 功能私有化**（2026-11-01 重构）：`core` 按领域拆成独立服务——`Account`、`Home`、`Videos`、`Danmakus`、`Stein`、`Comments`、`Discover`、`Following`、`Space`、`Actions`、`History`、`WatchLater`、`Favorites`、`Messages`、`Playlists`（列表编辑）、`PlayQueue`（视频页连播）、`Listening`（听视频，三者共用 crate 内部的 `Lineup`）、`Preferences`（设置与备份）、`Emotes` 等。`api` 的账号类接口按业务拆成 `VideoActionApi`、`FavoritesApi`、`WatchLaterApi`、`HistoryApi`、`FollowingsApi`，同一个 `WebAccount` 在组装处以各自接口分别交给对应服务；直播消息通道经 `ChannelOpener` 注入（2026-11-05）。每个服务字段私有，只持有自己需要的 API trait；服务之间只经窄接口（`core/src/ports.rs`）协作：`RuleSource` / `FeedConfig`（规则表与编译好的过滤器，由 `SettingsService` 实现，规则只在改动时编译一次）、`FeedbackSink` / `HomeFeed` / `ProfileBackup`（由 `FeedService` 实现）、`VideoLookup` / `VideoStreams`（由 `Videos` 实现）、`LoginState`、`SettingsPort`、`PlaylistBackup`，服务看不到实现者的其余部分；仓储依赖用 store 的 trait，读改写在 store 内一次事务完成。卡片缓存 `CardCache`（不存原始 JSON）、评论根缓存都有上限；事件、曝光、已看表按时间 / 数量自动清理。设置在 JSON 上仍是一个平铺对象，Kotlin 只按键提交 merge patch（`patch_settings_json`），互不覆盖。（2026-11-03 架构审查后修订）
+- **门面按业务分对象**（2026-11-05）：`RubiCore` 只负责打开核心，并按业务交出对象（`core.history()`、`core.favorites()`、`core.playQueue()`…）；Kotlin 的状态类只接收自己业务的对象（如 `HistoryState(HistoryService)`、`LiveState(LiveService, EsportsService)`）；页面函数同样只接收用到的业务对象与 `UiPrefs` / `CoreSettings` / `Signin`（登录状态与会话）/ `Appearance`（外观状态）；视频页与竖屏推流依赖多，按功能打包为参数对象（`ui/VideoDeps.kt`：`VideoPageDeps` 含 `actionRow: VideoActionDeps` 与 `panel: VideoPanelDeps`，下层只拿到自己那一份），只有 `RubiApp` 与组装处 `RubiRoot` 持有 `RubiCore`。
 - **门面不含业务**：`ffi` 只把 `Ffi*` 记录与核心类型互转；清晰度上限（1080P）、弹幕空文本、楼中楼分页、听视频的上一首 / 下一首规则都在 `core`，Android 与将来的 iOS 共用。CLI 同样只调用服务。
 - **Android 端**：页面不自写分页，统一用 `Paged`（`ui/Paging.kt`，游标泛型、去重、错误重试、重置时丢弃旧请求）；播放页拆为页面本身、`PlayerEffects`（小窗与后台、观看心跳、列表连播、弹幕分段加载）、`CommentSection`、`RelatedList`；听视频的选曲交给 core，`Listening` 只负责播放。播放相关的状态不再是全局单例：`MainPlayer`（正片 / 听视频）、`PreviewPlayer`、`Listening`、`Pip` 与全屏状态由应用持有的 `Media` 一次构建，界面经 `LocalMedia` 取用，播放服务经 Application 取用。评论区与 UP 页也用 `Paged`，可设最小翻页间隔（评论 1.5 秒、UP 投稿 1 秒）防止 412。
 
@@ -277,6 +278,24 @@
 - 每次测试构建在 `D:\` 下新建唯一临时目录（如 `D:\rubi-build-<时间戳>`），复制源码后构建。
 - 结束后（无论成败）删除该临时目录的全部构建产物并核验无残留。
 - 依赖下载缓存保留在固定目录 `D:\rubi-cache`（`CARGO_HOME`、`GRADLE_USER_HOME` 指向此处），不存放构建产物。
+
+### 11.4 改动前架构检查（强制，2026-11-04 起）
+
+每次动代码前先过一遍下表，不满足的先调整设计再写；评审（自审或交给另一个 agent 只读复核）也按这张表逐条给结论。
+
+| 规则 | 在 Rubi 里的具体要求 |
+|---|---|
+| 单一职责 | 一个 `core` 服务只管一个业务；一个 Kotlin 页面只负责呈现，取数、乐观更新、重试放到状态持有者（`*State` 类）里。文件超过约 500 行时检查是否混了多个职责 |
+| 开闭 | 新能力 = 新实现（新 trait 实现、新 `Source`/`Factor`/规则单元），不在旧实现里加分支 |
+| 里氏替换 | trait 的每个实现（含测试用 Fake）都满足 trait 文档的约定，不靠调用方判断具体类型 |
+| 接口隔离 | `api` trait 按业务拆，调用方只拿到自己用的方法；一个 trait 的方法分属多个服务时就拆开。不做大一统客户端 |
+| 依赖倒置 | 服务只依赖 `api` trait、`ports.rs` 窄接口和 store trait；具体类型（`HttpClient`、`SqliteStore`、`Web*`、`LiveSocket`）只在 `Services::open` 出现 |
+| 合成复用 | 用组合与注入拼装能力，不用继承；Kotlin 不建 `Base*Screen` 之类的基类 |
+| 迪米特 | 只和直接协作者说话：服务不经一个服务去拿另一个服务；Kotlin 页面拿到需要的那一个对象（服务 / 状态 / 回调），不传整个 `RubiApp` 再一路点下去 |
+| 接口私有化 | 默认最小可见性：Rust 先 `fn`，再 `pub(crate)`，确实跨 crate 才 `pub`；Kotlin 先 `private`，再 `internal`。新增的 `pub`/公开 Kotlin 声明要能说出是谁在用 |
+| 接口专用 | 某个业务的接口只服务该业务：不为图方便复用另一个业务的方法，需要时新开窄接口（加进 `ports.rs`） |
+
+另外：`ffi` 只做类型转换不含业务；新增业务规则写在 `core`，Android 与 CLI 共用。
 
 ---
 

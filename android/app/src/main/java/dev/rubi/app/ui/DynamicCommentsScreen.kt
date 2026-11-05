@@ -1,5 +1,8 @@
 package dev.rubi.app.ui
 
+import dev.rubi.core.VideosService
+import dev.rubi.core.FollowingService
+import dev.rubi.core.CommentsService
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
@@ -16,13 +19,12 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
-import dev.rubi.app.RubiApp
 import dev.rubi.app.ui.theme.LocalMetro
 import dev.rubi.core.FfiDynamic
 
 /** A dynamic's comment area: the post in brief, then its comments (and 发表评论). */
 @Composable
-fun DynamicCommentsScreen(app: RubiApp, nav: Nav, post: FfiDynamic) {
+fun DynamicCommentsScreen(videos: VideosService, commentsService: CommentsService, following: FollowingService, nav: Nav, post: FfiDynamic) {
     val c = LocalMetro.current
     val scope = rememberCoroutineScope()
     val area = post.comments ?: return
@@ -41,10 +43,10 @@ fun DynamicCommentsScreen(app: RubiApp, nav: Nav, post: FfiDynamic) {
             }
             item(key = "comments") {
                 CommentSection(
-                    app,
+                    commentsService, following,
                     area,
                     focus = null,
-                    onOpenVideo = { v -> nav.openVideo(scope, app, v.video, v.title) },
+                    onOpenVideo = { v -> nav.openVideo(scope, videos, v.video, v.title) },
                     onOpenArticle = { nav.push(Screen.Article(it)) },
                     onFocusShown = {},
                 )

@@ -1,5 +1,8 @@
 package dev.rubi.app.ui
 
+import dev.rubi.app.data.UiPrefs
+import dev.rubi.app.data.CoreSettings
+import dev.rubi.app.Appearance
 import androidx.compose.ui.graphics.Color
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.Box
@@ -29,7 +32,6 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
-import dev.rubi.app.RubiApp
 import dev.rubi.app.data.PlaybackPrefs
 import dev.rubi.app.ui.theme.LocalMetro
 import org.json.JSONArray
@@ -63,16 +65,16 @@ private val FACTORS = listOf(
  * kept; the core validates it (bad regexes are rejected).
  */
 @Composable
-fun SettingsScreen(app: RubiApp, nav: Nav) {
+fun SettingsScreen(uiPrefs: UiPrefs, coreSettings: CoreSettings, appearance: Appearance, nav: Nav) {
     val c = LocalMetro.current
-    val settings = remember { app.settings.read() }
+    val settings = remember { coreSettings.read() }
     var version by remember { mutableIntStateOf(0) }
     var note by remember { mutableStateOf("") }
 
     /** `patch` holds the keys just changed in `settings` (already edited in place). */
     fun save(patch: JSONObject) {
         version++
-        app.settings.patch(patch) { e -> note = e?.let { "未保存：${it.message}" }.orEmpty() }
+        coreSettings.patch(patch) { e -> note = e?.let { "未保存：${it.message}" }.orEmpty() }
     }
 
     fun top(key: String, value: Any) = JSONObject().put(key, value)
@@ -196,13 +198,13 @@ fun SettingsScreen(app: RubiApp, nav: Nav) {
                 Text("应用图标", fontSize = 16.sp, color = c.fg, modifier = Modifier.padding(start = 16.dp, top = 4.dp))
                 Row(Modifier.padding(horizontal = 16.dp, vertical = 6.dp), horizontalArrangement = Arrangement.spacedBy(12.dp)) {
                     AppIcon.LABELS.forEachIndexed { i, label ->
-                        val on = app.appIcon.value == i
+                        val on = appearance.appIcon.value == i
                         Column(
                             Modifier.then(if (on) Modifier.border(2.dp, c.accent) else Modifier.border(1.dp, c.line))
                                 .clickable {
                                     if (!on) {
-                                        app.appIcon.value = i
-                                        app.ui.appIcon = i
+                                        appearance.appIcon.value = i
+                                        uiPrefs.appIcon = i
                                     }
                                 }
                                 .padding(10.dp),
@@ -215,27 +217,39 @@ fun SettingsScreen(app: RubiApp, nav: Nav) {
                     }
                 }
                 Meta("关于页和分享卡片立即换；桌面图标在退出 Rubi 后（返回退出或下次启动时）再换，部分桌面要几秒才刷新，有的需要重新把图标放到主屏幕。", Modifier.padding(horizontal = 16.dp))
-                Segmented(listOf("跟随系统", "浅色", "深色"), app.themeMode.value) {
-                    app.themeMode.value = it
-                    app.ui.themeMode = it
+                Segmented(listOf("跟随系统", "浅色", "深色"), appearance.themeMode.value) {
+                    appearance.themeMode.value = it
+                    uiPrefs.themeMode = it
                 }
+                Text("界面风格", fontSize = 16.sp, color = c.fg, modifier = Modifier.padding(start = 16.dp, top = 12.dp))
+                Segmented(listOf("图形", "文字"), appearance.uiStyle.value) {
+                    appearance.uiStyle.value = it
+                    uiPrefs.uiStyle = it
+                }
+                Meta("图形用线条图标配文字（默认）；文字只用文字，是早先的样式。两套功能一致，发弹幕栏相同。", Modifier.padding(horizontal = 16.dp))
+                Text("竖屏视频封面", fontSize = 16.sp, color = c.fg, modifier = Modifier.padding(start = 16.dp, top = 12.dp))
+                Segmented(listOf("适应", "填充"), appearance.portraitCover.value) {
+                    appearance.portraitCover.value = it
+                    uiPrefs.portraitCover = it
+                }
+                Meta("竖屏视频在列表里的封面：适应显示完整画面（两侧为模糊底），填充铺满卡片（裁去上下）。", Modifier.padding(horizontal = 16.dp))
                 Text("动效风格", fontSize = 16.sp, color = c.fg, modifier = Modifier.padding(start = 16.dp, top = 12.dp))
-                Segmented(Motion.STYLES, app.motionStyle.value) {
-                    app.motionStyle.value = it
-                    app.ui.motionStyle = it
+                Segmented(Motion.STYLES, appearance.motionStyle.value) {
+                    appearance.motionStyle.value = it
+                    uiPrefs.motionStyle = it
                 }
                 Meta(
                     listOf(
                         "页面绕边缘翻入，栏目滑入，按住卡片倾斜",
                         "点卡片以卡片中心为轴旋转放大，封面渐隐露出播放页；切页以画面中心为轴翻转",
                         "点卡片放大后从左侧翻开，封面渐隐露出播放页，返回时封面从左侧翻回再缩小；切页以屏幕左侧为轴翻页",
-                    )[app.motionStyle.value.coerceIn(0, 2)],
+                    )[appearance.motionStyle.value.coerceIn(0, 2)],
                     Modifier.padding(horizontal = 16.dp),
                 )
                 Text("动效速度", fontSize = 16.sp, color = c.fg, modifier = Modifier.padding(start = 16.dp, top = 12.dp))
-                Segmented(Motion.LABELS, app.motion.value) {
-                    app.motion.value = it
-                    app.ui.motion = it
+                Segmented(Motion.LABELS, appearance.motion.value) {
+                    appearance.motion.value = it
+                    uiPrefs.motion = it
                 }
                 Meta("非线性缓动：进入先快后慢；「无动效」立即切换。强调色 Cobalt。", Modifier.padding(16.dp))
             }

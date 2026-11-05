@@ -1,5 +1,11 @@
 package dev.rubi.app.ui
 
+import dev.rubi.core.VideosService
+import dev.rubi.core.PgcService
+import dev.rubi.core.HomeService
+import dev.rubi.core.DiscoverService
+import dev.rubi.core.DanmakuService
+import dev.rubi.app.data.CoreSettings
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.runtime.key
@@ -56,7 +62,6 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import coil3.compose.AsyncImage
-import dev.rubi.app.RubiApp
 import dev.rubi.app.data.PreviewPrefs
 import dev.rubi.app.data.UiPrefs
 import dev.rubi.app.ui.theme.LocalMetro
@@ -113,7 +118,7 @@ class HomeState(private val ui: UiPrefs) {
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-fun HomeScreen(app: RubiApp, nav: Nav, home: HomeState) {
+fun HomeScreen(homeService: HomeService, videos: VideosService, danmaku: DanmakuService, discover: DiscoverService, pgcService: PgcService, settings: CoreSettings, nav: Nav, home: HomeState) {
     val c = LocalMetro.current
     val scope = rememberCoroutineScope()
     val feed = home.recommend
@@ -122,15 +127,24 @@ fun HomeScreen(app: RubiApp, nav: Nav, home: HomeState) {
     var why by remember { mutableStateOf<FfiVideoCard?>(null) }
 
     /** `reset` = user pulled to refresh; otherwise append the next page from the pool. */
-    suspend fun loadPage(reset: Boolean) {
+    // `pulled`: 下拉刷新 — a new batch fetched now, and cards already seen kept out of it.
+    suspend fun loadPage(reset: Boolean, pulled: Boolean = false) {
         // A rebuilt list may show earlier cards again; an appended page must not repeat them.
-        if (reset || cards.isEmpty()) app.core.newFeedSession()
+        // A pull keeps the session, so the new list starts with cards not yet shown.
+        if (!pulled && (reset || cards.isEmpty())) homeService.newFeedSession()
         // Off the main thread: the core filters and stores hundreds of candidates while this
         // runs, and on the main thread taps would be dropped meanwhile.
-        suspend fun refresh() = withContext(Dispatchers.IO) { runCatching { app.core.refreshFeed(20u) } }
+        suspend fun refresh() = withContext(Dispatchers.IO) {
+            runCatching { if (pulled) homeService.refreshFeedNow(20u) else homeService.refreshFeed(20u) }
+        }
         var report = if (reset || cards.isEmpty()) refresh() else null
-        suspend fun next() = withContext(Dispatchers.IO) { runCatching { app.core.nextPage(PAGE) }.getOrDefault(emptyList()) }
+        suspend fun next() = withContext(Dispatchers.IO) { runCatching { homeService.nextPage(PAGE) }.getOrDefault(emptyList()) }
         var page = next()
+        if (pulled && page.isEmpty()) {
+            // Everything in the pool was seen already: start over rather than show nothing.
+            homeService.newFeedSession()
+            page = next()
+        }
         if (page.isEmpty() && report == null) {
             // Pool used up while scrolling: fetch more candidates and append, never replace.
             report = refresh()
@@ -152,10 +166,10 @@ fun HomeScreen(app: RubiApp, nav: Nav, home: HomeState) {
         }
     }
 
-    suspend fun load(reset: Boolean) {
+    suspend fun load(reset: Boolean, pulled: Boolean = false) {
         if (feed.loading) return
         feed.loading = true
-        try { loadPage(reset) } finally { feed.loading = false }
+        try { loadPage(reset, pulled) } finally { feed.loading = false }
     }
 
     // First visit only: an existing list is kept as is when returning to this screen.
@@ -176,13 +190,14 @@ fun HomeScreen(app: RubiApp, nav: Nav, home: HomeState) {
     }
     val refreshing = feed.loading
     val dual = home.dual
+    val columns = LocalScreenLayout.current.videoColumns(dual)
     val ctx = LocalContext.current
     // Re-read when coming back from 设置.
-    val preview = remember(nav.stack.size) { PreviewPrefs.load(app.settings) }
-    val previewing = rememberPreviewTarget(grid, enabled = !dual && home.pivot == 0 && preview.allowed(ctx))
+    val preview = remember(nav.stack.size) { PreviewPrefs.load(settings) }
+    val previewing = rememberPreviewTarget(grid, enabled = columns == 1 && home.pivot == 0 && preview.allowed(ctx))
     val pivot = home.pivot
-    val zones = remember { app.core.homeZones() }
-    val pgcZones = remember { app.core.pgcZones() }
+    val zones = remember { discover.homeZones() }
+    val pgcZones = remember { pgcService.pgcZones() }
     var zoneMenu by remember { mutableStateOf(false) }
     // How far the 分区 menu is shown: it and the dimming behind it fade in and out with the
     // page switch instead of vanishing at once.
@@ -207,7 +222,8 @@ fun HomeScreen(app: RubiApp, nav: Nav, home: HomeState) {
                     turns.switch(i > pivot) { home.pivot = i }
                 }
             }) }
-            Text(
+            // A wide screen sets its own columns: no 单列 / 双列 choice there.
+            if (!LocalScreenLayout.current.wide) Text(
                 if (dual) "▦ 双列" else "▭ 单列",
                 style = MetroType.meta.copy(fontSize = 12.sp),
                 color = c.fg,
@@ -234,15 +250,15 @@ fun HomeScreen(app: RubiApp, nav: Nav, home: HomeState) {
             }
             val sub = home.zoneSub
             key(zone.name, sub) {
-                HotRankList(app, nav, home.zoneList(zone.name, sub), ranking = sub == 1, dual = dual) { page ->
-                    if (sub == 1) app.core.zoneRanking(zone.rid) else app.core.zoneFeed(zone.region, page)
+                HotRankList(videos, danmaku, settings, nav, home.zoneList(zone.name, sub), ranking = sub == 1, dual = dual) { page ->
+                    if (sub == 1) discover.zoneRanking(zone.rid) else discover.zoneFeed(zone.region, page)
                 }
             }
             return@Column
         }
         if (pivot != 0) {
-            HotRankList(app, nav, if (pivot == 2) home.rank else home.hot, ranking = pivot == 2, dual = dual) { page ->
-                if (pivot == 2) app.core.ranking() else app.core.popular(page)
+            HotRankList(videos, danmaku, settings, nav, if (pivot == 2) home.rank else home.hot, ranking = pivot == 2, dual = dual) { page ->
+                if (pivot == 2) discover.ranking() else discover.popular(page)
             }
             return@Column
         }
@@ -253,9 +269,9 @@ fun HomeScreen(app: RubiApp, nav: Nav, home: HomeState) {
         if (home.showErrors) {
             Column(Modifier.padding(horizontal = 16.dp)) { home.sourceErrors.forEach { Meta(it) } }
         }
-        PullToRefreshBox(isRefreshing = refreshing, onRefresh = { scope.launch { load(reset = true) } }) {
+        PullToRefreshBox(isRefreshing = refreshing, onRefresh = { scope.launch { load(reset = true, pulled = true) } }) {
             LazyVerticalGrid(
-                columns = GridCells.Fixed(if (dual) 2 else 1),
+                columns = GridCells.Fixed(columns),
                 state = grid,
                 contentPadding = PaddingValues(start = 16.dp, end = 16.dp, top = 4.dp, bottom = 28.dp),
                 horizontalArrangement = Arrangement.spacedBy(12.dp),
@@ -265,10 +281,10 @@ fun HomeScreen(app: RubiApp, nav: Nav, home: HomeState) {
                 items(cards, key = { it.bvid }) { card ->
                     VideoCardView(
                         card,
-                        big = !dual,
+                        big = columns == 1,
                         onOpen = { nav.push(Screen.Player(card.bvid, card.title)) },
                         onMore = { why = card },
-                        preview = if (card.bvid == previewing) { { FeedPreview(app, card, preview) } } else null,
+                        preview = if (card.bvid == previewing) { { FeedPreview(videos, danmaku, settings, card, preview) } } else null,
                     )
                 }
                 if (cards.isEmpty() && !refreshing) {
@@ -304,7 +320,7 @@ fun HomeScreen(app: RubiApp, nav: Nav, home: HomeState) {
                 onPgc = { i ->
                     zoneMenu = false
                     val pgc = pgcZones[i]
-                    nav.push(Screen.PgcZone(pgc.seasonType, pgc.name, PgcZoneState(app.core, pgc.seasonType)))
+                    nav.push(Screen.PgcZone(pgc.seasonType, pgc.name, PgcZoneState(pgcService, pgc.seasonType)))
                 },
             )
         }
@@ -312,7 +328,7 @@ fun HomeScreen(app: RubiApp, nav: Nav, home: HomeState) {
     }
 
     why?.let { card ->
-        WhySheet(app, card, onDismiss = { why = null }, onDisliked = {
+        WhySheet(homeService, card, onDismiss = { why = null }, onDisliked = {
             cards.removeAll { it.bvid == card.bvid }
             why = null
         })
@@ -321,10 +337,11 @@ fun HomeScreen(app: RubiApp, nav: Nav, home: HomeState) {
 
 /** 热门 (paged grid) and 排行 (numbered list); both already filtered by the rule table. */
 @Composable
-private fun HotRankList(app: RubiApp, nav: Nav, list: FeedList, ranking: Boolean, dual: Boolean, load: suspend (page: UInt) -> List<FfiVideoCard>) {
+private fun HotRankList(videos: VideosService, danmaku: DanmakuService, settings: CoreSettings, nav: Nav, list: FeedList, ranking: Boolean, dual: Boolean, load: suspend (page: UInt) -> List<FfiVideoCard>) {
+    val layout = LocalScreenLayout.current
     val ctx = LocalContext.current
-    val preview = remember(nav.stack.size) { PreviewPrefs.load(app.settings) }
-    val previewing = rememberPreviewTarget(list.grid, enabled = !dual && !ranking && preview.allowed(ctx))
+    val preview = remember(nav.stack.size) { PreviewPrefs.load(settings) }
+    val previewing = rememberPreviewTarget(list.grid, enabled = layout.videoColumns(dual) == 1 && !ranking && preview.allowed(ctx))
     val c = LocalMetro.current
     val cards = list.cards
     val grid = list.grid
@@ -357,7 +374,7 @@ private fun HotRankList(app: RubiApp, nav: Nav, list: FeedList, ranking: Boolean
     }
 
     LazyVerticalGrid(
-        columns = GridCells.Fixed(if (dual && !ranking) 2 else 1),
+        columns = GridCells.Fixed(if (ranking) layout.gridColumns(1) else layout.videoColumns(dual)),
         state = grid,
         contentPadding = PaddingValues(start = 16.dp, end = 16.dp, top = 8.dp, bottom = 28.dp),
         horizontalArrangement = Arrangement.spacedBy(12.dp),
@@ -392,9 +409,9 @@ private fun HotRankList(app: RubiApp, nav: Nav, list: FeedList, ranking: Boolean
             items(cards, key = { it.bvid }) { card ->
                 VideoCardView(
                     card,
-                    big = !dual,
+                    big = layout.videoColumns(dual) == 1,
                     onOpen = { nav.push(Screen.Player(card.bvid, card.title)) },
-                    preview = if (card.bvid == previewing) { { FeedPreview(app, card, preview) } } else null,
+                    preview = if (card.bvid == previewing) { { FeedPreview(videos, danmaku, settings, card, preview) } } else null,
                 )
             }
         }
@@ -431,8 +448,9 @@ fun VideoCardView(
                     .graphicsLayer { alpha = if (flights.landingOn(card.bvid)) 0f else 1f }
                     .background(c.bg2),
             ) {
-                AsyncImage(model = card.cover, contentDescription = null, contentScale = ContentScale.Crop, modifier = Modifier.fillMaxSize())
+                VideoCover(card.cover, card.portrait, Modifier.fillMaxSize())
                 preview?.invoke()
+                ProbeLine(card.bvid, Modifier.align(Alignment.BottomStart))
                 if (card.reason.isNotEmpty()) Tag(card.reason, Modifier.align(Alignment.TopStart))
                 Text(
                     formatDuration(card.durationS),
@@ -463,11 +481,11 @@ fun VideoCardView(
 
 @OptIn(ExperimentalMaterial3Api::class, androidx.compose.foundation.layout.ExperimentalLayoutApi::class)
 @Composable
-private fun WhySheet(app: RubiApp, card: FfiVideoCard, onDismiss: () -> Unit, onDisliked: () -> Unit) {
+private fun WhySheet(home: HomeService, card: FfiVideoCard, onDismiss: () -> Unit, onDisliked: () -> Unit) {
     val c = LocalMetro.current
     val scope = rememberCoroutineScope()
     var breakdown by remember { mutableStateOf<FfiBreakdown?>(null) }
-    LaunchedEffect(card.bvid) { breakdown = withContext(Dispatchers.IO) { runCatching { app.core.explain(card.bvid) }.getOrNull() } }
+    LaunchedEffect(card.bvid) { breakdown = withContext(Dispatchers.IO) { runCatching { home.explain(card.bvid) }.getOrNull() } }
 
     ModalBottomSheet(onDismissRequest = onDismiss, containerColor = c.bg2, shape = androidx.compose.ui.graphics.RectangleShape, dragHandle = null) {
         Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
@@ -497,7 +515,7 @@ private fun WhySheet(app: RubiApp, card: FfiVideoCard, onDismiss: () -> Unit, on
                 ).forEach { (label, signal) ->
                     TextAction(label, onClick = {
                         scope.launch {
-                            runCatching { app.core.record(card.bvid, signal) }
+                            runCatching { home.record(card.bvid, signal) }
                             onDisliked()
                         }
                     })

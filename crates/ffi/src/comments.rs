@@ -3,14 +3,14 @@
 use rubi_core::CommentArea;
 use rubi_model::ThreadRow;
 
-use crate::{FfiCommentArea, FfiCommentPage, FfiCommentRef, FfiCommentRow, FfiCommentThread, Res, RubiCore};
+use crate::{CommentsService, FfiCommentArea, FfiCommentPage, FfiCommentRef, FfiCommentRow, FfiCommentThread, Res};
 
 fn area_of(a: FfiCommentArea) -> CommentArea {
     CommentArea { kind: a.kind, oid: a.oid }
 }
 
 #[uniffi::export(async_runtime = "tokio")]
-impl RubiCore {
+impl CommentsService {
     /// The comment area under a video.
     pub fn video_comments(&self, aid: u64) -> FfiCommentArea {
         FfiCommentArea { kind: CommentArea::video(aid).kind, oid: aid }

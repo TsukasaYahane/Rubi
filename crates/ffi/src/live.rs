@@ -6,12 +6,12 @@ use rubi_core::{LiveBatch, LiveChannel, LiveFilter};
 use rubi_model::LiveProtocol;
 
 use crate::{
-    FfiEsportsGame, FfiHeader, FfiLiveArea, FfiLiveBatch, FfiLiveFilter, FfiLivePlay, FfiLiveQuality, FfiLiveRoom,
-    FfiLiveRoomPage, FfiLiveStream, FfiMatch, FfiMatchPage, Res, RubiCore,
+    EsportsService, FfiEsportsGame, FfiHeader, FfiLiveArea, FfiLiveBatch, FfiLiveFilter, FfiLivePlay, FfiLiveQuality,
+    FfiLiveRoom, FfiLiveRoomPage, FfiLiveStream, FfiMatch, FfiMatchPage, LiveService, Res,
 };
 
 #[uniffi::export(async_runtime = "tokio")]
-impl RubiCore {
+impl LiveService {
     /// The 推荐 rooms; each call gives a fresh batch.
     pub async fn live_recommended(&self) -> Res<Vec<FfiLiveRoom>> {
         Ok(self.live.recommended().await?.into_iter().map(Into::into).collect())
@@ -55,7 +55,10 @@ impl RubiCore {
     pub async fn live_channel(&self, room_id: u64, filter: FfiLiveFilter) -> Res<Arc<FfiLiveChannel>> {
         Ok(Arc::new(FfiLiveChannel(self.live.channel(room_id, filter.into()).await?)))
     }
+}
 
+#[uniffi::export(async_runtime = "tokio")]
+impl EsportsService {
     /// One page (from 1) of the schedule around today; `game` 0 for every game.
     pub async fn esports_schedule(&self, game: u32, page: u32) -> Res<FfiMatchPage> {
         let (matches, has_more) = self.esports.schedule(game, page).await?;

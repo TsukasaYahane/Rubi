@@ -1,5 +1,6 @@
 package dev.rubi.app.ui
 
+import dev.rubi.app.Appearance
 import android.content.Intent
 import android.net.Uri
 import android.os.Build
@@ -29,7 +30,6 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
-import dev.rubi.app.RubiApp
 import dev.rubi.app.ui.theme.LocalMetro
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
@@ -68,7 +68,7 @@ private val LIBRARIES = listOf(
  * page, the 声明 with open-source licences, and 帮助.
  */
 @Composable
-fun AboutScreen(app: RubiApp, nav: Nav) {
+fun AboutScreen(appearance: Appearance, nav: Nav) {
     val c = LocalMetro.current
     val ctx = LocalContext.current
     val scope = rememberCoroutineScope()
@@ -88,7 +88,7 @@ fun AboutScreen(app: RubiApp, nav: Nav) {
         LazyColumn(Modifier.weight(1f), contentPadding = PaddingValues(start = 16.dp, end = 16.dp, bottom = 24.dp)) {
             item {
                 Row(Modifier.fillMaxWidth().padding(top = 14.dp), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(14.dp)) {
-                    RubiLogo(64.dp, app.appIcon.value)
+                    RubiLogo(64.dp, appearance.appIcon.value)
                     Column {
                         Text("RUBI", fontSize = 22.sp, letterSpacing = 4.sp, fontWeight = FontWeight.Light, color = c.fg)
                         Meta("版本 ${version.first}（构建 ${version.second}）")

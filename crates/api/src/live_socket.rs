@@ -5,6 +5,8 @@
 use std::io::Read;
 use std::time::Duration;
 
+use async_trait::async_trait;
+
 use flate2::read::ZlibDecoder;
 use futures_util::{SinkExt, StreamExt};
 use serde_json::{Value, json};
@@ -38,15 +40,53 @@ pub struct ChannelJoin<'a> {
     pub token: &'a str,
 }
 
+/// Opens room channels. The service holds this, never the websocket type, so the channel
+/// can be faked in a test.
+#[async_trait]
+pub trait ChannelOpener: Send + Sync {
+    /// Connects to the first address that answers and joins the room.
+    async fn open(&self, urls: &[String], join: &ChannelJoin<'_>) -> Result<Box<dyn ChannelStream>>;
+}
+
+/// An open room channel.
+#[async_trait]
+pub trait ChannelStream: Send {
+    /// The messages of the next packet; `None` once the channel has closed. Reading also keeps
+    /// the channel alive.
+    async fn next(&mut self) -> Result<Option<Vec<Value>>>;
+    async fn close(self: Box<Self>);
+}
+
+/// Room channels over B站's websocket.
+pub struct WebChannels;
+
+#[async_trait]
+impl ChannelOpener for WebChannels {
+    async fn open(&self, urls: &[String], join: &ChannelJoin<'_>) -> Result<Box<dyn ChannelStream>> {
+        Ok(Box::new(LiveSocket::open(urls, join).await?))
+    }
+}
+
+#[async_trait]
+impl ChannelStream for LiveSocket {
+    async fn next(&mut self) -> Result<Option<Vec<Value>>> {
+        LiveSocket::next(self).await
+    }
+
+    async fn close(self: Box<Self>) {
+        LiveSocket::close(*self).await
+    }
+}
+
 /// An open channel; read it with [`next`](Self::next), which also keeps it alive.
-pub struct LiveSocket {
+struct LiveSocket {
     ws: WebSocketStream<MaybeTlsStream<TcpStream>>,
     heartbeat: Interval,
 }
 
 impl LiveSocket {
     /// Connects to the first address that answers and joins the room.
-    pub async fn open(urls: &[String], join: &ChannelJoin<'_>) -> Result<Self> {
+    async fn open(urls: &[String], join: &ChannelJoin<'_>) -> Result<Self> {
         let mut last = ApiError::Decode("no channel address".into());
         for url in urls {
             match Self::open_one(url, join).await {
@@ -76,7 +116,7 @@ impl LiveSocket {
 
     /// The next messages from the channel, sending heartbeats while it waits. `None` once the
     /// server closes the channel.
-    pub async fn next(&mut self) -> Result<Option<Vec<Value>>> {
+    async fn next(&mut self) -> Result<Option<Vec<Value>>> {
         loop {
             tokio::select! {
                 _ = self.heartbeat.tick() => {
@@ -99,7 +139,7 @@ impl LiveSocket {
         }
     }
 
-    pub async fn close(mut self) {
+    async fn close(mut self) {
         let _ = self.ws.close(None).await;
     }
 }

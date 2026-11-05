@@ -1,5 +1,6 @@
 package dev.rubi.app.ui
 
+import dev.rubi.core.VideosService
 import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.layout.onSizeChanged
@@ -35,7 +36,6 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
-import dev.rubi.app.RubiApp
 import dev.rubi.app.cast.Dlna
 import dev.rubi.app.cast.Renderer
 import dev.rubi.app.playback.LocalMedia
@@ -54,7 +54,7 @@ import kotlinx.coroutines.withContext
  */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-fun CastSheet(app: RubiApp, bvid: String, cid: ULong?, title: String, onDismiss: () -> Unit) {
+fun CastSheet(videos: VideosService, bvid: String, cid: ULong?, title: String, onDismiss: () -> Unit) {
     val c = LocalMetro.current
     val ctx = LocalContext.current
     val media = LocalMedia.current
@@ -80,7 +80,7 @@ fun CastSheet(app: RubiApp, bvid: String, cid: ULong?, title: String, onDismiss:
         problem = null
         scope.launch {
             runCatching {
-                val file = withContext(Dispatchers.IO) { app.core.castFile(bvid, cid, qn ?: 80u) }
+                val file = withContext(Dispatchers.IO) { videos.castFile(bvid, cid, qn ?: 80u) }
                 qualities = file.qualities
                 // The phone stops; the TV carries on from where it was.
                 media.player.get().pause()

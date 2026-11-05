@@ -1,9 +1,9 @@
 //! Like, coin, favourite, watch later, follow.
 
-use crate::{FfiFavFolder, FfiTriple, FfiVideoRelation, Res, RubiCore};
+use crate::{ActionsService, FfiFavFolder, FfiTriple, FfiVideoRelation, Res};
 
 #[uniffi::export(async_runtime = "tokio")]
-impl RubiCore {
+impl ActionsService {
     pub async fn like(&self, bvid: String, on: bool) -> Res<()> {
         Ok(self.actions.like(&bvid, on).await?)
     }

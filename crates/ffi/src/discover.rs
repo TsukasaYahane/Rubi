@@ -2,14 +2,30 @@
 
 use rubi_model::VideoCard;
 
-use crate::{FfiEmote, FfiHotWords, FfiSearchResult, FfiVideoCard, Res, RubiCore};
+use crate::{DiscoverService, EmotesService, FfiEmote, FfiHotWords, FfiSearchResult, FfiVideoCard, Res};
+
+/// 影视 works handed to the search page at most (it shows three and folds the rest).
+const PGC_HITS: usize = 20;
+
+/// A 番剧 / 电影 / 纪录片 / 电视剧 found by a search.
+#[derive(Debug, Clone, uniffi::Record)]
+pub struct FfiPgcHit {
+    pub season_id: u64,
+    pub title: String,
+    pub cover: String,
+    pub kind: String,
+    pub badge: String,
+    pub score: String,
+    pub index_show: String,
+    pub styles: String,
+}
 
 fn cards(list: &[VideoCard]) -> Vec<FfiVideoCard> {
     list.iter().map(|c| FfiVideoCard::of(c, None)).collect()
 }
 
 #[uniffi::export(async_runtime = "tokio")]
-impl RubiCore {
+impl DiscoverService {
     pub async fn popular(&self, page: u32) -> Res<Vec<FfiVideoCard>> {
         Ok(cards(&self.discover.popular(page).await?))
     }
@@ -45,6 +61,26 @@ impl RubiCore {
         Ok(FfiSearchResult { cards: cards(&found), hidden: hidden as u32 })
     }
 
+    /// 影视 works the term names (番剧 first), shown above the results with a way into them.
+    pub async fn search_pgc(&self, keyword: String) -> Res<Vec<FfiPgcHit>> {
+        Ok(self
+            .discover
+            .search_pgc(&keyword, PGC_HITS)
+            .await?
+            .into_iter()
+            .map(|h| FfiPgcHit {
+                season_id: h.season_id,
+                title: h.title,
+                cover: h.cover,
+                kind: h.kind,
+                badge: h.badge,
+                score: h.score,
+                index_show: h.index_show,
+                styles: h.styles,
+            })
+            .collect())
+    }
+
     /// UPs whose name or alias fits (「TES」 finds 滔搏电子竞技俱乐部), page from 1.
     pub async fn search_users(&self, keyword: String, page: u32) -> Res<FfiUserHits> {
         let hits = self.discover.search_users(&keyword, page).await?;
@@ -71,7 +107,10 @@ impl RubiCore {
         let (words, hidden) = self.discover.hot_words(10).await?;
         Ok(FfiHotWords { words: words.into_iter().map(|w| w.keyword).collect(), hidden: hidden as u32 })
     }
+}
 
+#[uniffi::export(async_runtime = "tokio")]
+impl EmotesService {
     /// The default emote set, for rendering `[doge]`-style tokens as images.
     pub async fn emotes(&self) -> Res<Vec<FfiEmote>> {
         Ok(self.emotes.all().await?.iter().map(|e| FfiEmote { text: e.text.clone(), url: e.url.clone() }).collect())

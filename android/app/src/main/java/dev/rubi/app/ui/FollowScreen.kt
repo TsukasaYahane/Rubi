@@ -3,7 +3,6 @@ package dev.rubi.app.ui
 import androidx.compose.foundation.border
 import androidx.compose.foundation.lazy.LazyListState
 import kotlinx.coroutines.CoroutineScope
-import dev.rubi.core.RubiCore
 import android.content.Intent
 import android.net.Uri
 import androidx.compose.foundation.background
@@ -49,9 +48,9 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import coil3.compose.AsyncImage
-import dev.rubi.app.RubiApp
 import dev.rubi.app.ui.theme.LocalMetro
 import dev.rubi.app.ui.theme.MetroType
+import dev.rubi.core.FollowingService
 import dev.rubi.core.FfiDynamic
 import dev.rubi.core.FfiDynamicBody
 import dev.rubi.core.FfiDynamicKind
@@ -66,7 +65,7 @@ import kotlinx.coroutines.launch
  * 关注 tab state, kept above the screen so switching tabs does not reload it. `selected` null
  * is 全部 (every followed UP's videos); otherwise one UP's posts of every kind.
  */
-class FollowState(private val core: RubiCore, private val scope: CoroutineScope) {
+class FollowState(private val following: FollowingService, private val scope: CoroutineScope) {
     val ups = mutableStateListOf<FfiFollowedUp>()
     val grid = LazyGridState()
     val bar = LazyListState()
@@ -75,7 +74,7 @@ class FollowState(private val core: RubiCore, private val scope: CoroutineScope)
         private set
 
     val videos = Paged<FfiVideoCard, String>(scope, key = { it.bvid }) { at ->
-        core.followedFeed(at).let { Page(it.cards, it.next, it.hidden) }
+        following.followedFeed(at).let { Page(it.cards, it.next, it.hidden) }
     }
     var posts by mutableStateOf(postsOf(0uL))
         private set
@@ -98,17 +97,17 @@ class FollowState(private val core: RubiCore, private val scope: CoroutineScope)
 
     fun loadUps() {
         if (ups.isNotEmpty()) return
-        scope.launch { runCatching { core.followedUps() }.onSuccess { ups.addAll(it) } }
+        scope.launch { runCatching { following.followedUps() }.onSuccess { ups.addAll(it) } }
     }
 
     private fun postsOf(mid: ULong) = Paged<FfiDynamic, String>(scope, key = { it.id }) { at ->
-        core.upDynamics(mid, at).let { Page(it.items, it.next) }
+        following.upDynamics(mid, at).let { Page(it.items, it.next) }
     }
 }
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-fun FollowScreen(app: RubiApp, nav: Nav, state: FollowState, dual: Boolean) {
+fun FollowScreen(followingService: FollowingService, nav: Nav, state: FollowState, dual: Boolean) {
     val c = LocalMetro.current
     val scope = rememberCoroutineScope()
     val ctx = LocalContext.current
@@ -137,7 +136,7 @@ fun FollowScreen(app: RubiApp, nav: Nav, state: FollowState, dual: Boolean) {
             // Copies the following list into the recommender's 关注 UP factor.
             TextAction("同步到推荐", onClick = {
                 scope.launch {
-                    state.note = runCatching { "已同步 ${app.core.syncFollowings()} 个关注到推荐" }.getOrElse { "同步失败：${it.message}" }
+                    state.note = runCatching { "已同步 ${followingService.syncFollowings()} 个关注到推荐" }.getOrElse { "同步失败：${it.message}" }
                 }
             }, dim = true)
         }
@@ -162,7 +161,7 @@ fun FollowScreen(app: RubiApp, nav: Nav, state: FollowState, dual: Boolean) {
         PullToRefreshBox(isRefreshing = shown.loading && !isEmpty, onRefresh = { shown.reset() }) {
             LazyVerticalGrid(
                 // One UP's posts read top to bottom; 全部 follows the home layout.
-                columns = GridCells.Fixed(if (dual && all) 2 else 1),
+                columns = GridCells.Fixed(if (all) LocalScreenLayout.current.videoColumns(dual) else LocalScreenLayout.current.gridColumns(1)),
                 state = state.grid,
                 contentPadding = PaddingValues(start = 16.dp, end = 16.dp, top = 8.dp, bottom = 28.dp),
                 horizontalArrangement = Arrangement.spacedBy(12.dp),
@@ -171,7 +170,7 @@ fun FollowScreen(app: RubiApp, nav: Nav, state: FollowState, dual: Boolean) {
             ) {
                 if (all) {
                     items(state.videos.items, key = { it.bvid }) { card ->
-                        VideoCardView(card, big = !dual, onOpen = { nav.push(Screen.Player(card.bvid, card.title)) })
+                        VideoCardView(card, big = LocalScreenLayout.current.videoColumns(dual) == 1, onOpen = { nav.push(Screen.Player(card.bvid, card.title)) })
                     }
                 } else {
                     items(state.posts.items, key = { it.id }) { post ->

@@ -6,7 +6,7 @@ use rubi_api::{ChatApi, NoticeApi, NoticeCursor};
 use rubi_model::{ChatMessage, ChatSession, Notice, NoticeKind, UnreadCounts};
 
 use crate::error::Result;
-use crate::ports::RuleSource;
+use crate::ports::{RuleSource, VideoLookup};
 use crate::social::filter_sessions;
 
 /// Chat messages loaded when a conversation opens.
@@ -16,11 +16,17 @@ pub struct Messages {
     notices: Arc<dyn NoticeApi>,
     chat: Arc<dyn ChatApi>,
     rules: Arc<dyn RuleSource>,
+    videos: Arc<dyn VideoLookup>,
 }
 
 impl Messages {
-    pub(crate) fn new(notices: Arc<dyn NoticeApi>, chat: Arc<dyn ChatApi>, rules: Arc<dyn RuleSource>) -> Self {
-        Self { notices, chat, rules }
+    pub(crate) fn new(
+        notices: Arc<dyn NoticeApi>,
+        chat: Arc<dyn ChatApi>,
+        rules: Arc<dyn RuleSource>,
+        videos: Arc<dyn VideoLookup>,
+    ) -> Self {
+        Self { notices, chat, rules, videos }
     }
 
     pub async fn unread(&self) -> Result<UnreadCounts> {
@@ -41,11 +47,12 @@ impl Messages {
         Ok(self.chat.messages(talker_mid, CHAT_PAGE).await?)
     }
 
-    /// Sends `card` to `talker_mid`: as B站's video share card when the server takes it,
+    /// Sends video `bvid` to `talker_mid`: as B站's video share card when the server takes it,
     /// otherwise as its title and link. B站 answers -400 to share cards sent from outside its
     /// own clients (seen 2026-11-03); a refused card sends nothing, so the link is no repeat.
     /// Returns whether it went as a card.
-    pub async fn share_video(&self, talker_mid: u64, card: &rubi_model::VideoCard) -> Result<bool> {
+    pub async fn share_video(&self, talker_mid: u64, bvid: &str) -> Result<bool> {
+        let card = &self.videos.card(bvid).await?;
         let share = rubi_api::VideoShare {
             aid: card.aid,
             bvid: card.bvid.clone(),

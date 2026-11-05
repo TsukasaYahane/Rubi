@@ -21,31 +21,60 @@ pub const MAX_FREE_QN: u32 = 80;
 /// Cards seen in any list, by BV id. Shared by every service that hands cards out. Kept without
 /// the raw API JSON they were parsed from: the filters have judged them already, and the raw
 /// object is most of a card's size.
-pub struct CardCache(Recent<String, VideoCard>);
+pub struct CardCache {
+    cards: Recent<String, VideoCard>,
+    /// Whether each video is portrait, where its list said (read before the raw JSON goes).
+    portrait: Recent<String, bool>,
+}
 
 impl Default for CardCache {
     fn default() -> Self {
-        Self(Recent::new(CARD_CACHE))
+        Self { cards: Recent::new(CARD_CACHE), portrait: Recent::new(CARD_CACHE) }
     }
 }
 
 impl CardCache {
     pub fn remember(&self, cards: &[VideoCard]) {
         for c in cards {
+            if let Some(p) = portrait_of(&c.raw) {
+                self.portrait.put(c.bvid.clone(), p);
+            }
             let mut slim = c.clone();
             slim.raw = serde_json::Value::Null;
-            self.0.put(c.bvid.clone(), slim);
+            self.cards.put(c.bvid.clone(), slim);
         }
+    }
+
+    /// Whether `bvid` is a portrait video, when a list it was shown in said so.
+    pub fn portrait(&self, bvid: &str) -> Option<bool> {
+        self.portrait.get(&bvid.to_owned())
+    }
+
+    /// Records a video's shape learned some other way (its details).
+    fn note_portrait(&self, bvid: &str, portrait: bool) {
+        self.portrait.put(bvid.to_owned(), portrait);
     }
 
     /// Drops every card; the next action on one looks it up again.
     fn clear(&self) {
-        self.0.clear();
+        self.cards.clear();
+        self.portrait.clear();
     }
 
     fn get(&self, bvid: &str) -> Option<VideoCard> {
-        self.0.get(&bvid.to_owned())
+        self.cards.get(&bvid.to_owned())
     }
+}
+
+/// Whether a video is portrait (taller than wide), from the `dimension` B站 gives with it
+/// (`rotate` 1: width and height are swapped). `None` when the JSON has no size.
+pub fn portrait_of(raw: &serde_json::Value) -> Option<bool> {
+    let d = &raw["dimension"];
+    let (w, h) = (d["width"].as_u64()?, d["height"].as_u64()?);
+    if w == 0 || h == 0 {
+        return None;
+    }
+    Some(if d["rotate"].as_u64() == Some(1) { w > h } else { h > w })
 }
 
 /// What the player page shows about a video besides its card: its parts (分P) and the
@@ -109,6 +138,22 @@ impl Videos {
     /// Forgets the cards shown so far (after a video chain is left, or when memory is low).
     pub fn forget_shown(&self) {
         self.cards.clear();
+    }
+
+    /// Whether `bvid` is a portrait video, when a list it was shown in said so.
+    pub fn known_portrait(&self, bvid: &str) -> Option<bool> {
+        self.cards.portrait(bvid)
+    }
+
+    /// Whether `bvid` is a portrait video: from the lists when they said, else from its
+    /// details (one request; only the shape is kept, the card is looked up in full later).
+    pub async fn portrait(&self, bvid: &str) -> Result<bool> {
+        if let Some(p) = self.cards.portrait(bvid) {
+            return Ok(p);
+        }
+        let p = portrait_of(&self.api.view(bvid).await?.card.raw).unwrap_or(false);
+        self.cards.note_portrait(bvid, p);
+        Ok(p)
     }
 
     /// Fresh details for the player page: the card (with tags and cid), its parts and 合集.
@@ -210,6 +255,15 @@ impl VideoStreams for Videos {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn portrait_follows_dimension_and_rotation() {
+        let d = |w: u64, h: u64, r: u64| serde_json::json!({ "dimension": { "width": w, "height": h, "rotate": r } });
+        assert_eq!(portrait_of(&d(1080, 1920, 0)), Some(true));
+        assert_eq!(portrait_of(&d(1920, 1080, 0)), Some(false));
+        assert_eq!(portrait_of(&d(1920, 1080, 1)), Some(true), "rotated: the sides swap");
+        assert_eq!(portrait_of(&serde_json::json!({})), None);
+    }
 
     #[test]
     fn resume_skips_the_start_and_the_end() {

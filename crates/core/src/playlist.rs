@@ -1,18 +1,16 @@
-//! The custom play list: videos added from anywhere, played in order, looped or shuffled, as
-//! video or as audio only (听视频). Kept in the local database and part of the export.
+//! The custom play lists: videos added from anywhere, kept in the local database and part of
+//! the export. [`Playlists`] edits them; playing one is [`crate::PlayQueue`]'s, hearing one
+//! [`crate::Listening`]'s, both over the shared [`crate::lineup::Lineup`].
 
-use std::collections::{HashMap, HashSet};
-use std::sync::{Arc, Mutex};
+use std::sync::Arc;
 
-use futures_util::future::join_all;
-use rubi_model::{VideoCard, now_secs};
+use rubi_model::VideoCard;
 use rubi_store::{DEFAULT_PLAYLIST, KvRepo, PlaylistInfo, PlaylistRepo, SqliteStore};
 use serde::{Deserialize, Serialize};
 
 use crate::error::{CoreError, Result};
+use crate::lineup::Lineup;
 use crate::ports::{PlaylistBackup, VideoLookup};
-use crate::queue::ListenQueue;
-use crate::videos::CardCache;
 
 const MODE_KEY: &str = "playlist_mode";
 /// The name of the list that always exists.
@@ -166,33 +164,16 @@ pub(crate) fn next_in<'a>(
     }
 }
 
-/// A list that lives in memory only (negative ids).
-struct Adhoc {
-    name: String,
-    items: Vec<VideoCard>,
-}
-
-/// The play lists as the app uses them: editing them, playing one as video, and hearing one
-/// (听视频). The list last started is the one whose next item follows.
+/// Editing the play lists: names, videos, order, and the mode they play in.
 pub struct Playlists<S = SqliteStore> {
     list: Arc<Playlist<S>>,
+    lineup: Arc<Lineup<S>>,
     videos: Arc<dyn VideoLookup>,
-    cards: Arc<CardCache>,
-    listening: Mutex<ListenQueue>,
-    active: Mutex<i64>,
-    adhoc: Mutex<HashMap<i64, Adhoc>>,
 }
 
 impl<S: PlaylistRepo + KvRepo + Send + Sync> Playlists<S> {
-    pub(crate) fn new(list: Arc<Playlist<S>>, videos: Arc<dyn VideoLookup>, cards: Arc<CardCache>) -> Self {
-        Self {
-            list,
-            videos,
-            cards,
-            listening: Mutex::default(),
-            active: Mutex::new(DEFAULT_PLAYLIST),
-            adhoc: Mutex::default(),
-        }
+    pub(crate) fn new(list: Arc<Playlist<S>>, lineup: Arc<Lineup<S>>, videos: Arc<dyn VideoLookup>) -> Self {
+        Self { list, lineup, videos }
     }
 
     pub fn lists(&self) -> Result<Vec<PlaylistInfo>> {
@@ -207,27 +188,17 @@ impl<S: PlaylistRepo + KvRepo + Send + Sync> Playlists<S> {
         self.list.rename(id, name)
     }
 
+    /// Deletes a stored list, or forgets an in-memory one (negative id).
     pub fn delete(&self, id: i64) -> Result<()> {
-        if id < 0 {
-            self.drop_adhoc(id);
-            return Ok(());
+        if id >= 0 {
+            self.list.delete(id)?;
         }
-        self.list.delete(id)?;
-        let mut active = self.active.lock().unwrap_or_else(|e| e.into_inner());
-        if *active == id {
-            *active = DEFAULT_PLAYLIST;
-        }
+        self.lineup.forget(id);
         Ok(())
     }
 
     pub fn items(&self, list: i64) -> Result<Vec<VideoCard>> {
-        let items = if list < 0 {
-            self.adhoc_lock().get(&list).map(|a| a.items.clone()).unwrap_or_default()
-        } else {
-            self.list.items(list)?
-        };
-        self.cards.remember(&items);
-        Ok(items)
+        self.lineup.items(list)
     }
 
     pub fn lists_with(&self, bvid: &str) -> Result<Vec<i64>> {
@@ -259,186 +230,6 @@ impl<S: PlaylistRepo + KvRepo + Send + Sync> Playlists<S> {
     pub fn set_mode(&self, mode: PlaylistMode) -> Result<()> {
         self.list.set_mode(mode)
     }
-
-    /// Makes `list` the one played: its next item follows the video that ends.
-    pub fn play(&self, list: i64) {
-        *self.active.lock().unwrap_or_else(|e| e.into_inner()) = list;
-    }
-
-    /// Where 播放全部 / 听全部 starts; `list` becomes the one played.
-    pub fn first(&self, list: i64) -> Result<Option<VideoCard>> {
-        self.play(list);
-        let items = self.items(list)?;
-        Ok(match self.mode_of(list)? {
-            PlaylistMode::Shuffle if !items.is_empty() => Some(items[random_below(items.len())].clone()),
-            _ => items.into_iter().next(),
-        })
-    }
-
-    /// The video to play after `current` ended on the video page; `None` stops.
-    pub fn next_after(&self, current: &str) -> Result<Option<VideoCard>> {
-        let list = self.active();
-        let items = self.items(list)?;
-        Ok(next_in(&items, current, self.mode_of(list)?, random_below).cloned())
-    }
-
-    /// The list being played: its id, name and videos.
-    pub fn playing(&self) -> Result<(i64, String, Vec<VideoCard>)> {
-        let list = self.active();
-        let name = if list < 0 {
-            self.adhoc_lock().get(&list).map(|a| a.name.clone()).unwrap_or_default()
-        } else {
-            self.list.lists()?.into_iter().find(|l| l.id == list).map(|l| l.name).unwrap_or_default()
-        };
-        Ok((list, name, self.items(list)?))
-    }
-
-    /// Plays `cards` (a 收藏夹, 稍后再看) as a list of their own that is not kept: it replaces
-    /// the last such list and goes with [Self::drop_temp]. Returns the first to play.
-    pub async fn play_temp(&self, name: &str, bvids: &[String]) -> Result<Option<VideoCard>> {
-        let cards = self.cards_of(bvids).await;
-        self.adhoc_lock().insert(TEMP_PLAYLIST, Adhoc { name: name.to_owned(), items: dedup(cards) });
-        self.first(TEMP_PLAYLIST)
-    }
-
-    /// Adds later pages of the list being played through.
-    pub async fn extend_temp(&self, bvids: &[String]) {
-        let cards = self.cards_of(bvids).await;
-        self.extend(TEMP_PLAYLIST, cards);
-    }
-
-    /// The cards of `bvids` (already shown, so mostly cached; the rest are looked up together);
-    /// ones that cannot be found are left out.
-    async fn cards_of(&self, bvids: &[String]) -> Vec<VideoCard> {
-        join_all(bvids.iter().map(|b| self.videos.card(b))).await.into_iter().filter_map(|c| c.ok()).collect()
-    }
-
-    /// The video page playing the temporary list closed: the list goes.
-    pub fn drop_temp(&self) {
-        self.drop_adhoc(TEMP_PLAYLIST);
-    }
-
-    fn extend(&self, list: i64, cards: Vec<VideoCard>) {
-        if let Some(a) = self.adhoc_lock().get_mut(&list) {
-            let mut have: HashSet<String> = a.items.iter().map(|i| i.bvid.clone()).collect();
-            a.items.extend(cards.into_iter().filter(|c| have.insert(c.bvid.clone())));
-        }
-    }
-
-    fn drop_adhoc(&self, list: i64) {
-        self.adhoc_lock().remove(&list);
-        let mut active = self.active.lock().unwrap_or_else(|e| e.into_inner());
-        if *active == list {
-            *active = DEFAULT_PLAYLIST;
-        }
-    }
-
-    /// 相关推荐 plays in order; the other lists in the chosen mode.
-    fn mode_of(&self, list: i64) -> Result<PlaylistMode> {
-        if list == RELATED_PLAYLIST { Ok(PlaylistMode::Sequential) } else { self.list.mode() }
-    }
-
-    fn active(&self) -> i64 {
-        *self.active.lock().unwrap_or_else(|e| e.into_inner())
-    }
-
-    fn adhoc_lock(&self) -> std::sync::MutexGuard<'_, HashMap<i64, Adhoc>> {
-        self.adhoc.lock().unwrap_or_else(|e| e.into_inner())
-    }
-
-    // ----- 听视频 -----
-
-    /// What is being heard; `None` when not listening.
-    pub fn listening(&self) -> Option<VideoCard> {
-        self.queue().current()
-    }
-
-    /// Starts hearing `list` from `bvid`.
-    pub async fn listen_from(&self, list: i64, bvid: &str) -> Result<VideoCard> {
-        let card = self.videos.card(bvid).await?;
-        self.play(list);
-        Ok(self.queue().start(card))
-    }
-
-    /// Switches to `bvid` picked from the list.
-    pub async fn listen_jump(&self, bvid: &str) -> Result<VideoCard> {
-        let card = self.videos.card(bvid).await?;
-        Ok(self.queue().jump(card))
-    }
-
-    /// Starts hearing one video, to be followed by its 相关推荐 ([Self::listen_append]).
-    pub async fn listen_related(&self, bvid: &str) -> Result<VideoCard> {
-        let card = self.videos.card(bvid).await?;
-        self.adhoc_lock().insert(RELATED_PLAYLIST, Adhoc { name: "相关推荐".into(), items: vec![card.clone()] });
-        self.play(RELATED_PLAYLIST);
-        Ok(self.queue().start(card))
-    }
-
-    /// How many videos are left to hear after the current one when following 相关推荐;
-    /// `None` when hearing a list of the user's own.
-    pub fn related_left(&self) -> Option<usize> {
-        if self.active() != RELATED_PLAYLIST {
-            return None;
-        }
-        let now = self.queue().current()?;
-        let items = self.items(RELATED_PLAYLIST).ok()?;
-        Some(items.iter().position(|c| c.bvid == now.bvid).map(|at| items.len() - at - 1).unwrap_or(0))
-    }
-
-    /// Adds 相关推荐 to come after what is heard; ones already in the list are left out.
-    pub async fn listen_append(&self, bvids: &[String]) {
-        let cards = self.cards_of(bvids).await;
-        self.extend(RELATED_PLAYLIST, cards);
-    }
-
-    /// 下一首 (`by_user`) or the item having ended; `None` means listening stopped.
-    pub fn listen_next(&self, by_user: bool) -> Result<Option<VideoCard>> {
-        let list = self.active();
-        let (items, mode) = (self.items(list)?, self.mode_of(list)?);
-        // Following 相关推荐 never wraps back to the first.
-        let by_user = by_user && list != RELATED_PLAYLIST;
-        Ok(self.queue().next(&items, mode, by_user, random_below))
-    }
-
-    /// 上一首.
-    pub fn listen_previous(&self) -> Result<Option<VideoCard>> {
-        let list = self.active();
-        let (items, mode) = (self.items(list)?, self.mode_of(list)?);
-        Ok(self.queue().previous(&items, mode))
-    }
-
-    /// The list being heard, for the 听视频 page.
-    pub fn listening_items(&self) -> Result<Vec<VideoCard>> {
-        self.items(self.active())
-    }
-
-    pub fn listen_stop(&self) {
-        self.queue().stop();
-        self.drop_adhoc(RELATED_PLAYLIST);
-    }
-
-    fn queue(&self) -> std::sync::MutexGuard<'_, ListenQueue> {
-        self.listening.lock().unwrap_or_else(|e| e.into_inner())
-    }
-}
-
-/// `cards` without repeats, first one kept.
-fn dedup(cards: Vec<VideoCard>) -> Vec<VideoCard> {
-    let mut seen = HashSet::with_capacity(cards.len());
-    cards.into_iter().filter(|c| seen.insert(c.bvid.clone())).collect()
-}
-
-/// A number in `0..n` (n > 0). Shuffling needs no more than the clock's nanoseconds.
-fn random_below(n: usize) -> usize {
-    let nanos = std::time::SystemTime::now()
-        .duration_since(std::time::UNIX_EPOCH)
-        .map(|d| d.subsec_nanos() as u64)
-        .unwrap_or(0);
-    let mut x = nanos ^ (now_secs() as u64).rotate_left(17) ^ 0x9E37_79B9_7F4A_7C15;
-    x ^= x << 13;
-    x ^= x >> 7;
-    x ^= x << 17;
-    (x % n.max(1) as u64) as usize
 }
 
 #[cfg(test)]

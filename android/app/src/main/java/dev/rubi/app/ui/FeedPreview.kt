@@ -1,5 +1,8 @@
 package dev.rubi.app.ui
 
+import dev.rubi.core.VideosService
+import dev.rubi.core.DanmakuService
+import dev.rubi.app.data.CoreSettings
 import dev.rubi.app.LocalFrozen
 import dev.rubi.app.playback.LocalMedia
 import android.view.LayoutInflater
@@ -25,7 +28,6 @@ import androidx.lifecycle.compose.LocalLifecycleOwner
 import androidx.media3.common.Player
 import androidx.media3.ui.PlayerView
 import dev.rubi.app.R
-import dev.rubi.app.RubiApp
 import dev.rubi.app.data.DanmakuDisplay
 import dev.rubi.app.data.PreviewPrefs
 import dev.rubi.app.playback.PREVIEW_QN
@@ -75,7 +77,7 @@ fun rememberPreviewTarget(grid: LazyGridState, enabled: Boolean): String? {
  * leaves the centre, the list scrolls, the page closes or the app goes to the background.
  */
 @Composable
-fun FeedPreview(app: RubiApp, card: FfiVideoCard, prefs: PreviewPrefs) {
+fun FeedPreview(videos: VideosService, danmakuService: DanmakuService, settings: CoreSettings, card: FfiVideoCard, prefs: PreviewPrefs) {
     // Frozen (节电): the preview player is released; it is built afresh on waking.
     if (LocalFrozen.current) return
     val ctx = LocalContext.current
@@ -111,11 +113,11 @@ fun FeedPreview(app: RubiApp, card: FfiVideoCard, prefs: PreviewPrefs) {
     LaunchedEffect(card.bvid, round) {
         ready = false
         runCatching {
-            val playback = app.core.playback(card.bvid, PREVIEW_QN)
+            val playback = videos.playback(card.bvid, PREVIEW_QN)
             media.preview.play(playback, prefs.volume)
             if (prefs.danmaku) {
                 val durationMs = maxOf(card.durationS.toULong() * 1000u, playback.durationMs).toUInt()
-                danmaku = app.core.danmakuSession(playback.cid, durationMs).use { it.load(listOf(1u)) }
+                danmaku = danmakuService.danmakuSession(playback.cid, durationMs).use { it.load(listOf(1u)) }
             }
         }
     }
@@ -133,7 +135,7 @@ fun FeedPreview(app: RubiApp, card: FfiVideoCard, prefs: PreviewPrefs) {
     )
     val set = danmaku
     if (ready && set != null) {
-        val display = remember { DanmakuDisplay.load(app.settings) }
-        DanmakuLayer(app.core, set, display, Modifier.fillMaxSize(), source = player)
+        val display = remember { DanmakuDisplay.load(settings) }
+        DanmakuLayer(danmakuService, set, display, Modifier.fillMaxSize(), source = player)
     }
 }

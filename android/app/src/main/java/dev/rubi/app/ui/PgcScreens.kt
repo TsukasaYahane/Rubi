@@ -40,16 +40,15 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import coil3.compose.AsyncImage
-import dev.rubi.app.RubiApp
 import dev.rubi.app.ui.theme.LocalMetro
 import dev.rubi.app.ui.theme.MetroType
+import dev.rubi.core.PgcService
 import dev.rubi.core.FfiPgcChoice
 import dev.rubi.core.FfiPgcConditions
 import dev.rubi.core.FfiPgcDay
 import dev.rubi.core.FfiPgcDetail
 import dev.rubi.core.FfiPgcEpisode
 import dev.rubi.core.FfiPgcSeason
-import dev.rubi.core.RubiCore
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
@@ -60,13 +59,13 @@ import kotlinx.coroutines.withContext
 private val SHOWN_FILTERS = listOf("style_id", "area", "season_status", "year", "release_date", "producer_id")
 
 /** The poster corner's colour for 会员 / 付费 marks; other marks (独家…) are Cobalt. */
-private fun badgeColor(badge: String) = if (badge.contains("会员") || badge.contains("付费") || badge.contains("点播")) LiveRed else Color(0xFF0050EF)
+internal fun badgeColor(badge: String) = if (badge.contains("会员") || badge.contains("付费") || badge.contains("点播")) LiveRed else Color(0xFF0050EF)
 
 /**
  * What a 专区 page has loaded and where it was, kept with its place in the back stack: coming
  * back from a season or a video shows it as it was instead of loading it again.
  */
-class PgcZoneState(private val core: RubiCore, private val seasonType: UInt) {
+class PgcZoneState(private val pgc: PgcService, private val seasonType: UInt) {
     var conditions by mutableStateOf<FfiPgcConditions?>(null)
         private set
     var timeline by mutableStateOf(emptyList<FfiPgcDay>())
@@ -82,7 +81,7 @@ class PgcZoneState(private val core: RubiCore, private val seasonType: UInt) {
     val pager = Paged<FfiPgcSeason, UInt>(scope, key = { it.seasonId }, minGapMs = 600L) { at ->
         val page = at ?: 1u
         val filters = chosen.filter { it.value != "-1" }.map { (field, value) -> FfiPgcChoice(value, field) }
-        val r = withContext(Dispatchers.IO) { core.pgcIndex(seasonType, filters, order, page) }
+        val r = withContext(Dispatchers.IO) { pgc.pgcIndex(seasonType, filters, order, page) }
         Page(r.seasons, if (r.hasMore) page + 1u else null)
     }
 
@@ -90,15 +89,15 @@ class PgcZoneState(private val core: RubiCore, private val seasonType: UInt) {
     suspend fun load() {
         if (loaded) return
         loaded = true
-        val cond = runCatching { withContext(Dispatchers.IO) { core.pgcConditions(seasonType) } }.getOrNull()
+        val cond = runCatching { withContext(Dispatchers.IO) { pgc.pgcConditions(seasonType) } }.getOrNull()
         conditions = cond
         order = cond?.orders?.firstOrNull()?.value ?: "0"
         pager.reset()
-        timeline = runCatching { withContext(Dispatchers.IO) { core.pgcTimeline(seasonType) } }.getOrDefault(emptyList())
+        timeline = runCatching { withContext(Dispatchers.IO) { pgc.pgcTimeline(seasonType) } }.getOrDefault(emptyList())
         if (timeline.isEmpty()) {
             // No timeline for this 专区: the latest additions stand in.
             val latest = cond?.orders?.firstOrNull { it.name.contains("更新") || it.name.contains("上线") || it.name.contains("时间") }?.value ?: "0"
-            recent = runCatching { withContext(Dispatchers.IO) { core.pgcIndex(seasonType, emptyList(), latest, 1u).seasons.take(10) } }.getOrDefault(emptyList())
+            recent = runCatching { withContext(Dispatchers.IO) { pgc.pgcIndex(seasonType, emptyList(), latest, 1u).seasons.take(10) } }.getOrDefault(emptyList())
         }
     }
 
@@ -106,7 +105,7 @@ class PgcZoneState(private val core: RubiCore, private val seasonType: UInt) {
         if (opened.containsKey(id)) opened.remove(id)
         else {
             opened[id] = null
-            scope.launch { opened[id] = runCatching { withContext(Dispatchers.IO) { core.pgcSeason(id) } }.getOrNull() }
+            scope.launch { opened[id] = runCatching { withContext(Dispatchers.IO) { pgc.pgcSeason(id) } }.getOrNull() }
         }
     }
 }
@@ -116,7 +115,7 @@ class PgcZoneState(private val core: RubiCore, private val seasonType: UInt) {
  * per season — poster with its 会员 / 付费 mark, title, score, date, and details that unfold.
  */
 @Composable
-fun PgcZoneScreen(app: RubiApp, nav: Nav, name: String, state: PgcZoneState) {
+fun PgcZoneScreen(pgc: PgcService, nav: Nav, name: String, state: PgcZoneState) {
     val c = LocalMetro.current
     val conditions = state.conditions
     val timeline = state.timeline
@@ -139,12 +138,12 @@ fun PgcZoneScreen(app: RubiApp, nav: Nav, name: String, state: PgcZoneState) {
                         timeline.forEach { day ->
                             day.releases.forEach { r ->
                                 TimelineItem(day.date + " " + r.time, r.title, r.index, r.cover, today = day.today) {
-                                    nav.push(Screen.PgcSeason(r.seasonId, r.title, PgcSeasonState(app.core, r.seasonId)))
+                                    nav.push(Screen.PgcSeason(r.seasonId, r.title, PgcSeasonState(pgc, r.seasonId)))
                                 }
                             }
                         }
                     } else {
-                        recent.forEach { s -> TimelineItem(s.orderText.ifEmpty { s.indexShow }, s.title, s.indexShow, s.cover, today = false) { nav.push(Screen.PgcSeason(s.seasonId, s.title, PgcSeasonState(app.core, s.seasonId))) } }
+                        recent.forEach { s -> TimelineItem(s.orderText.ifEmpty { s.indexShow }, s.title, s.indexShow, s.cover, today = false) { nav.push(Screen.PgcSeason(s.seasonId, s.title, PgcSeasonState(pgc, s.seasonId))) } }
                     }
                 }
             }
@@ -171,7 +170,7 @@ fun PgcZoneScreen(app: RubiApp, nav: Nav, name: String, state: PgcZoneState) {
                     detail = opened[s.seasonId],
                     open = opened.containsKey(s.seasonId),
                     onToggle = { state.toggle(s.seasonId) },
-                    onOpen = { nav.push(Screen.PgcSeason(s.seasonId, s.title, PgcSeasonState(app.core, s.seasonId))) },
+                    onOpen = { nav.push(Screen.PgcSeason(s.seasonId, s.title, PgcSeasonState(pgc, s.seasonId))) },
                 )
             }
             item {
@@ -220,7 +219,7 @@ private fun ChipRow(labels: List<String>, selected: Int, onSelect: (Int) -> Unit
 }
 
 @Composable
-private fun Poster(cover: String, badge: String, width: androidx.compose.ui.unit.Dp) {
+internal fun Poster(cover: String, badge: String, width: androidx.compose.ui.unit.Dp) {
     val c = LocalMetro.current
     Box(Modifier.width(width).height(width * 4 / 3).background(c.bg2)) {
         AsyncImage(model = cover, contentDescription = null, contentScale = ContentScale.Crop, modifier = Modifier.fillMaxSize())
@@ -256,7 +255,7 @@ private fun SeasonCard(s: FfiPgcSeason, detail: FfiPgcDetail?, open: Boolean, on
 }
 
 /** A season page's details and list place, kept with it in the back stack like [PgcZoneState]. */
-class PgcSeasonState(private val core: RubiCore, private val seasonId: ULong) {
+class PgcSeasonState(private val pgc: PgcService, private val seasonId: ULong) {
     var detail by mutableStateOf<FfiPgcDetail?>(null)
         private set
     var error by mutableStateOf<String?>(null)
@@ -266,7 +265,7 @@ class PgcSeasonState(private val core: RubiCore, private val seasonId: ULong) {
     suspend fun load() {
         if (detail != null) return
         error = null
-        runCatching { withContext(Dispatchers.IO) { core.pgcSeason(seasonId) } }.onSuccess { detail = it }.onFailure { error = errorText(it) }
+        runCatching { withContext(Dispatchers.IO) { pgc.pgcSeason(seasonId) } }.onSuccess { detail = it }.onFailure { error = errorText(it) }
     }
 }
 
@@ -277,7 +276,7 @@ class PgcSeasonState(private val core: RubiCore, private val seasonId: ULong) {
  */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-fun PgcSeasonScreen(app: RubiApp, nav: Nav, title: String, state: PgcSeasonState) {
+fun PgcSeasonScreen(pgc: PgcService, nav: Nav, title: String, state: PgcSeasonState) {
     val c = LocalMetro.current
     val scope = rememberCoroutineScope()
     val detail = state.detail
@@ -290,7 +289,7 @@ fun PgcSeasonScreen(app: RubiApp, nav: Nav, title: String, state: PgcSeasonState
         checking = ep.epId
         scope.launch {
             // Asked first, so a locked episode never opens a page that cannot play.
-            runCatching { withContext(Dispatchers.IO) { app.core.pgcPlay(ep.epId, ep.cid, 16u) } }
+            runCatching { withContext(Dispatchers.IO) { pgc.pgcPlay(ep.epId, ep.cid, 16u) } }
                 .onSuccess {
                     val d = detail
                     nav.push(Screen.Player(ep.bvid, "${d?.title ?: title} ${ep.title} ${ep.longTitle}".trim(), episode = ep.epId, episodeCid = ep.cid))
