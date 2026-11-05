@@ -9,6 +9,7 @@ use windows_collections::IVector;
 use windows_core::{IInspectable, Interface, Ref, Result};
 
 use crate::state::panes::{SideLayout, side_layout};
+use crate::ui::feed;
 use crate::ui::rows::{Covers, add_rows, on_row, on_row_click};
 use crate::ui::shell::shell;
 use crate::ui::{load_object, named, on_click, player, post};
@@ -101,7 +102,7 @@ impl Side {
             let Some(side) = opening.upgrade() else { return };
             let card = side.related.borrow().get(at).cloned();
             if let Some(card) = card {
-                let _ = player::show(&card.bvid, &card.title, &card.owner.name);
+                let _ = feed::route(&card.bvid, &card.title, &card.owner.name);
             }
         })?;
 
@@ -162,7 +163,7 @@ impl Side {
         Ok(())
     }
 
-    fn show_tab(&self, comments: bool) -> Result<()> {
+    pub fn show_tab(&self, comments: bool) -> Result<()> {
         let shown = |on| if on { Visibility::Visible } else { Visibility::Collapsed };
         named::<IUIElement>(&self.root, "Related")?.SetVisibility(shown(!comments))?;
         named::<IUIElement>(&self.root, "Comments")?.SetVisibility(shown(comments))?;

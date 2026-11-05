@@ -10,9 +10,10 @@ use windows_collections::IVector;
 use windows_core::{IInspectable, Interface, Ref, Result};
 
 use crate::state::layout::grid_cell;
+use crate::ui::feed;
 use crate::ui::rows::{Covers, add_rows, on_row, on_row_click};
 use crate::ui::shell::shell;
-use crate::ui::{load, named, player, post, set_text};
+use crate::ui::{load, named, post, set_text};
 use crate::xaml::{
     IFrameworkElement, IImage, IItemsControl, IItemsControl2, IItemsWrapGrid, ITextBlock, SizeChangedEventArgs,
     UIElement,
@@ -239,7 +240,7 @@ impl HomePage {
 
     fn open(&self, at: usize) -> Result<()> {
         if let Some(card) = self.cards.borrow().get(at) {
-            player::show(&card.bvid, &card.title, &card.owner.name)?;
+            feed::route(&card.bvid, &card.title, &card.owner.name)?;
         }
         Ok(())
     }

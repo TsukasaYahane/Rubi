@@ -187,3 +187,9 @@ Windows.Web.Http.HttpClient
 Windows.Web.Http.HttpClient::CreateInstance
 Windows.Web.Http.IHttpClient
 Windows.Web.Http.IHttpResponseMessage
+Windows.UI.Input.PointerPoint
+Windows.UI.Input.IPointerPoint
+Windows.UI.Input.PointerPointProperties
+Windows.UI.Input.IPointerPointProperties
+Windows.UI.Xaml.Input.IPointerRoutedEventArgs
+Windows.Foundation.IClosable

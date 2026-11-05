@@ -2,6 +2,7 @@
 //! through [`post`] as plain data.
 
 pub mod danmaku;
+pub mod feed;
 pub mod home;
 pub mod me;
 pub mod player;

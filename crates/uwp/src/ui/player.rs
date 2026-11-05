@@ -14,6 +14,7 @@ use crate::state::layout::WindowClass;
 use crate::state::manifest::dash_manifest;
 use crate::state::panes;
 use crate::ui::danmaku::Overlay;
+use crate::ui::feed;
 use crate::ui::player_actions::Actions;
 use crate::ui::player_side::Side;
 use crate::ui::shell::shell;
@@ -21,9 +22,9 @@ use crate::ui::splitter;
 use crate::ui::{load, named, on_click, post, set_text, soon};
 use crate::xaml::{
     AdaptiveMediaSource, AdaptiveMediaSourceCreationStatus, ApplicationView, DataWriter, FocusState, FrameworkElement,
-    Grid, GridLength, GridUnitType, HorizontalAlignment, HttpClient, IApplicationView3, IColumnDefinition, IControl,
-    IDataWriter, IFontIcon, IFrameworkElement, IInputStream, IMediaPlaybackSession, IMediaPlaybackSource, IMediaPlayer,
-    IMediaPlayer3, IMediaPlayerElement, IMediaPlayerFailedEventArgs, IMediaPlayerSource2, IOutputStream,
+    Grid, GridLength, GridUnitType, HorizontalAlignment, HttpClient, IApplicationView3, IClosable, IColumnDefinition,
+    IControl, IDataWriter, IFontIcon, IFrameworkElement, IInputStream, IMediaPlaybackSession, IMediaPlaybackSource,
+    IMediaPlayer, IMediaPlayer3, IMediaPlayerElement, IMediaPlayerFailedEventArgs, IMediaPlayerSource2, IOutputStream,
     IRandomAccessStream, IRowDefinition, ITextBox, IUIElement, InMemoryRandomAccessStream, MediaPlaybackSession,
     MediaPlayer, MediaPlayerFailedEventArgs, MediaSource, SizeChangedEventArgs, Uri, VerticalAlignment, VirtualKey,
     Visibility,
@@ -32,6 +33,8 @@ use crate::xaml::{
 /// Quality asked for; the core caps it to what the account may play.
 const QUALITY: u32 = 80;
 const DASH_TYPE: &str = "application/dash+xml";
+/// Width of the side pane beside the 竖屏 picture.
+const FEED_PANE: f64 = 340.0;
 /// How long the page must hold still before the video takes its new size.
 const VIDEO_SETTLE: Duration = Duration::from_millis(250);
 /// How long entering or leaving fullscreen goes on changing the window's size.
@@ -130,7 +133,11 @@ const LAYOUT: &str = r##"
       <Button x:Name="TabComments" Content="评论" Background="Transparent" BorderThickness="0" FontSize="20"
               FontWeight="Light" Padding="12,2" />
     </StackPanel>
-    <GridView x:Name="Related" Grid.Row="1" SelectionMode="None" IsItemClickEnabled="True">
+    <!--lists-->
+  </Grid>
+</Grid>"##;
+
+const LISTS: &str = r##"    <GridView x:Name="Related" Grid.Row="1" SelectionMode="None" IsItemClickEnabled="True">
       <GridView.ItemContainerTransitions><TransitionCollection /></GridView.ItemContainerTransitions>
       <GridView.ItemContainerStyle>
         <Style TargetType="GridViewItem">
@@ -162,8 +169,7 @@ const LAYOUT: &str = r##"
         </DataTemplate>
       </ListView.ItemTemplate>
     </ListView>
-  </Grid>
-</Grid>"##;
+"##;
 
 /// Bumped when a video opens or the page is left: an answer for an earlier one is dropped.
 static RUN: AtomicU64 = AtomicU64::new(0);
@@ -171,6 +177,8 @@ static RUN: AtomicU64 = AtomicU64::new(0);
 thread_local! {
     /// The player of the page on show; on the UI thread.
     static PLAYING: RefCell<Option<MediaPlayer>> = const { RefCell::new(None) };
+    /// What `PLAYING` plays: closing it lets go of its connections.
+    static SOURCE: RefCell<Option<MediaSource>> = const { RefCell::new(None) };
     /// The page on show, while there is one.
     static PAGE: RefCell<Option<Page>> = const { RefCell::new(None) };
 }
@@ -185,6 +193,8 @@ struct Page {
     /// What 发弹幕 needs: the video, and its part once known.
     bvid: String,
     cid: Rc<Cell<u64>>,
+    /// The 竖屏推流 layout, not the ordinary one.
+    feed: bool,
     /// Filling the screen.
     full: Rc<Cell<bool>>,
     /// The video element is held at its size while the page resizes around it.
@@ -226,6 +236,20 @@ pub fn overlay(run: u64) -> Option<Rc<Overlay>> {
         return None;
     }
     page()?.overlay.borrow().clone()
+}
+
+/// The picture in the middle, the side pane beside it: always on a wide window, on request on a
+/// smaller one.
+fn apply_feed_layout(root: &IFrameworkElement, wide: bool, full: bool) -> Result<()> {
+    let pane = (wide || feed::panel_open()) && !full;
+    let width = GridLength { value: if pane { FEED_PANE } else { 0.0 }, grid_unit_type: GridUnitType::Pixel };
+    named::<IColumnDefinition>(root, "SideColumn")?.SetWidth(width)?;
+    let shown = |on| if on { Visibility::Visible } else { Visibility::Collapsed };
+    named::<IUIElement>(root, "Side")?.SetVisibility(shown(pane))?;
+    for part in ["SendBar", "Info", "ActionRow"] {
+        named::<IUIElement>(root, part)?.SetVisibility(shown(!full))?;
+    }
+    Ok(())
 }
 
 /// Keeps the video element at its size until the page stops resizing. The system player draws on
@@ -350,6 +374,8 @@ pub fn key(key: VirtualKey) -> bool {
         VirtualKey::Escape if page.full.get() => {
             let _ = set_full(false);
         }
+        VirtualKey::Up | VirtualKey::PageUp if page.feed => feed::step(-1),
+        VirtualKey::Down | VirtualKey::PageDown if page.feed => feed::step(1),
         _ => return false,
     }
     true
@@ -373,6 +399,9 @@ pub fn resized() {
 fn apply_layout(root: &IFrameworkElement) -> Result<()> {
     let Some(shell) = shell() else { return Ok(()) };
     let full = page().is_some_and(|p| p.full.get());
+    if page().is_some_and(|p| p.feed) {
+        return apply_feed_layout(root, shell.class() == WindowClass::Wide, full);
+    }
     let wide = shell.class() == WindowClass::Wide || full;
     let star = |value| GridLength { value, grid_unit_type: GridUnitType::Star };
     let pixels = |value| GridLength { value, grid_unit_type: GridUnitType::Pixel };
@@ -408,23 +437,49 @@ fn apply_layout(root: &IFrameworkElement) -> Result<()> {
 pub fn leave() {
     let _ = set_full(false);
     RUN.fetch_add(1, Ordering::Relaxed);
+    // The element lets go first: it must not be left holding a closed player.
+    if let Some(page) = page() {
+        let video = named::<IMediaPlayerElement>(&page.root, "Video");
+        let _ = video.and_then(|v| v.SetMediaPlayer(None::<&MediaPlayer>));
+    }
     PAGE.with(|p| *p.borrow_mut() = None);
     if let Some(player) = PLAYING.with(|p| p.borrow_mut().take()) {
         let _ = player.cast::<IMediaPlayer>().and_then(|p| p.Pause());
         let _ = player.cast::<IMediaPlayerSource2>().and_then(|p| p.SetSource(None::<&IMediaPlaybackSource>));
+        let _ = player.cast::<IClosable>().and_then(|p| p.Close());
+    }
+    if let Some(source) = SOURCE.with(|s| s.borrow_mut().take()) {
+        let _ = source.cast::<IClosable>().and_then(|s| s.Close());
     }
 }
 
-/// Opens the video page.
+/// The page on show, for what lives beside it.
+pub fn root() -> Option<IFrameworkElement> {
+    page().map(|p| p.root)
+}
+
+/// Opens the ordinary video page.
 pub fn show(bvid: &str, title: &str, uploader: &str) -> Result<()> {
+    open(false, bvid, title, uploader)
+}
+
+/// Opens a video, in the 竖屏推流 layout when `feed`.
+pub fn open(feed: bool, bvid: &str, title: &str, uploader: &str) -> Result<()> {
     let Some(shell) = shell() else { return Ok(()) };
     leave();
-    let root = load(&LAYOUT.replace("<!--bar-->", splitter::BAR_TEMPLATE))?;
+    let layout = if feed { feed::LAYOUT } else { LAYOUT };
+    let root = load(&layout.replace("<!--bar-->", splitter::BAR_TEMPLATE).replace("<!--lists-->", LISTS))?;
     set_text(&root, "Title", title)?;
     set_text(&root, "Meta", &format!("{uploader} · 正在打开…"))?;
     on_click(&root, "Back", go_back)?;
+    if feed {
+        feed::attach(&root)?;
+    }
     splitter::attach(&root, "SideBar", drag_side, crate::ui::shell::save_widths, reset_side)?;
     let pane = Side::attach(&root)?;
+    if feed {
+        pane.show_tab(true)?;
+    }
     let actions = Actions::attach(&root, bvid)?;
     let (shown_overlay, cid) = (Rc::new(RefCell::new(None)), Rc::new(Cell::new(0)));
     let opened = Page {
@@ -434,6 +489,7 @@ pub fn show(bvid: &str, title: &str, uploader: &str) -> Result<()> {
         overlay: shown_overlay,
         bvid: bvid.to_owned(),
         cid,
+        feed,
         full: Rc::new(Cell::new(false)),
         held: Rc::default(),
         resizes: Arc::default(),
@@ -603,9 +659,13 @@ fn play(root: &IFrameworkElement, source: &MediaSource) -> Result<MediaPlaybackS
     player.cast::<IMediaPlayerSource2>()?.SetSource(&source.cast::<IMediaPlaybackSource>()?)?;
     named::<IMediaPlayerElement>(root, "Video")?.SetMediaPlayer(&player)?;
     report_failures(&player)?;
+    if page().is_some_and(|p| p.feed) {
+        player.cast::<IMediaPlayer>()?.SetIsLoopingEnabled(true)?;
+    }
     player.cast::<IMediaPlayer>()?.Play()?;
     let session = player.cast::<IMediaPlayer3>()?.PlaybackSession()?;
     PLAYING.with(|p| *p.borrow_mut() = Some(player));
+    SOURCE.with(|s| *s.borrow_mut() = Some(source.clone()));
     Ok(session)
 }
 
