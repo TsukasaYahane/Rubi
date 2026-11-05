@@ -4,6 +4,7 @@
 pub mod home;
 pub mod me;
 pub mod player;
+pub mod player_actions;
 pub mod player_side;
 pub mod rows;
 pub mod shell;
@@ -31,6 +32,11 @@ pub fn post(dispatcher: &CoreDispatcher, job: impl FnOnce() + Send + 'static) {
 /// Loads a XAML string.
 pub fn load(xaml: &str) -> Result<IFrameworkElement> {
     XamlReader::Load(xaml)?.cast()
+}
+
+/// Loads a XAML string whose root is not an element, such as a flyout.
+pub fn load_object(xaml: &str) -> Result<IInspectable> {
+    XamlReader::Load(xaml)
 }
 
 /// The element named `name` under `root`.

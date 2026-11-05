@@ -10,6 +10,7 @@ use windows_core::{Error, HRESULT, Interface, Ref, Result};
 
 use crate::state::layout::WindowClass;
 use crate::state::manifest::dash_manifest;
+use crate::ui::player_actions::Actions;
 use crate::ui::player_side::Side;
 use crate::ui::shell::shell;
 use crate::ui::{load, named, on_click, post, set_text};
@@ -54,6 +55,32 @@ const LAYOUT: &str = r##"
       <TextBlock x:Name="Meta" FontSize="12" Margin="0,4,0,0" TextWrapping="Wrap" MaxLines="3"
                  Foreground="{ThemeResource SystemControlForegroundBaseMediumBrush}" />
     </StackPanel>
+    <ScrollViewer Grid.Row="3" HorizontalScrollMode="Auto" VerticalScrollMode="Disabled"
+                  HorizontalScrollBarVisibility="Hidden" VerticalScrollBarVisibility="Disabled">
+      <StackPanel Orientation="Horizontal" Margin="6,0,6,8">
+        <StackPanel.Resources>
+          <Style TargetType="Button">
+            <Setter Property="Background" Value="Transparent" />
+            <Setter Property="BorderThickness" Value="0" />
+            <Setter Property="Padding" Value="10,6" />
+            <Setter Property="MinWidth" Value="64" />
+          </Style>
+        </StackPanel.Resources>
+        <Button x:Name="ActLike"><StackPanel>
+          <FontIcon Glyph="&#xE8E1;" FontSize="20" /><TextBlock x:Name="LikeText" Text="赞" FontSize="12" Margin="0,3,0,0" HorizontalAlignment="Center" /></StackPanel></Button>
+        <Button x:Name="ActCoin"><StackPanel>
+          <FontIcon Glyph="&#xE8C7;" FontSize="20" /><TextBlock x:Name="CoinText" Text="币" FontSize="12" Margin="0,3,0,0" HorizontalAlignment="Center" /></StackPanel>
+          <Button.Flyout><MenuFlyout>
+            <MenuFlyoutItem x:Name="Coin1" Text="投 1 枚" /><MenuFlyoutItem x:Name="Coin2" Text="投 2 枚" />
+          </MenuFlyout></Button.Flyout></Button>
+        <Button x:Name="ActFav"><StackPanel>
+          <FontIcon Glyph="&#xE734;" FontSize="20" /><TextBlock x:Name="FavText" Text="藏" FontSize="12" Margin="0,3,0,0" HorizontalAlignment="Center" /></StackPanel></Button>
+        <Button x:Name="ActLater"><StackPanel>
+          <FontIcon Glyph="&#xE823;" FontSize="20" /><TextBlock x:Name="LaterText" Text="稍后" FontSize="12" Margin="0,3,0,0" HorizontalAlignment="Center" /></StackPanel></Button>
+        <Button x:Name="ActFollow"><StackPanel>
+          <FontIcon Glyph="&#xE8FA;" FontSize="20" /><TextBlock x:Name="FollowText" Text="关注" FontSize="12" Margin="0,3,0,0" HorizontalAlignment="Center" /></StackPanel></Button>
+      </StackPanel>
+    </ScrollViewer>
   </Grid>
   <Grid x:Name="Side" Grid.Column="1" BorderThickness="1,0,0,0"
         BorderBrush="{ThemeResource SystemControlForegroundBaseLowBrush}">
@@ -122,7 +149,19 @@ thread_local! {
     /// The player of the page on show; on the UI thread.
     static PLAYING: RefCell<Option<MediaPlayer>> = const { RefCell::new(None) };
     /// The page on show, while there is one.
-    static PAGE: RefCell<Option<(IFrameworkElement, Rc<Side>)>> = const { RefCell::new(None) };
+    static PAGE: RefCell<Option<Page>> = const { RefCell::new(None) };
+}
+
+/// The page on show and its parts.
+#[derive(Clone)]
+struct Page {
+    root: IFrameworkElement,
+    side: Rc<Side>,
+    actions: Rc<Actions>,
+}
+
+fn page() -> Option<Page> {
+    PAGE.with(|p| p.borrow().clone())
 }
 
 /// Which opening of the page is current; answers for another are dropped.
@@ -135,20 +174,28 @@ pub fn side(run: u64) -> Option<Rc<Side>> {
     if run != self::run() {
         return None;
     }
-    PAGE.with(|p| p.borrow().as_ref().map(|(_, side)| side.clone()))
+    page().map(|p| p.side)
+}
+
+/// The action row, if opening `run` is still on show.
+pub fn actions(run: u64) -> Option<Rc<Actions>> {
+    if run != self::run() {
+        return None;
+    }
+    page().map(|p| p.actions)
 }
 
 /// Shows a line under the title.
 pub fn say(text: &str) {
-    if let Some((root, _)) = PAGE.with(|p| p.borrow().clone()) {
-        let _ = set_text(&root, "Meta", text);
+    if let Some(page) = page() {
+        let _ = set_text(&page.root, "Meta", text);
     }
 }
 
 /// Follows a new window class, if the page is on show.
 pub fn resized() {
-    if let Some((root, _)) = PAGE.with(|p| p.borrow().clone()) {
-        let _ = apply_layout(&root);
+    if let Some(page) = page() {
+        let _ = apply_layout(&page.root);
     }
 }
 
@@ -189,7 +236,8 @@ pub fn show(bvid: &str, title: &str, uploader: &str) -> Result<()> {
     set_text(&root, "Meta", &format!("{uploader} · 正在打开…"))?;
     on_click(&root, "Back", go_back)?;
     let pane = Side::attach(&root)?;
-    PAGE.with(|p| *p.borrow_mut() = Some((root.clone(), pane)));
+    let actions = Actions::attach(&root, bvid)?;
+    PAGE.with(|p| *p.borrow_mut() = Some(Page { root: root.clone(), side: pane, actions }));
     let sizing = root.clone();
     let revoker = root.SizeChanged(move |_: Ref<windows_core::IInspectable>, _: Ref<SizeChangedEventArgs>| {
         let _ = apply_layout(&sizing);
@@ -207,18 +255,22 @@ pub fn show(bvid: &str, title: &str, uploader: &str) -> Result<()> {
     backend.spawn(async move {
         let services = &info_core.services;
         let (detail, related) = tokio::join!(services.videos.detail(&info_bvid), services.discover.related(&info_bvid));
-        let detail = detail.ok().map(|d| (d.card.aid, d.card.title, d.card.desc, d.card.stats.view));
+        let detail = detail.ok().map(|d| d.card);
         let related = related.unwrap_or_default();
+        let relation =
+            if services.account.is_logged_in() { services.actions.relation(&info_bvid).await.ok() } else { None };
         post(&info_dispatcher, move || {
-            let Some(side) = side(run) else { return };
-            if let Some((aid, title, desc, views)) = detail {
-                side.set_aid(aid);
-                if let Some((root, _)) = PAGE.with(|p| p.borrow().clone()) {
-                    let _ = set_text(&root, "Title", &title);
-                    let _ = set_text(&root, "Meta", &format!("{views} 播放 · {desc}"));
-                }
+            let Some(page) = (run == self::run()).then(page).flatten() else { return };
+            if let Some(card) = detail {
+                page.side.set_aid(card.aid);
+                page.actions.set_counts(card.stats.like, card.stats.coin, card.stats.favorite);
+                let _ = set_text(&page.root, "Title", &card.title);
+                let _ = set_text(&page.root, "Meta", &format!("{} 播放 · {}", card.stats.view, card.desc));
             }
-            let _ = side.set_related(related);
+            if let Some(relation) = relation {
+                page.actions.set_relation(relation);
+            }
+            let _ = page.side.set_related(related);
         });
     });
     backend.spawn(async move {
