@@ -66,10 +66,10 @@ fn position(item: &Item, now_ms: u32, width: f64, height: f64) -> Option<(f64, f
     match item.lane {
         Lane::Scroll => {
             let done = age / SCROLL_MS as f64;
-            (done <= 1.0).then(|| (width - (width + item.width) * done, row))
+            (done <= 1.0).then_some((width - (width + item.width) * done, row))
         }
-        Lane::Top => (age <= FIXED_MS as f64).then(|| ((width - item.width) / 2.0, row)),
-        Lane::Bottom => (age <= FIXED_MS as f64).then(|| ((width - item.width) / 2.0, height - TRACK_HEIGHT - row)),
+        Lane::Top => (age <= FIXED_MS as f64).then_some(((width - item.width) / 2.0, row)),
+        Lane::Bottom => (age <= FIXED_MS as f64).then_some(((width - item.width) / 2.0, height - TRACK_HEIGHT - row)),
     }
 }
 
