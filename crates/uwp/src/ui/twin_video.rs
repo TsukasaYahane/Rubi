@@ -9,16 +9,19 @@ use windows_core::{Interface, Result};
 
 use crate::ui::shell::shell;
 use crate::ui::{media, named, post};
-use crate::xaml::{IFrameworkElement, IMediaPlayer, IMediaPlayerElement, IUIElement, MediaPlayer, MediaSource};
+use crate::xaml::{
+    IFrameworkElement, IMediaPlayer, IMediaPlayerElement, IUIElement, MediaPlayer, MediaSource, Visibility,
+};
 
 /// How long the old picture stays under the new one: the new one's first frame must be up.
 const OVERLAP: Duration = Duration::from_millis(250);
 const FIRST: &str = "Video";
 const SECOND: &str = "VideoNext";
 
-/// The second element, for a player's layout.
+/// The second element, for a player's layout. Collapsed until wanted: even see-through, an element
+/// left in place makes the compositor draw the video with the page, and danmaku stutter with it.
 pub const SECOND_ELEMENT: &str = r##"x:Name="VideoNext" AreTransportControlsEnabled="False" Stretch="Uniform"
-  Opacity="0" IsHitTestVisible="False""##;
+  Visibility="Collapsed" IsHitTestVisible="False""##;
 
 pub struct TwinVideo {
     root: IFrameworkElement,
@@ -45,12 +48,16 @@ impl TwinVideo {
 
     /// Gives `player` to the element out of sight.
     pub fn prepare(&self, player: &MediaPlayer) -> Result<()> {
+        let next = named::<IUIElement>(&self.root, self.next())?;
+        next.SetOpacity(0.0)?;
+        next.SetVisibility(Visibility::Visible)?;
         named::<IMediaPlayerElement>(&self.root, self.next())?.SetMediaPlayer(player)
     }
 
     /// Takes the waiting player back from the element out of sight.
     pub fn clear_next(&self) -> Result<()> {
-        named::<IMediaPlayerElement>(&self.root, self.next())?.SetMediaPlayer(None::<&MediaPlayer>)
+        named::<IMediaPlayerElement>(&self.root, self.next())?.SetMediaPlayer(None::<&MediaPlayer>)?;
+        named::<IUIElement>(&self.root, self.next())?.SetVisibility(Visibility::Collapsed)
     }
 
     /// Shows the element out of sight, and retires what played in the other.
@@ -80,8 +87,8 @@ impl TwinVideo {
 
     fn finish(&self) -> Result<()> {
         let Some((name, player, source)) = self.retiring.borrow_mut().take() else { return Ok(()) };
-        named::<IUIElement>(&self.root, name)?.SetOpacity(0.0)?;
         named::<IMediaPlayerElement>(&self.root, name)?.SetMediaPlayer(None::<&MediaPlayer>)?;
+        named::<IUIElement>(&self.root, name)?.SetVisibility(Visibility::Collapsed)?;
         media::close(Some(player), Some(source));
         Ok(())
     }
