@@ -12,13 +12,16 @@ use rubi_model::{Danmaku, LiveEvent, LiveProtocol};
 use windows_collections::IVector;
 use windows_core::{Interface, Ref, Result};
 
+use crate::backend::Backend;
 use crate::state::layout::WindowClass;
 use crate::state::library::count;
 use crate::state::live::CHAT_MOST;
+use crate::state::quality::Offer;
 use crate::state::settings::Prefs;
 use crate::ui::danmaku::{Host, Overlay};
+use crate::ui::quality;
 use crate::ui::rows::{add_rows, on_row};
-use crate::ui::shell::shell;
+use crate::ui::shell::{shell, toast};
 use crate::ui::{keep, load, media, named, on_click, on_enter, post, set_text, soon};
 use crate::xaml::{
     Color, CoreCursor, CoreCursorType, CoreWindow, ElementTheme, FocusState, FrameworkElement, Grid, GridLength,
@@ -71,6 +74,7 @@ const LAYOUT: &str = r##"
         <Grid.ColumnDefinitions>
           <ColumnDefinition Width="Auto" /><ColumnDefinition Width="Auto" /><ColumnDefinition Width="Auto" />
           <ColumnDefinition Width="*" /><ColumnDefinition Width="Auto" /><ColumnDefinition Width="Auto" />
+          <ColumnDefinition Width="Auto" />
         </Grid.ColumnDefinitions>
         <Button x:Name="Mute" Background="Transparent" Foreground="White" BorderThickness="0" Padding="8,6"
                 VerticalAlignment="Center"><FontIcon x:Name="MuteIcon" Glyph="&#xE767;" FontSize="16" /></Button>
@@ -84,7 +88,9 @@ const LAYOUT: &str = r##"
                         MaxWidth="560" Margin="12,0" />
         <TextBlock x:Name="Online" Grid.Column="4" VerticalAlignment="Center" FontSize="12" Foreground="White"
                    Margin="12,0" />
-        <Button x:Name="Full" Grid.Column="5" Background="Transparent" Foreground="White" BorderThickness="0"
+        <Button x:Name="Quality" Grid.Column="5" Visibility="Collapsed" Background="Transparent" Foreground="White"
+                BorderThickness="0" Padding="8,6" FontSize="12" VerticalAlignment="Center" />
+        <Button x:Name="Full" Grid.Column="6" Background="Transparent" Foreground="White" BorderThickness="0"
                 Padding="8,6" VerticalAlignment="Center">
           <FontIcon x:Name="FullIcon" Glyph="&#xE740;" FontSize="16" />
         </Button>
@@ -161,6 +167,8 @@ struct Room {
     /// Bumped by each sign of life: only the last one may hide the bar.
     bar_turn: Arc<AtomicU64>,
     send_bar: Cell<SendPlace>,
+    /// The qualities on offer.
+    offer: RefCell<Offer>,
 }
 
 thread_local! {
@@ -241,12 +249,14 @@ pub fn open(room_id: u64, title: &str, uploader: &str) -> Result<()> {
         over_bar: Cell::new(false),
         bar_turn: Arc::default(),
         send_bar: Cell::new(SendPlace::BelowVideo),
+        offer: RefCell::default(),
     });
     ROOM.with_borrow_mut(|r| *r = Some(shown.clone()));
     on_click(&root, "Back", go_back)?;
     on_click(&root, "Full", toggle_full)?;
     on_click(&root, "Mute", toggle_mute)?;
     on_click(&root, "DanmakuSwitch", toggle_danmaku)?;
+    on_click(&root, "Quality", choose_quality)?;
     keep(named::<IUIElement>(&root, "Stage")?.PointerMoved(
         |_: Ref<windows_core::IInspectable>, args: Ref<PointerRoutedEventArgs>| {
             let at = args.ok().and_then(|a| a.GetCurrentPoint(None::<&UIElement>)?.Position());
@@ -298,21 +308,7 @@ pub fn open(room_id: u64, title: &str, uploader: &str) -> Result<()> {
     let (dispatcher, core) = (shell.dispatcher.clone(), backend.clone());
     set_text(&root, "Meta", uploader)?;
     backend.spawn(async move {
-        let started = match core.services.live.play(room_id, None).await {
-            Ok((play, _)) if !play.live => Err(Stop::OffAir),
-            Ok((play, headers)) => {
-                let tries = play.streams.iter().filter(|s| s.protocol == LiveProtocol::Hls);
-                let mut made = Err(Stop::Failed("这个直播间没有系统能播放的流".to_owned()));
-                for stream in tries {
-                    made = media::stream_source(&stream.url, &headers).map_err(|e| Stop::Failed(e.message()));
-                    if made.is_ok() {
-                        break;
-                    }
-                }
-                made
-            }
-            Err(e) => Err(Stop::Failed(e.to_string())),
-        };
+        let started = source_at(&core, room_id, None).await;
         post(&dispatcher, move || {
             if opening == run() {
                 let _ = playing(started);
@@ -336,10 +332,63 @@ fn notice(root: &IFrameworkElement, glyph: &str, text: &str) -> Result<()> {
     named::<IUIElement>(root, "Notice")?.SetVisibility(Visibility::Visible)
 }
 
-fn playing(source: std::result::Result<MediaSource, Stop>) -> Result<()> {
+/// The room's stream at `qn`, the best on offer when `None`, and what else is on offer.
+async fn source_at(core: &Backend, room_id: u64, qn: Option<u32>) -> std::result::Result<(MediaSource, Offer), Stop> {
+    let (play, headers) = core.services.live.play(room_id, qn).await.map_err(|e| Stop::Failed(e.to_string()))?;
+    if !play.live {
+        return Err(Stop::OffAir);
+    }
+    let offer = Offer { options: play.qualities.clone(), current: play.qn };
+    let mut made = Err(Stop::Failed("这个直播间没有系统能播放的流".to_owned()));
+    for stream in play.streams.iter().filter(|s| s.protocol == LiveProtocol::Hls) {
+        made = media::stream_source(&stream.url, &headers).map_err(|e| Stop::Failed(e.message()));
+        if made.is_ok() {
+            break;
+        }
+    }
+    made.map(|source| (source, offer))
+}
+
+fn choose_quality() {
+    if let Some(room) = room() {
+        let _ = quality::open(&room.root, &room.offer.borrow(), switch_quality);
+    }
+}
+
+/// Goes on at quality `qn`.
+fn switch_quality(qn: u32) {
+    let (Some(room), Some(shell)) = (room(), shell()) else { return };
+    let Some(backend) = shell.backend.get().cloned() else { return };
+    let (dispatcher, core, room_id, opening) = (shell.dispatcher.clone(), backend.clone(), room.room_id, run());
+    backend.spawn(async move {
+        let ready = source_at(&core, room_id, Some(qn)).await;
+        post(&dispatcher, move || {
+            if opening == run() {
+                let _ = quality_ready(ready);
+            }
+        });
+    });
+}
+
+fn quality_ready(ready: std::result::Result<(MediaSource, Offer), Stop>) -> Result<()> {
     let Some(room) = room() else { return Ok(()) };
-    let source = match source {
-        Ok(source) => source,
+    let Ok((source, offer)) = ready else {
+        toast("切换清晰度失败");
+        return Ok(());
+    };
+    if let Some(player) = room.player.borrow().as_ref() {
+        media::replace(player, &source)?;
+    }
+    media::close_source(room.source.borrow_mut().replace(source));
+    quality::show(&room.root, &offer)?;
+    *room.offer.borrow_mut() = offer;
+    Ok(())
+}
+
+fn playing(source: std::result::Result<(MediaSource, Offer), Stop>) -> Result<()> {
+    let Some(room) = room() else { return Ok(()) };
+    let (source, offer) = match source {
+        Ok(ready) => ready,
         Err(Stop::OffAir) => return notice(&room.root, OFF_AIR_GLYPH, "主播现在没有开播"),
         Err(Stop::Failed(problem)) => return notice(&room.root, FAILED_GLYPH, &format!("无法播放：{problem}")),
     };
@@ -348,6 +397,8 @@ fn playing(source: std::result::Result<MediaSource, Stop>) -> Result<()> {
     *room.player.borrow_mut() = Some(player);
     *room.source.borrow_mut() = Some(source);
     apply_volume(&room)?;
+    quality::show(&room.root, &offer)?;
+    *room.offer.borrow_mut() = offer;
     let opened = room.opened;
     let overlay = Overlay::attach(
         &room.root,

@@ -192,6 +192,10 @@ pub fn start() -> Result<()> {
     )?;
     keep(revoker);
 
+    // The system brings a window back as it left: a page that went fullscreen is not here now.
+    if shell.is_filling_screen() {
+        ApplicationView::GetForCurrentView()?.cast::<IApplicationView3>()?.ExitFullScreenMode()?;
+    }
     shell.apply_class()?;
     window.SetContent(&root.cast::<UIElement>()?)?;
     extend_into_title_bar(&window, &root)?;

@@ -41,6 +41,12 @@ pub fn play(video: &IMediaPlayerElement, source: &MediaSource) -> Result<MediaPl
     Ok(player)
 }
 
+/// Plays `source` in place of what `player` plays.
+pub fn replace(player: &MediaPlayer, source: &MediaSource) -> Result<()> {
+    player.cast::<IMediaPlayerSource2>()?.SetSource(&source.cast::<IMediaPlaybackSource>()?)?;
+    player.cast::<IMediaPlayer>()?.Play()
+}
+
 /// Lets go of a player and what it played. The element must have let go first: left holding a
 /// closed player, it brings the app down.
 pub fn close(player: Option<MediaPlayer>, source: Option<MediaSource>) {
@@ -49,6 +55,11 @@ pub fn close(player: Option<MediaPlayer>, source: Option<MediaSource>) {
         let _ = player.cast::<IMediaPlayerSource2>().and_then(|p| p.SetSource(None::<&IMediaPlaybackSource>));
         let _ = player.cast::<IClosable>().and_then(|p| p.Close());
     }
+    close_source(source);
+}
+
+/// Lets go of a source no player plays any more.
+pub fn close_source(source: Option<MediaSource>) {
     if let Some(source) = source {
         let _ = source.cast::<IClosable>().and_then(|s| s.Close());
     }

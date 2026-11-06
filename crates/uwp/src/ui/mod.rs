@@ -15,6 +15,7 @@ pub mod media;
 pub mod player;
 pub mod player_actions;
 pub mod player_side;
+pub mod quality;
 pub mod rows;
 pub mod schedule;
 pub mod settings;

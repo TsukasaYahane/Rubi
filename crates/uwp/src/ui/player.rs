@@ -4,7 +4,7 @@
 use std::cell::{Cell, RefCell};
 use std::rc::Rc;
 use std::sync::Arc;
-use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::atomic::{AtomicI64, AtomicU64, Ordering};
 use std::time::{Duration, Instant};
 
 use rubi_core::{MAX_FREE_QN, Playback, SendDanmaku, pick_streams};
@@ -14,12 +14,15 @@ use windows_core::{Error, HRESULT, Interface, Ref, Result};
 use crate::state::layout::WindowClass;
 use crate::state::manifest::dash_manifest;
 use crate::state::panes;
+use crate::state::quality::Offer;
+use crate::state::settings::quality_patch;
 use crate::ui::danmaku::{Host, Overlay};
 use crate::ui::feed;
 use crate::ui::keep;
 use crate::ui::media;
 use crate::ui::player_actions::Actions;
 use crate::ui::player_side::Side;
+use crate::ui::quality;
 use crate::ui::shell::shell;
 use crate::ui::splitter;
 use crate::ui::watch;
@@ -78,6 +81,9 @@ const LAYOUT: &str = r##"
       </MediaPlayerElement.TransportControls>
     </MediaPlayerElement>
     <Canvas x:Name="Danmaku" Grid.Row="1" IsHitTestVisible="False" />
+    <Button x:Name="Quality" Visibility="Collapsed" Background="#66000000" Foreground="White"
+            BorderThickness="0" Padding="10,6" FontSize="12" Grid.Row="1" HorizontalAlignment="Right"
+            VerticalAlignment="Top" Margin="0,8,56,0" />
     <Button x:Name="Full" Grid.Row="1" HorizontalAlignment="Right" VerticalAlignment="Top" Margin="8"
             Background="#66000000" Foreground="White" BorderThickness="0" Padding="10,6">
       <FontIcon x:Name="FullIcon" Glyph="&#xE740;" FontSize="16" />
@@ -178,6 +184,9 @@ const LISTS: &str = r##"    <GridView x:Name="Related" Grid.Row="1" SelectionMod
     </ListView>
 "##;
 
+/// Where to go on from once a new quality has opened, in the player's units.
+static RESUME_AT: AtomicI64 = AtomicI64::new(0);
+
 /// Bumped when a video opens or the page is left: an answer for an earlier one is dropped.
 static RUN: AtomicU64 = AtomicU64::new(0);
 
@@ -203,6 +212,8 @@ struct Page {
     cid: Rc<Cell<u64>>,
     /// The 竖屏推流 layout, not the ordinary one.
     feed: bool,
+    /// The qualities on offer.
+    offer: Rc<RefCell<Offer>>,
     /// Filling the screen.
     full: Rc<Cell<bool>>,
     /// The video element is held at its size while the page resizes around it.
@@ -552,6 +563,7 @@ pub fn open(feed: bool, bvid: &str, title: &str, uploader: &str) -> Result<()> {
         bvid: bvid.to_owned(),
         cid,
         feed,
+        offer: Rc::default(),
         full: Rc::new(Cell::new(false)),
         held: Rc::default(),
         resizes: Arc::default(),
@@ -560,6 +572,7 @@ pub fn open(feed: bool, bvid: &str, title: &str, uploader: &str) -> Result<()> {
     PAGE.with(|p| *p.borrow_mut() = Some(opened));
     on_click(&root, "ActDanmaku", toggle_danmaku)?;
     on_click(&root, "Full", toggle_full)?;
+    on_click(&root, "Quality", choose_quality)?;
     on_click(&root, "SendButton", send_danmaku)?;
     on_enter(&root, "SendText", send_danmaku)?;
     let pending = Rc::new(Cell::new(false));
@@ -606,7 +619,12 @@ pub fn open(feed: bool, bvid: &str, title: &str, uploader: &str) -> Result<()> {
         let quality = core.services.preferences.settings().playback.preferred_quality.min(MAX_FREE_QN);
         let source = match core.services.videos.playback(&bvid, quality).await {
             Ok(playback) => open_source(&playback)
-                .map(|source| (source, playback.cid, playback.url.duration_ms as u32))
+                .map(|source| Opened {
+                    source,
+                    cid: playback.cid,
+                    duration_ms: playback.url.duration_ms as u32,
+                    offer: offer_of(&playback),
+                })
                 .map_err(|e| e.message()),
             Err(e) => Err(e.to_string()),
         };
@@ -647,11 +665,70 @@ fn go_back() {
     }
 }
 
-fn shown(source: std::result::Result<(MediaSource, u64, u32), String>, uploader: &str) -> Result<()> {
+/// A video ready to play.
+struct Opened {
+    source: MediaSource,
+    cid: u64,
+    duration_ms: u32,
+    offer: Offer,
+}
+
+fn offer_of(playback: &Playback) -> Offer {
+    Offer { options: playback.url.accept.clone(), current: playback.url.quality }
+}
+
+fn choose_quality() {
+    if let Some(page) = page() {
+        let _ = quality::open(&page.root, &page.offer.borrow(), switch_quality);
+    }
+}
+
+/// Goes on from the same place at quality `qn`, and keeps it as the default.
+fn switch_quality(qn: u32) {
+    let (Some(page), Some(shell)) = (page(), shell()) else { return };
+    let Some(backend) = shell.backend.get().cloned() else { return };
+    let (bvid, dispatcher, core, run) = (page.bvid.clone(), shell.dispatcher.clone(), backend.clone(), self::run());
+    backend.spawn(async move {
+        let _ = core.services.preferences.patch_settings(&quality_patch(qn).to_string());
+        let source = match core.services.videos.playback(&bvid, qn).await {
+            Ok(playback) => open_source(&playback).map(|source| (source, offer_of(&playback))).map_err(|e| e.message()),
+            Err(e) => Err(e.to_string()),
+        };
+        post(&dispatcher, move || {
+            if run == self::run() {
+                let _ = quality_ready(source);
+            }
+        });
+    });
+}
+
+fn quality_ready(source: std::result::Result<(MediaSource, Offer), String>) -> Result<()> {
     let Some(page) = page() else { return Ok(()) };
-    match source {
-        Ok((source, cid, duration_ms)) => {
+    let (source, offer) = match source {
+        Ok(ready) => ready,
+        Err(problem) => {
+            say(&format!("切换清晰度失败：{problem}"));
+            return Ok(());
+        }
+    };
+    let Some(player) = PLAYING.with(|p| p.borrow().clone()) else { return Ok(()) };
+    if let Some(session) = playing_session() {
+        RESUME_AT.store(session.Position()?.duration, Ordering::Relaxed);
+    }
+    media::replace(&player, &source)?;
+    media::close_source(SOURCE.with(|s| s.borrow_mut().replace(source)));
+    quality::show(&page.root, &offer)?;
+    *page.offer.borrow_mut() = offer;
+    Ok(())
+}
+
+fn shown(opened: std::result::Result<Opened, String>, uploader: &str) -> Result<()> {
+    let Some(page) = page() else { return Ok(()) };
+    match opened {
+        Ok(Opened { source, cid, duration_ms, offer }) => {
             let session = play(&page.root, &source)?;
+            quality::show(&page.root, &offer)?;
+            *page.offer.borrow_mut() = offer;
             page.cid.set(cid);
             watch::start(&page.bvid, cid);
             let clock = session.cast::<IMediaPlaybackSession>()?;
@@ -750,6 +827,17 @@ fn report_failures(player: &MediaPlayer) -> Result<()> {
 fn play(root: &IFrameworkElement, source: &MediaSource) -> Result<MediaPlaybackSession> {
     let player = media::play(&named::<IMediaPlayerElement>(root, "Video")?, source)?;
     report_failures(&player)?;
+    keep(player.cast::<IMediaPlayer>()?.MediaOpened(
+        |sender: Ref<MediaPlayer>, _: Ref<windows_core::IInspectable>| {
+            let at = RESUME_AT.swap(0, Ordering::Relaxed);
+            if at > 0
+                && let Ok(player) = sender.ok().and_then(|p| p.cast::<IMediaPlayer3>())
+                && let Ok(session) = player.PlaybackSession().and_then(|s| s.cast::<IMediaPlaybackSession>())
+            {
+                let _ = session.SetPosition(windows_time::TimeSpan { duration: at });
+            }
+        },
+    )?);
     if page().is_some_and(|p| p.feed) {
         player.cast::<IMediaPlayer>()?.SetIsLoopingEnabled(true)?;
     }

@@ -48,15 +48,18 @@ pub const LAYOUT: &str = r##"
     <Grid VerticalAlignment="Top">
       <Grid.ColumnDefinitions>
         <ColumnDefinition Width="Auto" /><ColumnDefinition Width="*" /><ColumnDefinition Width="Auto" />
-        <ColumnDefinition Width="Auto" />
+        <ColumnDefinition Width="Auto" /><ColumnDefinition Width="Auto" />
       </Grid.ColumnDefinitions>
+      <Button x:Name="Quality" Visibility="Collapsed" Background="#66000000" Foreground="White"
+            BorderThickness="0" Padding="10,6" FontSize="12" Grid.Column="2"
+              VerticalAlignment="Center" Margin="0,0,8,0" />
       <Button x:Name="Back" Background="Transparent" BorderThickness="0" Padding="12,8" Foreground="White">
         <FontIcon Glyph="&#xE72B;" FontSize="16" />
       </Button>
       <TextBlock x:Name="Position" Grid.Column="1" FontSize="12" Foreground="White" VerticalAlignment="Center" />
-      <Button x:Name="Normal" Grid.Column="2" Content="普通页" FontSize="12" Foreground="White" Padding="8,4"
+      <Button x:Name="Normal" Grid.Column="3" Content="普通页" FontSize="12" Foreground="White" Padding="8,4"
               Background="#59000000" BorderThickness="0" />
-      <Button x:Name="Full" Grid.Column="3" Margin="8" Background="#59000000" Foreground="White"
+      <Button x:Name="Full" Grid.Column="4" Margin="8" Background="#59000000" Foreground="White"
               BorderThickness="0" Padding="10,6">
         <FontIcon x:Name="FullIcon" Glyph="&#xE740;" FontSize="16" />
       </Button>
