@@ -1,33 +1,25 @@
-//! 首页: the recommended videos in a virtualized grid, columns following the window. Rows are
-//! filled as they come on screen, which also stands in for data binding: nothing Rust defines
-//! has to be known to XAML.
+//! 首页: 推荐, 热门, 排行 and a 分区 to pick. Each tab keeps its own grid, so it comes back where it
+//! was left.
 
-use std::cell::{Cell, RefCell};
+use std::cell::Cell;
 use std::rc::Rc;
 
-use rubi_model::VideoCard;
-use windows_collections::IVector;
+use rubi_core::HOME_ZONES;
 use windows_core::{IInspectable, Interface, Ref, Result};
 
-use crate::state::layout::grid_cell;
-use crate::ui::feed;
-use crate::ui::keep;
-use crate::ui::rows::{Covers, add_rows, on_row, on_row_click};
+use crate::ui::card_grid::{Answer, CardGrid, Source};
 use crate::ui::shell::shell;
-use crate::ui::{load, named, post, set_text};
+use crate::ui::{keep, load, load_object, named, on_click, set_text};
 use crate::xaml::{
-    IFrameworkElement, IImage, IItemsControl, IItemsControl2, IItemsWrapGrid, ITextBlock, SizeChangedEventArgs,
-    UIElement,
+    Color, FrameworkElement, IContentControl, IControl, IFlyoutBase, IFrameworkElement, IMenuFlyout, IMenuFlyoutItem,
+    IPanel, IUIElement, PropertyValue, RoutedEventArgs, SolidColorBrush, UIElement, Visibility,
 };
+use windows_collections::IVector;
 
-/// Cards asked for at a time.
-const PAGE: usize = 30;
-/// Candidates fetched per source when the feed fills.
-const PER_SOURCE: usize = 20;
-/// Rows from the end at which the next page loads.
-const LOAD_AHEAD: usize = 8;
-/// Width covers are decoded at, in pixels.
-const COVER_DECODE_WIDTH: i32 = 480;
+const COBALT: Color = Color { a: 255, r: 0, g: 0x50, b: 0xEF };
+const DIM: Color = Color { a: 255, r: 0x76, g: 0x76, b: 0x76 };
+const TAB_LABELS: [&str; 4] = ["推荐", "热门", "排行", "分区"];
+const ZONES_TAB: usize = 3;
 
 const LAYOUT: &str = r##"
 <Grid xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
@@ -36,88 +28,61 @@ const LAYOUT: &str = r##"
     <RowDefinition Height="Auto" />
     <RowDefinition Height="*" />
   </Grid.RowDefinitions>
-  <StackPanel Orientation="Horizontal" Margin="16,8,16,8">
-    <TextBlock Text="推荐" FontSize="20" FontWeight="Light" />
-    <TextBlock x:Name="Status" Margin="16,0,0,0" FontSize="13" VerticalAlignment="Center"
+  <Grid Margin="16,8,16,8">
+    <Grid.ColumnDefinitions><ColumnDefinition Width="Auto" /><ColumnDefinition Width="*" /></Grid.ColumnDefinitions>
+    <StackPanel Orientation="Horizontal">
+      <StackPanel.Resources>
+        <Style TargetType="Button">
+          <Setter Property="Background" Value="Transparent" />
+          <Setter Property="BorderThickness" Value="0" />
+          <Setter Property="Padding" Value="0" />
+          <Setter Property="Margin" Value="0,0,18,0" />
+          <Setter Property="FontSize" Value="20" />
+          <Setter Property="FontWeight" Value="Light" />
+        </Style>
+      </StackPanel.Resources>
+      <Button x:Name="Tab0" Content="推荐" /><Button x:Name="Tab1" Content="热门" />
+      <Button x:Name="Tab2" Content="排行" /><Button x:Name="Tab3" Content="分区" />
+    </StackPanel>
+    <TextBlock x:Name="Status" Grid.Column="1" FontSize="13" VerticalAlignment="Center" TextTrimming="CharacterEllipsis"
                Foreground="{ThemeResource SystemControlForegroundBaseMediumBrush}" />
-  </StackPanel>
-  <GridView x:Name="Grid" Grid.Row="1" Padding="9,0,9,12" SelectionMode="None" IsItemClickEnabled="True">
-    <GridView.ItemContainerTransitions><TransitionCollection /></GridView.ItemContainerTransitions>
-    <GridView.ItemContainerStyle>
-      <Style TargetType="GridViewItem">
-        <Setter Property="Margin" Value="0" />
-        <Setter Property="Padding" Value="0" />
-        <Setter Property="HorizontalContentAlignment" Value="Stretch" />
-        <Setter Property="VerticalContentAlignment" Value="Top" />
-      </Style>
-    </GridView.ItemContainerStyle>
-    <GridView.ItemsPanel>
-      <ItemsPanelTemplate><ItemsWrapGrid Orientation="Horizontal" /></ItemsPanelTemplate>
-    </GridView.ItemsPanel>
-    <GridView.ItemTemplate>
-      <DataTemplate>
-        <Grid Margin="7">
-          <Grid.RowDefinitions>
-            <RowDefinition Height="*" />
-            <RowDefinition Height="Auto" />
-            <RowDefinition Height="Auto" />
-          </Grid.RowDefinitions>
-          <Image Stretch="UniformToFill" />
-          <TextBlock Grid.Row="1" FontSize="13" MaxLines="2" TextWrapping="Wrap" TextTrimming="CharacterEllipsis"
-                     Height="38" Margin="0,6,0,0" />
-          <TextBlock Grid.Row="2" FontSize="12" MaxLines="1" TextTrimming="CharacterEllipsis" Height="18"
-                     Margin="0,2,0,0" Foreground="{ThemeResource SystemControlForegroundBaseMediumBrush}" />
-        </Grid>
-      </DataTemplate>
-    </GridView.ItemTemplate>
-  </GridView>
+  </Grid>
+  <Grid x:Name="Grids" Grid.Row="1" />
 </Grid>"##;
+
+fn tab_source(tab: usize) -> Option<Source> {
+    match tab {
+        0 => Some(Source::Recommended),
+        1 => Some(Source::Popular),
+        2 => Some(Source::Ranking),
+        _ => None,
+    }
+}
 
 pub struct HomePage {
     root: IFrameworkElement,
-    grid: IFrameworkElement,
-    cards: RefCell<Vec<VideoCard>>,
-    loading: Cell<bool>,
-    /// The feed has been filled from the network.
-    started: Cell<bool>,
-    /// The cells have been set for the grid's width.
-    sized: Cell<bool>,
-    /// The grid width and columns the cells were last set for.
-    fitted: Cell<(f64, u32)>,
-    covers: Covers,
+    grids: [Rc<CardGrid>; 4],
+    current: Cell<usize>,
 }
 
 impl HomePage {
     pub fn new() -> Result<Rc<Self>> {
         let root = load(LAYOUT)?;
-        let grid = named::<IFrameworkElement>(&root, "Grid")?;
-        let page = Rc::new(Self {
-            root,
-            grid: grid.clone(),
-            cards: RefCell::default(),
-            loading: Cell::new(false),
-            started: Cell::new(false),
-            sized: Cell::new(false),
-            fitted: Cell::new((0.0, 0)),
-            covers: Covers::default(),
-        });
-
-        let filling = Rc::downgrade(&page);
-        on_row(&grid, move |at, parts| filling.upgrade().map_or(Ok(()), |p| p.fill_row(at, parts)))?;
-        let clicking = Rc::downgrade(&page);
-        on_row_click(&grid, move |at| {
-            if let Some(page) = clicking.upgrade() {
-                let _ = page.open(at);
-            }
-        })?;
-
-        let sizing = Rc::downgrade(&page);
-        let revoker = grid.SizeChanged(move |_: Ref<IInspectable>, _: Ref<SizeChangedEventArgs>| {
-            if let Some(page) = sizing.upgrade() {
-                page.resized();
-            }
-        })?;
-        keep(revoker);
+        let grids = [CardGrid::new(0)?, CardGrid::new(1)?, CardGrid::new(2)?, CardGrid::new(ZONES_TAB)?];
+        let holder = named::<IPanel>(&root, "Grids")?.Children()?.cast::<IVector<UIElement>>()?;
+        for grid in &grids {
+            holder.Append(&grid.element().cast::<UIElement>()?)?;
+        }
+        let page = Rc::new(Self { root, grids, current: Cell::new(0) });
+        for (tab, _) in TAB_LABELS.iter().enumerate() {
+            let weak = Rc::downgrade(&page);
+            on_click(&page.root, &format!("Tab{tab}"), move || {
+                if let Some(page) = weak.upgrade() {
+                    let _ = page.select(tab);
+                }
+            })?;
+        }
+        page.show_tab()?;
         Ok(page)
     }
 
@@ -129,11 +94,10 @@ impl HomePage {
         let _ = set_text(&self.root, "Status", text);
     }
 
-    /// Fills the feed the first time and shows the first page.
+    /// Fills the feed the first time.
     pub fn start(&self) {
-        if !self.started.replace(true) {
-            self.say("正在获取推荐…");
-            self.load_page(true);
+        if self.grids[0].source().is_none() {
+            let _ = self.grids[0].open(Source::Recommended);
         }
     }
 
@@ -141,108 +105,82 @@ impl HomePage {
     pub fn reload(&self) {
         let Some(backend) = shell().and_then(|s| s.backend.get().cloned()) else { return };
         backend.services.home.new_session();
-        self.cards.borrow_mut().clear();
-        if let Ok(items) = self.grid.cast::<IItemsControl>().and_then(|l| l.Items()) {
-            let _ = items.cast::<IVector<IInspectable>>().and_then(|v| v.Clear());
+        for grid in &self.grids {
+            let _ = grid.forget();
         }
-        self.started.set(true);
-        self.say("正在获取推荐…");
-        self.load_page(true);
+        let _ = self.reopen();
     }
 
-    fn load_page(&self, fill: bool) {
-        let Some(shell) = shell() else { return };
-        let Some(backend) = shell.backend.get().cloned() else { return };
-        if self.loading.replace(true) {
-            return;
+    fn reopen(&self) -> Result<()> {
+        let tab = self.current.get();
+        if let Some(source) = tab_source(tab).filter(|_| self.grids[tab].source().is_none()) {
+            self.grids[tab].open(source)?;
         }
-        let dispatcher = shell.dispatcher.clone();
-        let core = backend.clone();
-        backend.spawn(async move {
-            let services = &core.services;
-            let filled = if fill {
-                let _ = services.account.ensure_device_ids().await;
-                services.home.refresh(PER_SOURCE).await.map(|_| ()).map_err(|e| e.to_string())
-            } else {
-                Ok(())
-            };
-            let page = filled.and_then(|()| services.home.next_page(PAGE).map_err(|e| e.to_string()));
-            post(&dispatcher, move || {
-                if let Some(home) = crate::ui::shell::shell().and_then(|s| s.home_page()) {
-                    home.loaded(page.map(|p| p.into_iter().map(|r| r.card).collect()));
+        self.show_tab()
+    }
+
+    fn select(self: &Rc<Self>, tab: usize) -> Result<()> {
+        self.current.set(tab);
+        self.reopen()?;
+        if tab == ZONES_TAB {
+            self.pick_zone()?;
+        }
+        Ok(())
+    }
+
+    fn show_tab(&self) -> Result<()> {
+        let current = self.current.get();
+        for (tab, grid) in self.grids.iter().enumerate() {
+            let on = tab == current;
+            let shown = if on { Visibility::Visible } else { Visibility::Collapsed };
+            grid.element().cast::<IUIElement>()?.SetVisibility(shown)?;
+            let color = if on { COBALT } else { DIM };
+            named::<IControl>(&self.root, &format!("Tab{tab}"))?
+                .SetForeground(&SolidColorBrush::CreateInstanceWithColor(color)?)?;
+        }
+        let waiting = current == ZONES_TAB && self.grids[current].source().is_none();
+        self.say(&if waiting { "选一个分区".to_owned() } else { self.grids[current].said() });
+        Ok(())
+    }
+
+    fn pick_zone(self: &Rc<Self>) -> Result<()> {
+        let items: String =
+            HOME_ZONES.iter().map(|(name, _, _)| format!(r##"<MenuFlyoutItem Text="{name}" />"##)).collect();
+        let menu = load_object(&format!(
+            r##"<MenuFlyout xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation">{items}</MenuFlyout>"##
+        ))?;
+        let listed = menu.cast::<IMenuFlyout>()?.Items()?;
+        for (at, (name, region, _)) in HOME_ZONES.iter().enumerate() {
+            let weak = Rc::downgrade(self);
+            let (name, region) = (*name, *region);
+            let item = listed.GetAt(at as u32)?.cast::<IMenuFlyoutItem>()?;
+            keep(item.Click(move |_: Ref<IInspectable>, _: Ref<RoutedEventArgs>| {
+                if let Some(page) = weak.upgrade() {
+                    let _ = page.open_zone(name, region);
                 }
-            });
-        });
+            })?);
+        }
+        menu.cast::<IFlyoutBase>()?.ShowAt(&named::<FrameworkElement>(&self.root, "Tab3")?)
     }
 
-    fn loaded(&self, page: std::result::Result<Vec<VideoCard>, String>) {
-        self.loading.set(false);
-        match page {
-            Ok(cards) => {
-                let nothing = cards.is_empty() && self.cards.borrow().is_empty();
-                self.say(if nothing { "暂时没有内容，稍后再打开" } else { "" });
-                let _ = self.append(cards);
-            }
-            Err(problem) => self.say(&format!("获取失败：{problem}")),
+    fn open_zone(&self, name: &str, region: u32) -> Result<()> {
+        named::<IContentControl>(&self.root, "Tab3")?.SetContent(&PropertyValue::CreateString(name)?)?;
+        self.grids[ZONES_TAB].open(Source::Zone(region))
+    }
+
+    /// The grid of `tab` has something new to say.
+    pub fn grid_spoke(&self, tab: usize) {
+        if tab == self.current.get() {
+            self.say(&self.grids[tab].said());
         }
     }
 
-    fn append(&self, cards: Vec<VideoCard>) -> Result<()> {
-        let from = self.cards.borrow().len();
-        self.cards.borrow_mut().extend(cards);
-        add_rows(&self.grid, from, self.cards.borrow().len())
+    pub fn grid_answered(&self, tab: usize, turn: u64, answer: Answer) {
+        let _ = self.grids[tab].answered(turn, answer);
     }
 
-    /// Sets the cells for the grid's width and the window's columns.
-    ///
-    /// Done at once, inside the size change: left for later, a shrinking grid would first lay
-    /// its old, wider cells out on fewer columns, and flash that frame.
+    /// Sets the cells of the grid on show.
     pub fn resized(&self) {
-        let _ = self.apply_cell();
-    }
-
-    fn apply_cell(&self) -> Result<()> {
-        let Some(shell) = shell() else { return Ok(()) };
-        let width = self.grid.ActualWidth()?;
-        let columns = shell.class().columns(width);
-        if self.fitted.get() == (width, columns) {
-            return Ok(());
-        }
-        let cell = grid_cell(width, columns);
-        let panel = self.grid.cast::<IItemsControl2>()?.ItemsPanelRoot()?.cast::<IItemsWrapGrid>()?;
-        panel.SetMaximumRowsOrColumns(columns as i32)?;
-        panel.SetItemWidth(cell.width)?;
-        panel.SetItemHeight(cell.height)?;
-        self.sized.set(true);
-        self.fitted.set((width, columns));
-        Ok(())
-    }
-
-    fn fill_row(&self, at: usize, parts: &IVector<UIElement>) -> Result<()> {
-        if !self.sized.get() {
-            self.apply_cell()?;
-        }
-        let cards = self.cards.borrow();
-        let Some(card) = cards.get(at) else { return Ok(()) };
-
-        let cover = parts.GetAt(0)?;
-        cover.cast::<IImage>()?.SetSource(&self.covers.get(&card.cover, COVER_DECODE_WIDTH)?)?;
-
-        parts.GetAt(1)?.cast::<ITextBlock>()?.SetText(&card.title)?;
-        parts.GetAt(2)?.cast::<ITextBlock>()?.SetText(&format!("{} · {} 播放", card.owner.name, card.stats.view))?;
-
-        let near_end = at + LOAD_AHEAD >= cards.len();
-        drop(cards);
-        if near_end {
-            self.load_page(false);
-        }
-        Ok(())
-    }
-
-    fn open(&self, at: usize) -> Result<()> {
-        if let Some(card) = self.cards.borrow().get(at) {
-            feed::route(&card.bvid, &card.title, &card.owner.name)?;
-        }
-        Ok(())
+        self.grids[self.current.get()].resized();
     }
 }
