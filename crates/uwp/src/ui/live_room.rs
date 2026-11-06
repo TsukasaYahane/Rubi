@@ -22,8 +22,8 @@ use crate::ui::{keep, load, media, named, on_click, on_enter, post, set_text, so
 use crate::xaml::{
     Color, ElementTheme, FrameworkElement, Grid, GridLength, GridUnitType, IColumnDefinition, IContentControl,
     IControl, IFontIcon, IFrameworkElement, IFrameworkElement2, IItemsControl, IMediaPlayer, IMediaPlayerElement,
-    IPanel, IRowDefinition, ITextBlock, ITextBox, ITextBox2, IUIElement, MediaPlayer, MediaSource,
-    SizeChangedEventArgs, SolidColorBrush, UIElement, VirtualKey, Visibility,
+    IPanel, IRowDefinition, ITextBlock, ITextBox, IUIElement, MediaPlayer, MediaSource, SizeChangedEventArgs,
+    SolidColorBrush, UIElement, VirtualKey, Visibility,
 };
 
 /// Width of the danmaku list beside the picture.
@@ -77,10 +77,13 @@ const LAYOUT: &str = r##"
     <ContentControl x:Name="SendBelowVideo" Grid.Row="1" IsTabStop="False" HorizontalContentAlignment="Stretch">
       <Grid x:Name="SendBar" Padding="12,6">
         <Grid.ColumnDefinitions><ColumnDefinition Width="*" /><ColumnDefinition Width="Auto" /></Grid.ColumnDefinitions>
+        <Grid.RowDefinitions><RowDefinition Height="Auto" /><RowDefinition Height="Auto" /></Grid.RowDefinitions>
         <TextBox x:Name="SendText" PlaceholderText="发个友善的弹幕…" MaxLength="30" BorderThickness="0,0,0,1"
                  Background="Transparent" />
         <Button x:Name="SendButton" Grid.Column="1" Background="Transparent" BorderThickness="0" Margin="8,0,0,0">
           <FontIcon Glyph="&#xE724;" FontSize="18" /></Button>
+        <TextBlock x:Name="SendNote" Grid.Row="1" Grid.ColumnSpan="2" FontSize="12" Margin="0,4,0,0" TextWrapping="Wrap"
+                   Visibility="Collapsed" IsTextSelectionEnabled="True" />
       </Grid>
     </ContentControl>
     <StackPanel x:Name="Info" Grid.Row="2" Padding="16,10">
@@ -477,10 +480,10 @@ fn send() {
         post(&dispatcher, move || {
             if opening == run()
                 && let Some(room) = self::room()
-                && let Ok(field) = named::<ITextBox2>(&room.root, "SendText")
             {
-                // Where the eye is after sending.
-                let _ = field.SetPlaceholderText(&said);
+                // Under the box, where the eye is after sending, and wrapped: a reason can be long.
+                let _ = set_text(&room.root, "SendNote", &said);
+                let _ = named::<IUIElement>(&room.root, "SendNote").and_then(|n| n.SetVisibility(Visibility::Visible));
             }
         });
     });

@@ -153,7 +153,7 @@ impl LiveApi for WebLive {
                 ],
             )
             .await?;
-        refusal_of(body["message"].as_str().unwrap_or_default()).map_or(Ok(()), |why| Err(ApiError::from_code(-1, why)))
+        refusal_of(body["message"].as_str().unwrap_or_default()).map_or(Ok(()), |why| Err(ApiError::Refused(why)))
     }
 
     fn identity(&self) -> (u64, String) {

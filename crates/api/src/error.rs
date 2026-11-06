@@ -9,6 +9,9 @@ pub enum ApiError {
     NotLoggedIn,
     #[error("API error {code}: {message}")]
     Api { code: i64, message: String },
+    /// The server took the request and said no, in its own words.
+    #[error("{0}")]
+    Refused(String),
     #[error("unexpected response: {0}")]
     Decode(String),
 }
