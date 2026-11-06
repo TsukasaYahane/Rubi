@@ -23,9 +23,6 @@ thread_local! {
 }
 
 fn send(bvid: String, cid: u64, played_s: u64, real_s: u64, play_type: u8) {
-    if true {
-        return;
-    } // TEMPORARY-NO-REPORT
     let Some(backend) = shell().and_then(|s| s.backend.get().cloned()) else { return };
     let core = backend.clone();
     backend.spawn(async move {
