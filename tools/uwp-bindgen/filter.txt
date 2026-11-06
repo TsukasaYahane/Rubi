@@ -232,3 +232,4 @@ Windows.ApplicationModel.DataTransfer.DataPackage
 Windows.ApplicationModel.DataTransfer.IDataPackage
 Windows.Foundation.Point
 Windows.ApplicationModel.DataTransfer.DataPackage::CreateInstance
+Windows.UI.Xaml.Input.TappedRoutedEventArgs

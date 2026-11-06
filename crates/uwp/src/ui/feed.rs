@@ -39,30 +39,18 @@ pub const LAYOUT: &str = r##"
       <RowDefinition Height="Auto" />
       <RowDefinition Height="Auto" />
     </Grid.RowDefinitions>
-    <MediaPlayerElement x:Name="Video" Grid.RowSpan="4" AreTransportControlsEnabled="True" Stretch="Uniform">
-      <MediaPlayerElement.TransportControls>
-        <MediaTransportControls IsFullWindowButtonVisible="False" IsZoomButtonVisible="False" />
-      </MediaPlayerElement.TransportControls>
-    </MediaPlayerElement>
+    <MediaPlayerElement x:Name="Video" Grid.RowSpan="4" AreTransportControlsEnabled="False" Stretch="Uniform" />
     <Canvas x:Name="Danmaku" Grid.RowSpan="4" IsHitTestVisible="False" />
-    <Grid VerticalAlignment="Top">
+    <Grid x:Name="TopBar" VerticalAlignment="Top">
       <Grid.ColumnDefinitions>
         <ColumnDefinition Width="Auto" /><ColumnDefinition Width="*" /><ColumnDefinition Width="Auto" />
-        <ColumnDefinition Width="Auto" /><ColumnDefinition Width="Auto" />
       </Grid.ColumnDefinitions>
-      <Button x:Name="Quality" Visibility="Collapsed" Background="#66000000" Foreground="White"
-            BorderThickness="0" Padding="10,6" FontSize="12" Grid.Column="2"
-              VerticalAlignment="Center" Margin="0,0,8,0" />
       <Button x:Name="Back" Background="Transparent" BorderThickness="0" Padding="12,8" Foreground="White">
         <FontIcon Glyph="&#xE72B;" FontSize="16" />
       </Button>
       <TextBlock x:Name="Position" Grid.Column="1" FontSize="12" Foreground="White" VerticalAlignment="Center" />
-      <Button x:Name="Normal" Grid.Column="3" Content="普通页" FontSize="12" Foreground="White" Padding="8,4"
+      <Button x:Name="Normal" Grid.Column="2" Content="普通页" FontSize="12" Foreground="White" Padding="8,4"
               Background="#59000000" BorderThickness="0" />
-      <Button x:Name="Full" Grid.Column="4" Margin="8" Background="#59000000" Foreground="White"
-              BorderThickness="0" Padding="10,6">
-        <FontIcon x:Name="FullIcon" Glyph="&#xE740;" FontSize="16" />
-      </Button>
     </Grid>
     <StackPanel x:Name="ActionRow" Grid.RowSpan="4" HorizontalAlignment="Right" VerticalAlignment="Center"
                 Margin="0,0,4,0">
@@ -94,11 +82,13 @@ pub const LAYOUT: &str = r##"
       <Button x:Name="ActFollow"><StackPanel><FontIcon Glyph="&#xE8FA;" FontSize="24" /><TextBlock x:Name="FollowText" Text="关注" /></StackPanel></Button>
       <Button x:Name="Next"><FontIcon Glyph="&#xE70D;" FontSize="20" /></Button>
     </StackPanel>
-    <StackPanel x:Name="Info" Grid.Row="2" Margin="12,0,72,64" VerticalAlignment="Bottom">
+    <StackPanel x:Name="Info" Grid.Row="2" Margin="12,0,72,8" VerticalAlignment="Bottom">
       <TextBlock x:Name="Title" FontSize="15" Foreground="White" TextWrapping="Wrap" MaxLines="2" />
       <TextBlock x:Name="Meta" FontSize="12" Margin="0,3,0,0" Foreground="#CCFFFFFF" TextWrapping="Wrap" MaxLines="2" />
     </StackPanel>
-    <Grid x:Name="SendBar" Grid.Row="3" Background="#66000000" Padding="12,6" Margin="0,0,0,64">
+    <ContentControl x:Name="SendBelowVideo" Grid.Row="3" IsTabStop="False" HorizontalContentAlignment="Stretch"
+                    Margin="0,0,0,88">
+    <Grid x:Name="SendBar" Background="#66000000" Padding="12,6">
       <Grid.ColumnDefinitions>
         <ColumnDefinition Width="*" />
         <ColumnDefinition Width="Auto" />
@@ -110,6 +100,8 @@ pub const LAYOUT: &str = r##"
         <FontIcon Glyph="&#xE724;" FontSize="18" />
       </Button>
     </Grid>
+    </ContentControl>
+    <!--controls-->
   </Grid>
   <Thumb x:Name="SideBar" Grid.Column="1" Width="0" Visibility="Collapsed"><!--bar--></Thumb>
   <Grid x:Name="Side" Grid.Column="2" Background="{ThemeResource ApplicationPageBackgroundThemeBrush}">

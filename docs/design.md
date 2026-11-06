@@ -324,6 +324,8 @@
 
 直播（2026-11-06）：系统 `AdaptiveMediaSource` 接受 B 站 HLS 地址，经带请求头的 `HttpClient` 下载；FLV 不用。弹幕复用播放页的 `Overlay`，时钟换成进房后的时长。
 
+无缝换清晰度：新源放进第二个不上屏的 `MediaPlayer`。视频暂停在当前位置 4 秒之后缓冲好，旧源走到该点时接管；直播等新源开始播放后接管。超时则直接接管（视频）或放弃（直播）。
+
 发直播弹幕：`msg/send` 要 multipart 表单、直播间的 Referer / Origin、WBI 签名的 `web_location`，以及网页版的全部字段。缺这些时接口仍回成功，但 `message` 为 `f`，弹幕被静默屏蔽（2026-11-06 用户实发验证）。
 
 关注的直播：`xlive/web-ucenter/user/following` 只给谁在播，封面、人气、分区为空（2026-11-06 实测），开播的房间再逐个查 `getInfoByRoom`，每页最多 12 个。`xfetter/GetWebList` 按第三方资料的字段读不到数据，未使用。

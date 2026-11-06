@@ -4,18 +4,21 @@
 use std::cell::{Cell, RefCell};
 use std::rc::Rc;
 use std::sync::Arc;
-use std::sync::atomic::{AtomicI64, AtomicU64, Ordering};
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::{Duration, Instant};
 
 use rubi_core::{MAX_FREE_QN, Playback, SendDanmaku, pick_streams};
+use tokio::sync::oneshot::channel as oneshot;
 use windows_collections::IVector;
 use windows_core::{Error, HRESULT, Interface, Ref, Result};
 
+use crate::state::handover::{Handover, Sample, Step};
 use crate::state::layout::WindowClass;
 use crate::state::manifest::dash_manifest;
 use crate::state::panes;
 use crate::state::quality::Offer;
 use crate::state::settings::quality_patch;
+use crate::ui::control_bar::{self, ControlBar};
 use crate::ui::danmaku::{Host, Overlay};
 use crate::ui::feed;
 use crate::ui::keep;
@@ -23,17 +26,18 @@ use crate::ui::media;
 use crate::ui::player_actions::Actions;
 use crate::ui::player_side::Side;
 use crate::ui::quality;
-use crate::ui::shell::shell;
+use crate::ui::shell::{shell, toast};
 use crate::ui::splitter;
 use crate::ui::watch;
 use crate::ui::{load, named, on_click, on_enter, post, set_text, soon};
 use crate::xaml::{
-    AdaptiveMediaSource, DataWriter, FocusManager, FocusState, FrameworkElement, Grid, GridLength, GridUnitType,
+    AdaptiveMediaSource, Color, DataWriter, FocusManager, FocusState, FrameworkElement, Grid, GridLength, GridUnitType,
     HorizontalAlignment, IButtonBase, IColumnDefinition, IContentControl, IControl, IDataWriter, IFontIcon,
     IFrameworkElement, IFrameworkElement4, IInputStream, IMediaPlaybackSession, IMediaPlayer, IMediaPlayer3,
     IMediaPlayerElement, IMediaPlayerFailedEventArgs, IOutputStream, IPanel, IRandomAccessStream, IRangeBase,
-    IRowDefinition, ITextBox, IUIElement, InMemoryRandomAccessStream, MediaPlaybackSession, MediaPlaybackState,
-    MediaPlayer, MediaPlayerFailedEventArgs, MediaSource, SizeChangedEventArgs, UIElement, Uri, VerticalAlignment,
+    IRangeBaseValueChangedEventArgs, IRowDefinition, ITextBox, IUIElement, InMemoryRandomAccessStream,
+    MediaPlaybackSession, MediaPlaybackState, MediaPlayer, MediaPlayerFailedEventArgs, MediaSource,
+    RangeBaseValueChangedEventArgs, SizeChangedEventArgs, TappedRoutedEventArgs, UIElement, Uri, VerticalAlignment,
     VirtualKey, Visibility,
 };
 
@@ -41,6 +45,14 @@ use crate::xaml::{
 const DASH_TYPE: &str = "application/dash+xml";
 /// The player's 100 ns units.
 const TICKS_PER_SECOND: i64 = 10_000_000;
+/// How often the bar shows the position.
+const POSITION_EVERY: Duration = Duration::from_millis(500);
+/// How long the seek bar is left alone after the hand moves it.
+const SEEK_HOLD: Duration = Duration::from_millis(1_200);
+/// How long the hand must rest before the video goes there.
+const SEEK_SETTLE: Duration = Duration::from_millis(150);
+/// How often a handover between qualities is looked at.
+const HANDOVER_EVERY: Duration = Duration::from_millis(50);
 /// What the arrow keys move by.
 const SEEK_STEP: i64 = 5 * TICKS_PER_SECOND;
 /// Width of the side pane beside the 竖屏 picture.
@@ -75,20 +87,11 @@ const LAYOUT: &str = r##"
         <FontIcon Glyph="&#xE72B;" FontSize="16" /><TextBlock Text="返回" Margin="10,0,0,0" />
       </StackPanel>
     </Button>
-    <MediaPlayerElement x:Name="Video" Grid.Row="1" AreTransportControlsEnabled="True" Stretch="Uniform">
-      <MediaPlayerElement.TransportControls>
-        <MediaTransportControls IsFullWindowButtonVisible="False" IsZoomButtonVisible="False" />
-      </MediaPlayerElement.TransportControls>
-    </MediaPlayerElement>
+    <MediaPlayerElement x:Name="Video" Grid.Row="1" AreTransportControlsEnabled="False" Stretch="Uniform" />
     <Canvas x:Name="Danmaku" Grid.Row="1" IsHitTestVisible="False" />
-    <Button x:Name="Quality" Visibility="Collapsed" Background="#66000000" Foreground="White"
-            BorderThickness="0" Padding="10,6" FontSize="12" Grid.Row="1" HorizontalAlignment="Right"
-            VerticalAlignment="Top" Margin="0,8,56,0" />
-    <Button x:Name="Full" Grid.Row="1" HorizontalAlignment="Right" VerticalAlignment="Top" Margin="8"
-            Background="#66000000" Foreground="White" BorderThickness="0" Padding="10,6">
-      <FontIcon x:Name="FullIcon" Glyph="&#xE740;" FontSize="16" />
-    </Button>
-    <Grid x:Name="SendBar" Grid.Row="2" Background="#111111" Padding="12,6">
+    <!--controls-->
+    <ContentControl x:Name="SendBelowVideo" Grid.Row="2" IsTabStop="False" HorizontalContentAlignment="Stretch">
+    <Grid x:Name="SendBar" Background="#111111" Padding="12,6" RequestedTheme="Dark">
       <Grid.ColumnDefinitions>
         <ColumnDefinition Width="*" />
         <ColumnDefinition Width="Auto" />
@@ -100,6 +103,7 @@ const LAYOUT: &str = r##"
         <FontIcon Glyph="&#xE724;" FontSize="18" />
       </Button>
     </Grid>
+    </ContentControl>
     <StackPanel x:Name="Info" Grid.Row="3" Margin="16,10,16,6">
       <TextBlock x:Name="Title" FontSize="20" FontWeight="Light" TextWrapping="Wrap" MaxLines="2" />
       <TextBlock x:Name="Meta" FontSize="12" Margin="0,4,0,0" TextWrapping="Wrap" MaxLines="3"
@@ -184,9 +188,6 @@ const LISTS: &str = r##"    <GridView x:Name="Related" Grid.Row="1" SelectionMod
     </ListView>
 "##;
 
-/// Where to go on from once a new quality has opened, in the player's units.
-static RESUME_AT: AtomicI64 = AtomicI64::new(0);
-
 /// Bumped when a video opens or the page is left: an answer for an earlier one is dropped.
 static RUN: AtomicU64 = AtomicU64::new(0);
 
@@ -214,6 +215,16 @@ struct Page {
     feed: bool,
     /// The qualities on offer.
     offer: Rc<RefCell<Offer>>,
+    bar: Rc<ControlBar>,
+    /// A new quality waiting to take over.
+    standby: Rc<RefCell<Option<Standby>>>,
+    /// The send bar sits in the control bar.
+    send_in_full: Rc<Cell<bool>>,
+    /// Until when the seek bar is left to the hand on it.
+    seek_held: Rc<Cell<Instant>>,
+    /// The position is being shown, not chosen.
+    showing_position: Rc<Cell<bool>>,
+    seeks: Arc<AtomicU64>,
     /// Filling the screen.
     full: Rc<Cell<bool>>,
     /// The video element is held at its size while the page resizes around it.
@@ -265,10 +276,21 @@ fn apply_feed_layout(root: &IFrameworkElement, wide: bool, full: bool) -> Result
     named::<IColumnDefinition>(root, "SideColumn")?.SetWidth(width)?;
     let shown = |on| if on { Visibility::Visible } else { Visibility::Collapsed };
     named::<IUIElement>(root, "Side")?.SetVisibility(shown(pane))?;
-    for part in ["SendBar", "Info", "ActionRow"] {
+    for part in ["Info", "ActionRow"] {
         named::<IUIElement>(root, part)?.SetVisibility(shown(!full))?;
     }
-    Ok(())
+    place_send_bar(root, full, Color { a: 0x66, r: 0, g: 0, b: 0 })
+}
+
+/// In the control bar in fullscreen, under the picture otherwise.
+fn place_send_bar(root: &IFrameworkElement, full: bool, normally: Color) -> Result<()> {
+    let Some(page) = page() else { return Ok(()) };
+    if page.send_in_full.replace(full) == full {
+        return Ok(());
+    }
+    let (from, to) = if full { ("SendBelowVideo", "SendInFull") } else { ("SendInFull", "SendBelowVideo") };
+    let color = if full { Color { a: 0, r: 0, g: 0, b: 0 } } else { normally };
+    control_bar::move_send_bar(root, from, to, color)
 }
 
 /// Keeps the video element at its size until the page stops resizing. The system player draws on
@@ -352,12 +374,8 @@ fn set_full(on: bool) -> Result<()> {
     page.hold_from.set(Instant::now() + FULLSCREEN_SETTLE);
     release_video()?;
     shell.fill_screen(on)?;
-    set_glyph(&page.root, if on { "\u{E73F}" } else { "\u{E740}" })?;
-    apply_layout(&page.root)
-}
-
-fn set_glyph(root: &IFrameworkElement, glyph: &str) -> Result<()> {
-    named::<IFontIcon>(root, "FullIcon")?.SetGlyph(glyph)
+    apply_layout(&page.root)?;
+    page.bar.set_full(on)
 }
 
 /// The window left fullscreen by itself (the system's own control): the page follows.
@@ -489,7 +507,8 @@ fn apply_layout(root: &IFrameworkElement) -> Result<()> {
     } else {
         pixels(0.0)
     })?;
-    for part in ["Back", "SendBar", "Info", "ActionRow", "Side"] {
+    place_send_bar(root, full, Color { a: 255, r: 0x11, g: 0x11, b: 0x11 })?;
+    for part in ["Back", "Info", "ActionRow", "Side"] {
         let shown = if full { Visibility::Collapsed } else { Visibility::Visible };
         named::<IUIElement>(root, part)?.SetVisibility(shown)?;
     }
@@ -509,6 +528,12 @@ pub fn leave() {
     watch::stop();
     let _ = set_full(false);
     PAUSED_FOR_BLUR.set(false);
+    if let Some(page) = page() {
+        page.bar.keep_volume();
+        if let Some(standby) = page.standby.borrow_mut().take() {
+            media::close(Some(standby.player), Some(standby.source));
+        }
+    }
     RUN.fetch_add(1, Ordering::Relaxed);
     // The element lets go first: it must not be left holding a closed player.
     if let Some(page) = page() {
@@ -540,7 +565,15 @@ pub fn open(feed: bool, bvid: &str, title: &str, uploader: &str) -> Result<()> {
     leave();
     crate::ui::me::leave();
     let layout = if feed { feed::LAYOUT } else { LAYOUT };
-    let root = load(&layout.replace("<!--bar-->", splitter::BAR_TEMPLATE).replace("<!--lists-->", LISTS))?;
+    let place = if feed { r#"Grid.RowSpan="4""# } else { r#"Grid.Row="1""# };
+    let root = load(
+        &layout
+            .replace("<!--bar-->", splitter::BAR_TEMPLATE)
+            .replace("<!--lists-->", LISTS)
+            .replace("<!--controls-->", &control_bar::markup(place)),
+    )?;
+    named::<IUIElement>(&root, "SeekRow")?.SetVisibility(Visibility::Visible)?;
+    named::<IUIElement>(&root, "PlayPause")?.SetVisibility(Visibility::Visible)?;
     set_text(&root, "Title", title)?;
     set_text(&root, "Meta", &format!("{uploader} · 正在打开…"))?;
     on_click(&root, "Back", go_back)?;
@@ -564,6 +597,19 @@ pub fn open(feed: bool, bvid: &str, title: &str, uploader: &str) -> Result<()> {
         cid,
         feed,
         offer: Rc::default(),
+        bar: ControlBar::attach(
+            &root,
+            "Video",
+            if feed { &["TopBar"] } else { &[] },
+            run,
+            || page().map(|p| p.bar),
+            set_sound,
+        )?,
+        standby: Rc::default(),
+        send_in_full: Rc::default(),
+        seek_held: Rc::new(Cell::new(Instant::now())),
+        showing_position: Rc::default(),
+        seeks: Arc::default(),
         full: Rc::new(Cell::new(false)),
         held: Rc::default(),
         resizes: Arc::default(),
@@ -573,6 +619,20 @@ pub fn open(feed: bool, bvid: &str, title: &str, uploader: &str) -> Result<()> {
     on_click(&root, "ActDanmaku", toggle_danmaku)?;
     on_click(&root, "Full", toggle_full)?;
     on_click(&root, "Quality", choose_quality)?;
+    on_click(&root, "PlayPause", toggle_play)?;
+    on_click(&root, "DanmakuSwitch", toggle_danmaku)?;
+    keep(
+        named::<IUIElement>(&root, "Video")?
+            .Tapped(|_: Ref<windows_core::IInspectable>, _: Ref<TappedRoutedEventArgs>| toggle_play())?,
+    );
+    keep(named::<IRangeBase>(&root, "Seek")?.ValueChanged(
+        |_: Ref<windows_core::IInspectable>, args: Ref<RangeBaseValueChangedEventArgs>| {
+            let value = args.ok().and_then(|a| a.cast::<IRangeBaseValueChangedEventArgs>()?.NewValue());
+            if let Ok(value) = value {
+                seek_asked(value);
+            }
+        },
+    )?);
     on_click(&root, "SendButton", send_danmaku)?;
     on_enter(&root, "SendText", send_danmaku)?;
     let pending = Rc::new(Cell::new(false));
@@ -702,21 +762,96 @@ fn switch_quality(qn: u32) {
     });
 }
 
+/// A new quality waiting, out of sight, to take over.
+struct Standby {
+    player: MediaPlayer,
+    source: MediaSource,
+    offer: Offer,
+    handover: Handover,
+}
+
 fn quality_ready(source: std::result::Result<(MediaSource, Offer), String>) -> Result<()> {
-    let Some(page) = page() else { return Ok(()) };
+    let (Some(page), Some(shell)) = (page(), shell()) else { return Ok(()) };
     let (source, offer) = match source {
         Ok(ready) => ready,
         Err(problem) => {
-            say(&format!("切换清晰度失败：{problem}"));
+            toast(&format!("切换清晰度失败：{problem}"));
             return Ok(());
         }
     };
-    let Some(player) = PLAYING.with(|p| p.borrow().clone()) else { return Ok(()) };
-    if let Some(session) = playing_session() {
-        RESUME_AT.store(session.Position()?.duration, Ordering::Relaxed);
+    let Some(backend) = shell.backend.get().cloned() else { return Ok(()) };
+    if page.standby.borrow().is_some() {
+        media::close_source(Some(source));
+        return Ok(());
     }
-    media::replace(&player, &source)?;
-    media::close_source(SOURCE.with(|s| s.borrow_mut().replace(source)));
+    let player = media::standby(&source, false)?;
+    *page.standby.borrow_mut() = Some(Standby { player, source, offer, handover: Handover::default() });
+    let (dispatcher, run) = (shell.dispatcher.clone(), self::run());
+    backend.spawn(async move {
+        while run == self::run() {
+            tokio::time::sleep(HANDOVER_EVERY).await;
+            let (done, wait) = oneshot();
+            post(&dispatcher, move || {
+                let _ = done.send(run != self::run() || handover_step());
+            });
+            if wait.await.unwrap_or(true) {
+                return;
+            }
+        }
+    });
+    Ok(())
+}
+
+fn milliseconds(at: windows_time::TimeSpan) -> u64 {
+    (at.duration / 10_000).max(0) as u64
+}
+
+/// Moves the handover on; whether it is over.
+fn handover_step() -> bool {
+    let Some(page) = page() else { return true };
+    let Some(old) = playing_session() else { return true };
+    let mut waiting = page.standby.borrow_mut();
+    let Some(standby) = waiting.as_mut() else { return true };
+    let Ok(new) = media::session_of(&standby.player) else { return true };
+    let whole = new.NaturalDuration().map_or(0, |d| d.duration);
+    let state = new.PlaybackState().unwrap_or(MediaPlaybackState::None);
+    let sample = Sample {
+        opened: whole > 0,
+        settled: state == MediaPlaybackState::Paused,
+        new_ms: new.Position().map_or(0, milliseconds),
+        old_ms: old.Position().map_or(0, milliseconds),
+        old_playing: is_playing(),
+    };
+    match standby.handover.step(sample) {
+        Step::Wait => false,
+        Step::SeekTo(ms) => {
+            let _ = new.SetPosition(windows_time::TimeSpan { duration: ms as i64 * 10_000 });
+            false
+        }
+        Step::Swap => {
+            let Some(standby) = waiting.take() else { return true };
+            drop(waiting);
+            if take_over(&page, standby, sample.old_playing).is_err() {
+                toast("切换清晰度失败");
+            }
+            true
+        }
+    }
+}
+
+fn take_over(page: &Page, standby: Standby, playing: bool) -> Result<()> {
+    let Standby { player, source, offer, .. } = standby;
+    named::<IMediaPlayerElement>(&page.root, "Video")?.SetMediaPlayer(&player)?;
+    report_failures(&player)?;
+    let control = player.cast::<IMediaPlayer>()?;
+    control.SetIsLoopingEnabled(page.feed)?;
+    if playing {
+        control.Play()?;
+    }
+    let old = PLAYING.with(|p| p.borrow_mut().replace(player));
+    let old_source = SOURCE.with(|s| s.borrow_mut().replace(source));
+    page.bar.apply_sound()?;
+    media::close(old, old_source);
     quality::show(&page.root, &offer)?;
     *page.offer.borrow_mut() = offer;
     Ok(())
@@ -726,15 +861,17 @@ fn shown(opened: std::result::Result<Opened, String>, uploader: &str) -> Result<
     let Some(page) = page() else { return Ok(()) };
     match opened {
         Ok(Opened { source, cid, duration_ms, offer }) => {
-            let session = play(&page.root, &source)?;
+            play(&page.root, &source)?;
             quality::show(&page.root, &offer)?;
             *page.offer.borrow_mut() = offer;
             page.cid.set(cid);
             watch::start(&page.bvid, cid);
-            let clock = session.cast::<IMediaPlaybackSession>()?;
             let overlay = Overlay::attach(
                 &page.root,
-                Box::new(move || clock.Position().map_or(0, |at| (at.duration / 10_000) as u32)),
+                // Read each time: another quality brings another session.
+                Box::new(|| {
+                    playing_session().and_then(|s| s.Position().ok()).map_or(0, |at| (at.duration / 10_000) as u32)
+                }),
                 Host { run, find: overlay },
             )?;
             if let Some(shell) = shell()
@@ -754,7 +891,79 @@ fn toggle_danmaku() {
     if let Some(overlay) = page.overlay.borrow().as_ref() {
         let on = overlay.toggle();
         let _ = set_text(&page.root, "DanmakuText", if on { "弹幕 开" } else { "弹幕 关" });
+        let _ = page.bar.show_danmaku_state(on);
     }
+}
+
+fn set_sound(level: f64, muted: bool) {
+    PLAYING.with(|p| {
+        if let Some(player) = p.borrow().as_ref().and_then(|m| m.cast::<IMediaPlayer>().ok()) {
+            let _ = player.SetVolume(level);
+            let _ = player.SetIsMuted(muted);
+        }
+    });
+}
+
+/// The hand moved the seek bar: follows it once it rests.
+fn seek_asked(seconds: f64) {
+    let (Some(page), Some(shell)) = (page(), shell()) else { return };
+    if page.showing_position.get() {
+        return;
+    }
+    page.seek_held.set(Instant::now() + SEEK_HOLD);
+    let Some(backend) = shell.backend.get().cloned() else { return };
+    let turn = page.seeks.fetch_add(1, Ordering::Relaxed) + 1;
+    let (seeks, dispatcher, run) = (page.seeks.clone(), shell.dispatcher.clone(), self::run());
+    backend.spawn(async move {
+        tokio::time::sleep(SEEK_SETTLE).await;
+        if seeks.load(Ordering::Relaxed) == turn {
+            post(&dispatcher, move || {
+                if run == self::run()
+                    && let Some(session) = playing_session()
+                {
+                    let at = windows_time::TimeSpan { duration: (seconds * TICKS_PER_SECOND as f64) as i64 };
+                    let _ = session.SetPosition(at);
+                }
+            });
+        }
+    });
+}
+
+/// Shows on the bar how far the video is, for as long as this run lasts.
+fn follow_position() {
+    let Some(shell) = shell() else { return };
+    let Some(backend) = shell.backend.get().cloned() else { return };
+    let (dispatcher, run) = (shell.dispatcher.clone(), self::run());
+    backend.spawn(async move {
+        while run == self::run() {
+            tokio::time::sleep(POSITION_EVERY).await;
+            post(&dispatcher, move || {
+                if run == self::run() {
+                    let _ = show_position();
+                }
+            });
+        }
+    });
+}
+
+fn show_position() -> Result<()> {
+    let (Some(page), Some(session)) = (page(), playing_session()) else { return Ok(()) };
+    let seconds = |t: windows_time::TimeSpan| t.duration / TICKS_PER_SECOND;
+    let (at, whole) = (seconds(session.Position()?), seconds(session.NaturalDuration()?));
+    named::<IFontIcon>(&page.root, "PlayIcon")?.SetGlyph(if is_playing() { "\u{E769}" } else { "\u{E768}" })?;
+    set_text(&page.root, "Time", &format!("{} / {}", clock(at), clock(whole)))?;
+    if Instant::now() >= page.seek_held.get() {
+        let seek = named::<IRangeBase>(&page.root, "Seek")?;
+        page.showing_position.set(true);
+        seek.SetMaximum(whole.max(1) as f64)?;
+        seek.SetValue(at as f64)?;
+        page.showing_position.set(false);
+    }
+    Ok(())
+}
+
+fn clock(seconds: i64) -> String {
+    format!("{}:{:02}", seconds / 60, seconds % 60)
 }
 
 fn send_danmaku() {
@@ -792,7 +1001,7 @@ fn send_typed() -> Result<()> {
                     overlay.add(sent);
                 }
             }
-            Err(problem) => say(&format!("发送失败：{problem}")),
+            Err(problem) => toast(&format!("发送失败：{problem}")),
         });
     });
     Ok(())
@@ -827,17 +1036,6 @@ fn report_failures(player: &MediaPlayer) -> Result<()> {
 fn play(root: &IFrameworkElement, source: &MediaSource) -> Result<MediaPlaybackSession> {
     let player = media::play(&named::<IMediaPlayerElement>(root, "Video")?, source)?;
     report_failures(&player)?;
-    keep(player.cast::<IMediaPlayer>()?.MediaOpened(
-        |sender: Ref<MediaPlayer>, _: Ref<windows_core::IInspectable>| {
-            let at = RESUME_AT.swap(0, Ordering::Relaxed);
-            if at > 0
-                && let Ok(player) = sender.ok().and_then(|p| p.cast::<IMediaPlayer3>())
-                && let Ok(session) = player.PlaybackSession().and_then(|s| s.cast::<IMediaPlaybackSession>())
-            {
-                let _ = session.SetPosition(windows_time::TimeSpan { duration: at });
-            }
-        },
-    )?);
     if page().is_some_and(|p| p.feed) {
         player.cast::<IMediaPlayer>()?.SetIsLoopingEnabled(true)?;
     }
@@ -845,6 +1043,10 @@ fn play(root: &IFrameworkElement, source: &MediaSource) -> Result<MediaPlaybackS
     let session = player.cast::<IMediaPlayer3>()?.PlaybackSession()?;
     PLAYING.with(|p| *p.borrow_mut() = Some(player));
     SOURCE.with(|s| *s.borrow_mut() = Some(source.clone()));
+    if let Some(page) = page() {
+        page.bar.apply_sound()?;
+    }
+    follow_position();
     Ok(session)
 }
 

@@ -3,6 +3,7 @@
 pub mod danmaku;
 pub mod feed;
 pub mod follow;
+pub mod handover;
 pub mod layout;
 pub mod library;
 pub mod live;

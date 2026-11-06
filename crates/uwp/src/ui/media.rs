@@ -4,7 +4,8 @@ use windows_core::{Error, HRESULT, Interface, Result};
 
 use crate::xaml::{
     AdaptiveMediaSource, AdaptiveMediaSourceCreationResult, AdaptiveMediaSourceCreationStatus, HttpClient, IClosable,
-    IMediaPlaybackSource, IMediaPlayer, IMediaPlayerElement, IMediaPlayerSource2, MediaPlayer, MediaSource, Uri,
+    IMediaPlaybackSession, IMediaPlaybackSource, IMediaPlayer, IMediaPlayer3, IMediaPlayerElement, IMediaPlayerSource2,
+    MediaPlayer, MediaSource, Uri,
 };
 
 /// An HTTP client sending `headers` with each request.
@@ -41,10 +42,20 @@ pub fn play(video: &IMediaPlayerElement, source: &MediaSource) -> Result<MediaPl
     Ok(player)
 }
 
-/// Plays `source` in place of what `player` plays.
-pub fn replace(player: &MediaPlayer, source: &MediaSource) -> Result<()> {
+/// A silent player on `source`, not on screen, to take over from another. It plays by itself when
+/// `plays`.
+pub fn standby(source: &MediaSource, plays: bool) -> Result<MediaPlayer> {
+    let player = MediaPlayer::new()?;
+    let control = player.cast::<IMediaPlayer>()?;
+    control.SetIsMuted(true)?;
+    control.SetAutoPlay(plays)?;
     player.cast::<IMediaPlayerSource2>()?.SetSource(&source.cast::<IMediaPlaybackSource>()?)?;
-    player.cast::<IMediaPlayer>()?.Play()
+    Ok(player)
+}
+
+/// The session of `player`.
+pub fn session_of(player: &MediaPlayer) -> Result<IMediaPlaybackSession> {
+    player.cast::<IMediaPlayer3>()?.PlaybackSession()?.cast()
 }
 
 /// Lets go of a player and what it played. The element must have let go first: left holding a

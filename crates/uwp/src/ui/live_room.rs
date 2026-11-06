@@ -9,6 +9,7 @@ use std::time::{Duration, Instant};
 
 use rubi_core::{LiveChannel, LiveFilter};
 use rubi_model::{Danmaku, LiveEvent, LiveProtocol};
+use tokio::sync::oneshot::channel as oneshot;
 use windows_collections::IVector;
 use windows_core::{Interface, Ref, Result};
 
@@ -17,28 +18,26 @@ use crate::state::layout::WindowClass;
 use crate::state::library::count;
 use crate::state::live::CHAT_MOST;
 use crate::state::quality::Offer;
-use crate::state::settings::Prefs;
+use crate::ui::control_bar::{self, ControlBar};
 use crate::ui::danmaku::{Host, Overlay};
 use crate::ui::quality;
 use crate::ui::rows::{add_rows, on_row};
 use crate::ui::shell::{shell, toast};
 use crate::ui::{keep, load, media, named, on_click, on_enter, post, set_text, soon};
 use crate::xaml::{
-    Color, CoreCursor, CoreCursorType, CoreWindow, ElementTheme, FocusState, FrameworkElement, Grid, GridLength,
-    GridUnitType, IColumnDefinition, IContentControl, IControl, ICoreWindow, IFontIcon, IFrameworkElement,
-    IFrameworkElement2, IItemsControl, IMediaPlayer, IMediaPlayerElement, IPanel, IRangeBase, IRowDefinition,
-    ITextBlock, ITextBox, IUIElement, MediaPlayer, MediaSource, PointerRoutedEventArgs, RangeBaseValueChangedEventArgs,
-    SizeChangedEventArgs, SolidColorBrush, Thickness, UIElement, VirtualKey, Visibility,
+    Color, ElementTheme, FocusState, FrameworkElement, Grid, GridLength, GridUnitType, IColumnDefinition, IControl,
+    IFontIcon, IFrameworkElement, IFrameworkElement2, IItemsControl, IMediaPlayer, IMediaPlayerElement, IPanel,
+    IRowDefinition, ITextBlock, ITextBox, IUIElement, MediaPlaybackState, MediaPlayer, MediaSource,
+    SizeChangedEventArgs, SolidColorBrush, Thickness, VirtualKey, Visibility,
 };
 
 /// Width of the danmaku list beside the picture.
 const CHAT_WIDTH: f64 = 320.0;
 /// How far ahead of now a new danmaku starts, so it does not appear mid-way.
 const DANMAKU_LEAD_MS: u32 = 200;
-/// How long the fullscreen bar stays without a sign of life.
-const BAR_STAYS: Duration = Duration::from_secs(3);
-const WHITE: Color = Color { a: 255, r: 255, g: 255, b: 255 };
-const DIMMED: Color = Color { a: 110, r: 255, g: 255, b: 255 };
+/// How often a new stream is looked at, and how many times before giving up on it.
+const STANDBY_EVERY: Duration = Duration::from_millis(100);
+const STANDBY_LOOKS: u32 = 150;
 /// The icons of what is shown over the picture.
 const OFF_AIR_GLYPH: &str = "\u{E93E}";
 const FAILED_GLYPH: &str = "\u{E7BA}";
@@ -70,31 +69,7 @@ const LAYOUT: &str = r##"
       </StackPanel>
       <Button x:Name="Back" VerticalAlignment="Top" Background="Transparent" BorderThickness="0" Padding="12,8"
               Foreground="White"><FontIcon Glyph="&#xE72B;" FontSize="16" /></Button>
-      <Grid x:Name="ControlBar" VerticalAlignment="Bottom" Background="#99000000" Padding="4,2,8,2">
-        <Grid.ColumnDefinitions>
-          <ColumnDefinition Width="Auto" /><ColumnDefinition Width="Auto" /><ColumnDefinition Width="Auto" />
-          <ColumnDefinition Width="*" /><ColumnDefinition Width="Auto" /><ColumnDefinition Width="Auto" />
-          <ColumnDefinition Width="Auto" />
-        </Grid.ColumnDefinitions>
-        <Button x:Name="Mute" Background="Transparent" Foreground="White" BorderThickness="0" Padding="8,6"
-                VerticalAlignment="Center"><FontIcon x:Name="MuteIcon" Glyph="&#xE767;" FontSize="16" /></Button>
-        <Slider x:Name="Volume" Grid.Column="1" Width="96" Minimum="0" Maximum="100" StepFrequency="1"
-                VerticalAlignment="Center" IsThumbToolTipEnabled="False" />
-        <Button x:Name="DanmakuSwitch" Grid.Column="2" Margin="4,0,0,0" Background="Transparent" Foreground="White"
-                BorderThickness="0" Padding="8,6" VerticalAlignment="Center">
-          <FontIcon Glyph="&#xE8BD;" FontSize="16" />
-        </Button>
-        <ContentControl x:Name="SendInFull" Grid.Column="3" IsTabStop="False" HorizontalContentAlignment="Stretch"
-                        MaxWidth="560" Margin="12,0" />
-        <TextBlock x:Name="Online" Grid.Column="4" VerticalAlignment="Center" FontSize="12" Foreground="White"
-                   Margin="12,0" />
-        <Button x:Name="Quality" Grid.Column="5" Visibility="Collapsed" Background="Transparent" Foreground="White"
-                BorderThickness="0" Padding="8,6" FontSize="12" VerticalAlignment="Center" />
-        <Button x:Name="Full" Grid.Column="6" Background="Transparent" Foreground="White" BorderThickness="0"
-                Padding="8,6" VerticalAlignment="Center">
-          <FontIcon x:Name="FullIcon" Glyph="&#xE740;" FontSize="16" />
-        </Button>
-      </Grid>
+      <!--controls-->
     </Grid>
     <ContentControl x:Name="SendBelowVideo" Grid.Row="1" IsTabStop="False" HorizontalContentAlignment="Stretch">
       <Grid x:Name="SendBar" Padding="12,6">
@@ -157,15 +132,8 @@ struct Room {
     chat: RefCell<Vec<String>>,
     next_danmaku: Cell<u64>,
     full: Cell<bool>,
-    muted: Cell<bool>,
-    /// Where the pointer last was.
-    pointer: Cell<(f32, f32)>,
-    /// The bars and the cursor are hidden.
-    idle: Cell<bool>,
-    /// The pointer rests on the control bar.
-    over_bar: Cell<bool>,
-    /// Bumped by each sign of life: only the last one may hide the bar.
-    bar_turn: Arc<AtomicU64>,
+    bar: Rc<ControlBar>,
+    standby: RefCell<Option<(MediaPlayer, MediaSource, Offer)>>,
     send_bar: Cell<SendPlace>,
     /// The qualities on offer.
     offer: RefCell<Offer>,
@@ -190,23 +158,14 @@ fn overlay_of(asked: u64) -> Option<Rc<Overlay>> {
     room().and_then(|r| r.overlay.borrow().clone())
 }
 
-/// Remembers the volume for the next room.
-fn keep_volume(room: &Room) {
-    let (Some(shell), Ok(level)) = (shell(), named::<IRangeBase>(&room.root, "Volume").and_then(|v| v.Value())) else {
-        return;
-    };
-    let level = level as u8;
-    let prefs = shell.prefs();
-    if prefs.live_volume != level {
-        let _ = shell.set_prefs(Prefs { live_volume: level, ..prefs });
-    }
-}
-
 /// Leaves the room on show, if there is one.
 pub fn leave() {
     RUN.fetch_add(1, Ordering::Relaxed);
     let Some(room) = ROOM.with_borrow_mut(Option::take) else { return };
-    keep_volume(&room);
+    if let Some((player, source, _)) = room.standby.borrow_mut().take() {
+        media::close(Some(player), Some(source));
+    }
+    room.bar.keep_volume();
     let _ = set_full(&room, false);
     let video = named::<IMediaPlayerElement>(&room.root, "Video");
     let _ = video.and_then(|v| v.SetMediaPlayer(None::<&MediaPlayer>));
@@ -229,7 +188,7 @@ pub fn open(room_id: u64, title: &str, uploader: &str) -> Result<()> {
     crate::ui::player::leave();
     crate::ui::me::leave();
     leave();
-    let root = load(LAYOUT)?;
+    let root = load(&LAYOUT.replace("<!--controls-->", &control_bar::markup("")))?;
     set_text(&root, "Title", title)?;
     set_text(&root, "Meta", &format!("{uploader} · 正在打开…"))?;
     let shown = Rc::new(Room {
@@ -243,50 +202,16 @@ pub fn open(room_id: u64, title: &str, uploader: &str) -> Result<()> {
         chat: RefCell::default(),
         next_danmaku: Cell::new(1),
         full: Cell::new(false),
-        muted: Cell::new(false),
-        pointer: Cell::default(),
-        idle: Cell::new(false),
-        over_bar: Cell::new(false),
-        bar_turn: Arc::default(),
+        bar: ControlBar::attach(&root, "Stage", &["Back"], run, || room().map(|r| r.bar.clone()), set_sound)?,
+        standby: RefCell::default(),
         send_bar: Cell::new(SendPlace::BelowVideo),
         offer: RefCell::default(),
     });
     ROOM.with_borrow_mut(|r| *r = Some(shown.clone()));
     on_click(&root, "Back", go_back)?;
     on_click(&root, "Full", toggle_full)?;
-    on_click(&root, "Mute", toggle_mute)?;
     on_click(&root, "DanmakuSwitch", toggle_danmaku)?;
     on_click(&root, "Quality", choose_quality)?;
-    keep(named::<IUIElement>(&root, "Stage")?.PointerMoved(
-        |_: Ref<windows_core::IInspectable>, args: Ref<PointerRoutedEventArgs>| {
-            let at = args.ok().and_then(|a| a.GetCurrentPoint(None::<&UIElement>)?.Position());
-            if let (Some(room), Ok(at)) = (room(), at) {
-                // Hiding what lay under the pointer makes this fire too, with the pointer still.
-                if room.pointer.replace((at.x, at.y)) != (at.x, at.y) {
-                    let _ = show_bar(&room);
-                }
-            }
-        },
-    )?);
-    let bar = named::<IUIElement>(&root, "ControlBar")?;
-    keep(bar.PointerEntered(|_: Ref<windows_core::IInspectable>, _: Ref<PointerRoutedEventArgs>| {
-        if let Some(room) = room() {
-            room.over_bar.set(true);
-        }
-    })?);
-    keep(bar.PointerExited(|_: Ref<windows_core::IInspectable>, _: Ref<PointerRoutedEventArgs>| {
-        if let Some(room) = room() {
-            room.over_bar.set(false);
-        }
-    })?);
-    let volume = named::<IRangeBase>(&root, "Volume")?;
-    volume.SetValue(f64::from(shell.prefs().live_volume))?;
-    keep(volume.ValueChanged(|_: Ref<windows_core::IInspectable>, _: Ref<RangeBaseValueChangedEventArgs>| {
-        if let Some(room) = room() {
-            room.muted.set(false);
-            let _ = apply_volume(&room);
-        }
-    })?);
     on_click(&root, "SendButton", send)?;
     on_enter(&root, "SendText", send)?;
     let chat = named::<IFrameworkElement>(&root, "Chat")?;
@@ -370,19 +295,68 @@ fn switch_quality(qn: u32) {
     });
 }
 
+/// The new stream plays out of sight until it is under way, then takes over.
 fn quality_ready(ready: std::result::Result<(MediaSource, Offer), Stop>) -> Result<()> {
     let Some(room) = room() else { return Ok(()) };
-    let Ok((source, offer)) = ready else {
+    let (Some(shell), Ok((source, offer))) = (shell(), ready) else {
         toast("切换清晰度失败");
         return Ok(());
     };
-    if let Some(player) = room.player.borrow().as_ref() {
-        media::replace(player, &source)?;
+    let Some(backend) = shell.backend.get().cloned() else { return Ok(()) };
+    if room.standby.borrow().is_some() {
+        return Ok(());
     }
-    media::close_source(room.source.borrow_mut().replace(source));
-    quality::show(&room.root, &offer)?;
-    *room.offer.borrow_mut() = offer;
+    let player = media::standby(&source, true)?;
+    *room.standby.borrow_mut() = Some((player, source, offer));
+    let (dispatcher, opening) = (shell.dispatcher.clone(), run());
+    backend.spawn(async move {
+        for _ in 0..STANDBY_LOOKS {
+            tokio::time::sleep(STANDBY_EVERY).await;
+            let (ready, wait) = oneshot();
+            post(&dispatcher, move || {
+                let _ = ready.send(opening == run() && standby_ready());
+            });
+            if wait.await.unwrap_or(true) {
+                return;
+            }
+        }
+        post(&dispatcher, move || {
+            if opening == run()
+                && let Some(room) = self::room()
+                && let Some((player, source, _)) = room.standby.borrow_mut().take()
+            {
+                media::close(Some(player), Some(source));
+                toast("切换清晰度失败");
+            }
+        });
+    });
     Ok(())
+}
+
+/// Swaps the streams once the new one plays; whether the wait is over.
+fn standby_ready() -> bool {
+    let Some(room) = room() else { return true };
+    let playing = room.standby.borrow().as_ref().is_none_or(|(player, _, _)| {
+        media::session_of(player).and_then(|s| s.PlaybackState()).is_ok_and(|s| s == MediaPlaybackState::Playing)
+    });
+    if !playing {
+        return false;
+    }
+    let Some((player, source, offer)) = room.standby.borrow_mut().take() else { return true };
+    let swapped = (|| {
+        named::<IMediaPlayerElement>(&room.root, "Video")?.SetMediaPlayer(&player)?;
+        let old = room.player.borrow_mut().replace(player);
+        let old_source = room.source.borrow_mut().replace(source);
+        room.bar.apply_sound()?;
+        media::close(old, old_source);
+        quality::show(&room.root, &offer)?;
+        *room.offer.borrow_mut() = offer;
+        Ok::<(), windows_core::Error>(())
+    })();
+    if swapped.is_err() {
+        toast("切换清晰度失败");
+    }
+    true
 }
 
 fn playing(source: std::result::Result<(MediaSource, Offer), Stop>) -> Result<()> {
@@ -396,7 +370,7 @@ fn playing(source: std::result::Result<(MediaSource, Offer), Stop>) -> Result<()
     player.cast::<IMediaPlayer>()?.Play()?;
     *room.player.borrow_mut() = Some(player);
     *room.source.borrow_mut() = Some(source);
-    apply_volume(&room)?;
+    room.bar.apply_sound()?;
     quality::show(&room.root, &offer)?;
     *room.offer.borrow_mut() = offer;
     let opened = room.opened;
@@ -541,40 +515,28 @@ impl SendPlace {
 /// Under the list it wears the page's colours and a box of its own; on the picture, the picture's.
 fn move_send_bar(root: &IFrameworkElement, place: SendPlace) -> Result<()> {
     let Some(room) = room() else { return Ok(()) };
-    let bar = named::<UIElement>(root, "SendBar")?;
     let from = room.send_bar.replace(place);
-    if from != place {
-        named::<IContentControl>(root, from.host())?.SetContent(None::<&windows_core::IInspectable>)?;
-        named::<IContentControl>(root, place.host())?.SetContent(&bar)?;
-    }
     let color = match place {
         SendPlace::BelowVideo => Color { a: 255, r: 0x11, g: 0x11, b: 0x11 },
         _ => Color { a: 0, r: 0, g: 0, b: 0 },
     };
-    bar.cast::<IPanel>()?.SetBackground(&SolidColorBrush::CreateInstanceWithColor(color)?)?;
+    if from != place {
+        control_bar::move_send_bar(root, from.host(), place.host(), color)?;
+    } else {
+        named::<IPanel>(root, "SendBar")?.SetBackground(&SolidColorBrush::CreateInstanceWithColor(color)?)?;
+    }
     let edge = if place == SendPlace::BelowChat { 1.0 } else { 0.0 };
     let line = Thickness { left: edge, top: edge, right: edge, bottom: 1.0 };
     named::<IControl>(root, "SendText")?.SetBorderThickness(line)?;
     let theme = if place == SendPlace::BelowChat { ElementTheme::Default } else { ElementTheme::Dark };
-    bar.cast::<IFrameworkElement2>()?.SetRequestedTheme(theme)
+    named::<IFrameworkElement2>(root, "SendBar")?.SetRequestedTheme(theme)
 }
 
-fn apply_volume(room: &Room) -> Result<()> {
-    let level = named::<IRangeBase>(&room.root, "Volume")?.Value()?;
-    let silent = room.muted.get() || level <= 0.0;
-    named::<IFontIcon>(&room.root, "MuteIcon")?.SetGlyph(if silent { "\u{E74F}" } else { "\u{E767}" })?;
-    if let Some(player) = room.player.borrow().as_ref() {
-        let player = player.cast::<IMediaPlayer>()?;
-        player.SetVolume(level / 100.0)?;
-        player.SetIsMuted(room.muted.get())?;
-    }
-    Ok(())
-}
-
-fn toggle_mute() {
-    if let Some(room) = room() {
-        room.muted.set(!room.muted.get());
-        let _ = apply_volume(&room);
+fn set_sound(level: f64, muted: bool) {
+    let Some(room) = room() else { return };
+    if let Some(player) = room.player.borrow().as_ref().and_then(|p| p.cast::<IMediaPlayer>().ok()) {
+        let _ = player.SetVolume(level);
+        let _ = player.SetIsMuted(muted);
     }
 }
 
@@ -596,77 +558,15 @@ fn set_full(room: &Room, on: bool) -> Result<()> {
     }
     let Some(shell) = shell() else { return Ok(()) };
     shell.fill_screen(on)?;
-    named::<IFontIcon>(&room.root, "FullIcon")?.SetGlyph(if on { "\u{E73F}" } else { "\u{E740}" })?;
     apply_layout(&room.root)?;
-    show_bar(room)
-}
-
-/// Shows the bars. In fullscreen they go again after a while without a sign of life.
-fn show_bar(room: &Room) -> Result<()> {
-    set_idle(room, false)?;
-    let turn = room.bar_turn.fetch_add(1, Ordering::Relaxed) + 1;
-    if room.full.get() {
-        hide_bar_after(room, turn);
-    }
-    Ok(())
-}
-
-fn hide_bar_after(room: &Room, turn: u64) {
-    let Some(shell) = shell() else { return };
-    let Some(backend) = shell.backend.get().cloned() else { return };
-    let (turns, dispatcher, opening) = (room.bar_turn.clone(), shell.dispatcher.clone(), run());
-    backend.spawn(async move {
-        tokio::time::sleep(BAR_STAYS).await;
-        if turns.load(Ordering::Relaxed) == turn {
-            post(&dispatcher, move || {
-                if opening == run()
-                    && let Some(room) = self::room()
-                {
-                    let _ = hide_bar(&room, turn);
-                }
-            });
-        }
-    });
-}
-
-/// Hides the bars, unless someone is at them: then it looks again later.
-fn hide_bar(room: &Room, turn: u64) -> Result<()> {
-    if !room.full.get() {
-        return Ok(());
-    }
-    let typing = named::<IControl>(&room.root, "SendText")?.FocusState()? != FocusState::Unfocused;
-    if typing || room.over_bar.get() {
-        hide_bar_after(room, turn);
-        return Ok(());
-    }
-    set_idle(room, true)
-}
-
-/// Takes the bars and the cursor off the picture, or brings them back.
-fn set_idle(room: &Room, idle: bool) -> Result<()> {
-    if room.idle.replace(idle) == idle {
-        return Ok(());
-    }
-    let shown = if idle { Visibility::Collapsed } else { Visibility::Visible };
-    named::<IUIElement>(&room.root, "ControlBar")?.SetVisibility(shown)?;
-    named::<IUIElement>(&room.root, "Back")?.SetVisibility(shown)?;
-    let window = CoreWindow::GetForCurrentThread()?.cast::<ICoreWindow>()?;
-    if idle {
-        window.SetPointerCursor(None::<&CoreCursor>)
-    } else {
-        window.SetPointerCursor(&CoreCursor::CreateCursor(CoreCursorType::Arrow, 0)?)
-    }
+    room.bar.set_full(on)
 }
 
 fn toggle_danmaku() {
     let Some(room) = room() else { return };
     let overlay = room.overlay.borrow().clone();
-    let Some(overlay) = overlay else { return };
-    let color = if overlay.toggle() { WHITE } else { DIMMED };
-    if let (Ok(button), Ok(brush)) =
-        (named::<IControl>(&room.root, "DanmakuSwitch"), SolidColorBrush::CreateInstanceWithColor(color))
-    {
-        let _ = button.SetForeground(&brush);
+    if let Some(overlay) = overlay {
+        let _ = room.bar.show_danmaku_state(overlay.toggle());
     }
 }
 

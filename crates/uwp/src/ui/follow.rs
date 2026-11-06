@@ -5,7 +5,7 @@ use std::cell::{Cell, RefCell};
 use std::rc::Rc;
 use std::time::{SystemTime, UNIX_EPOCH};
 
-use rubi_model::FollowedUp;
+use rubi_model::{FollowedUp, FollowingUp};
 use windows_collections::IVector;
 use windows_core::{IInspectable, Interface, Result};
 
@@ -13,13 +13,15 @@ use crate::state::follow::{PICTURES, Post};
 use crate::state::layout::WindowClass;
 use crate::ui::feed;
 use crate::ui::rows::{Covers, add_rows, on_row, on_row_click};
-use crate::ui::shell::shell;
+use crate::ui::shell::{shell, toast};
 use crate::ui::{load, named, post, set_text};
 use crate::xaml::{
     GridLength, GridUnitType, IColumnDefinition, IFrameworkElement, IImage, IItemsControl, IPanel, IRowDefinition,
     ISelector, ITextBlock, IUIElement, Launcher, UIElement, Uri, Visibility,
 };
 
+/// The row that lists the rest of the followed UPs.
+const MORE: u64 = u64::MAX;
 const FACE_DECODE_WIDTH: i32 = 64;
 const COVER_DECODE_WIDTH: i32 = 320;
 const PICTURE_DECODE_WIDTH: i32 = 240;
@@ -216,19 +218,62 @@ impl FollowPage {
 
     fn took_ups(&self, found: Vec<FollowedUp>) -> Result<()> {
         let everyone = FollowedUp { name: "全部".into(), ..FollowedUp::default() };
+        let more = FollowedUp { mid: MORE, name: "更多关注".into(), ..FollowedUp::default() };
         let mut ups = vec![everyone];
         ups.extend(found);
+        ups.push(more);
+        self.show_ups(ups)
+    }
+
+    fn show_ups(&self, ups: Vec<FollowedUp>) -> Result<()> {
+        let selected = ups.iter().position(|u| u.mid == self.mid.get()).unwrap_or(0);
         let count = ups.len();
         *self.ups.borrow_mut() = ups;
         for name in ["Ups", "Bar"] {
-            add_rows(&named(&self.root, name)?, 0, count)?;
-            named::<ISelector>(&self.root, name)?.SetSelectedIndex(0)?;
+            let list = named::<IFrameworkElement>(&self.root, name)?;
+            list.cast::<IItemsControl>()?.Items()?.cast::<IVector<IInspectable>>()?.Clear()?;
+            add_rows(&list, 0, count)?;
+            named::<ISelector>(&self.root, name)?.SetSelectedIndex(selected as i32)?;
         }
         Ok(())
     }
 
+    /// Lists every followed UP, those already shown first.
+    fn load_more_ups(&self) {
+        let Some(shell) = shell() else { return };
+        let Some(backend) = shell.backend.get().cloned() else { return };
+        toast("正在读取全部关注…");
+        let (dispatcher, core) = (shell.dispatcher.clone(), backend.clone());
+        backend.spawn(async move {
+            let all = core.services.following.all().await.map_err(|e| e.to_string());
+            post(&dispatcher, move || match all {
+                Ok(all) => {
+                    if let Some(page) = held() {
+                        let _ = page.took_all(all.ups);
+                    }
+                }
+                Err(problem) => toast(&format!("读取失败：{problem}")),
+            });
+        });
+    }
+
+    fn took_all(&self, all: Vec<FollowingUp>) -> Result<()> {
+        let mut ups = self.ups.borrow().clone();
+        ups.retain(|u| u.mid != MORE);
+        for up in all {
+            if !ups.iter().any(|u| u.mid == up.mid) {
+                ups.push(FollowedUp { mid: up.mid, name: up.name, face: up.face, has_update: up.has_update });
+            }
+        }
+        self.show_ups(ups)
+    }
+
     fn pick(&self, at: usize) -> Result<()> {
         let Some(mid) = self.ups.borrow().get(at).map(|u| u.mid) else { return Ok(()) };
+        if mid == MORE {
+            self.load_more_ups();
+            return Ok(());
+        }
         for name in ["Ups", "Bar"] {
             named::<ISelector>(&self.root, name)?.SetSelectedIndex(at as i32)?;
         }

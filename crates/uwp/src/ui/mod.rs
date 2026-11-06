@@ -3,6 +3,7 @@
 
 pub mod card_grid;
 pub mod card_menu;
+pub mod control_bar;
 pub mod danmaku;
 pub mod feed;
 pub mod follow;
