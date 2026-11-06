@@ -5,7 +5,7 @@ use std::cell::{Cell, RefCell};
 use std::rc::Rc;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
-use std::time::Instant;
+use std::time::{Duration, Instant};
 
 use rubi_core::{LiveChannel, LiveFilter};
 use rubi_model::{Danmaku, LiveEvent, LiveProtocol};
@@ -21,17 +21,21 @@ use crate::ui::rows::{add_rows, on_row};
 use crate::ui::shell::shell;
 use crate::ui::{keep, load, media, named, on_click, on_enter, post, set_text, soon};
 use crate::xaml::{
-    Color, ElementTheme, FrameworkElement, Grid, GridLength, GridUnitType, IColumnDefinition, IContentControl,
-    IControl, IFontIcon, IFrameworkElement, IFrameworkElement2, IItemsControl, IMediaPlayer, IMediaPlayerElement,
-    IPanel, IRangeBase, IRowDefinition, ITextBlock, ITextBox, IUIElement, MediaPlayer, MediaSource,
-    RangeBaseValueChangedEventArgs, SizeChangedEventArgs, SolidColorBrush, Thickness, UIElement, VirtualKey,
-    Visibility,
+    Color, ElementTheme, FocusState, FrameworkElement, Grid, GridLength, GridUnitType, IColumnDefinition,
+    IContentControl, IControl, IFontIcon, IFrameworkElement, IFrameworkElement2, IItemsControl, IMediaPlayer,
+    IMediaPlayerElement, IPanel, IRangeBase, IRowDefinition, ITextBlock, ITextBox, IUIElement, MediaPlayer,
+    MediaSource, PointerRoutedEventArgs, RangeBaseValueChangedEventArgs, SizeChangedEventArgs, SolidColorBrush,
+    Thickness, UIElement, VirtualKey, Visibility,
 };
 
 /// Width of the danmaku list beside the picture.
 const CHAT_WIDTH: f64 = 320.0;
 /// How far ahead of now a new danmaku starts, so it does not appear mid-way.
 const DANMAKU_LEAD_MS: u32 = 200;
+/// How long the fullscreen bar stays without a sign of life.
+const BAR_STAYS: Duration = Duration::from_secs(3);
+const WHITE: Color = Color { a: 255, r: 255, g: 255, b: 255 };
+const DIMMED: Color = Color { a: 110, r: 255, g: 255, b: 255 };
 /// The icons of what is shown over the picture.
 const OFF_AIR_GLYPH: &str = "\u{E93E}";
 const FAILED_GLYPH: &str = "\u{E7BA}";
@@ -63,20 +67,24 @@ const LAYOUT: &str = r##"
       </StackPanel>
       <Button x:Name="Back" VerticalAlignment="Top" Background="Transparent" BorderThickness="0" Padding="12,8"
               Foreground="White"><FontIcon Glyph="&#xE72B;" FontSize="16" /></Button>
-      <Grid VerticalAlignment="Bottom" Background="#99000000" Padding="4,2,8,2">
+      <Grid x:Name="ControlBar" VerticalAlignment="Bottom" Background="#99000000" Padding="4,2,8,2">
         <Grid.ColumnDefinitions>
-          <ColumnDefinition Width="Auto" /><ColumnDefinition Width="Auto" /><ColumnDefinition Width="*" />
-          <ColumnDefinition Width="Auto" /><ColumnDefinition Width="Auto" />
+          <ColumnDefinition Width="Auto" /><ColumnDefinition Width="Auto" /><ColumnDefinition Width="Auto" />
+          <ColumnDefinition Width="*" /><ColumnDefinition Width="Auto" /><ColumnDefinition Width="Auto" />
         </Grid.ColumnDefinitions>
         <Button x:Name="Mute" Background="Transparent" Foreground="White" BorderThickness="0" Padding="8,6"
                 VerticalAlignment="Center"><FontIcon x:Name="MuteIcon" Glyph="&#xE767;" FontSize="16" /></Button>
         <Slider x:Name="Volume" Grid.Column="1" Width="96" Minimum="0" Maximum="100" StepFrequency="1"
                 VerticalAlignment="Center" IsThumbToolTipEnabled="False" />
-        <ContentControl x:Name="SendInFull" Grid.Column="2" IsTabStop="False" HorizontalContentAlignment="Stretch"
+        <Button x:Name="DanmakuSwitch" Grid.Column="2" Margin="4,0,0,0" Background="Transparent" Foreground="White"
+                BorderThickness="0" Padding="8,6" VerticalAlignment="Center">
+          <FontIcon Glyph="&#xE8BD;" FontSize="16" />
+        </Button>
+        <ContentControl x:Name="SendInFull" Grid.Column="3" IsTabStop="False" HorizontalContentAlignment="Stretch"
                         MaxWidth="560" Margin="12,0" />
-        <TextBlock x:Name="Online" Grid.Column="3" VerticalAlignment="Center" FontSize="12" Foreground="White"
+        <TextBlock x:Name="Online" Grid.Column="4" VerticalAlignment="Center" FontSize="12" Foreground="White"
                    Margin="12,0" />
-        <Button x:Name="Full" Grid.Column="4" Background="Transparent" Foreground="White" BorderThickness="0"
+        <Button x:Name="Full" Grid.Column="5" Background="Transparent" Foreground="White" BorderThickness="0"
                 Padding="8,6" VerticalAlignment="Center">
           <FontIcon x:Name="FullIcon" Glyph="&#xE740;" FontSize="16" />
         </Button>
@@ -144,6 +152,10 @@ struct Room {
     next_danmaku: Cell<u64>,
     full: Cell<bool>,
     muted: Cell<bool>,
+    /// The pointer rests on the control bar.
+    over_bar: Cell<bool>,
+    /// Bumped by each sign of life: only the last one may hide the bar.
+    bar_turn: Arc<AtomicU64>,
     send_bar: Cell<SendPlace>,
 }
 
@@ -220,12 +232,33 @@ pub fn open(room_id: u64, title: &str, uploader: &str) -> Result<()> {
         next_danmaku: Cell::new(1),
         full: Cell::new(false),
         muted: Cell::new(false),
+        over_bar: Cell::new(false),
+        bar_turn: Arc::default(),
         send_bar: Cell::new(SendPlace::BelowVideo),
     });
     ROOM.with_borrow_mut(|r| *r = Some(shown.clone()));
     on_click(&root, "Back", go_back)?;
     on_click(&root, "Full", toggle_full)?;
     on_click(&root, "Mute", toggle_mute)?;
+    on_click(&root, "DanmakuSwitch", toggle_danmaku)?;
+    keep(named::<IUIElement>(&root, "Stage")?.PointerMoved(
+        |_: Ref<windows_core::IInspectable>, _: Ref<PointerRoutedEventArgs>| {
+            if let Some(room) = room() {
+                let _ = show_bar(&room);
+            }
+        },
+    )?);
+    let bar = named::<IUIElement>(&root, "ControlBar")?;
+    keep(bar.PointerEntered(|_: Ref<windows_core::IInspectable>, _: Ref<PointerRoutedEventArgs>| {
+        if let Some(room) = room() {
+            room.over_bar.set(true);
+        }
+    })?);
+    keep(bar.PointerExited(|_: Ref<windows_core::IInspectable>, _: Ref<PointerRoutedEventArgs>| {
+        if let Some(room) = room() {
+            room.over_bar.set(false);
+        }
+    })?);
     let volume = named::<IRangeBase>(&root, "Volume")?;
     volume.SetValue(f64::from(shell.prefs().live_volume))?;
     keep(volume.ValueChanged(|_: Ref<windows_core::IInspectable>, _: Ref<RangeBaseValueChangedEventArgs>| {
@@ -503,7 +536,61 @@ fn set_full(room: &Room, on: bool) -> Result<()> {
     let Some(shell) = shell() else { return Ok(()) };
     shell.fill_screen(on)?;
     named::<IFontIcon>(&room.root, "FullIcon")?.SetGlyph(if on { "\u{E73F}" } else { "\u{E740}" })?;
-    apply_layout(&room.root)
+    apply_layout(&room.root)?;
+    show_bar(room)
+}
+
+/// Shows the control bar. In fullscreen it goes again after a while without a sign of life.
+fn show_bar(room: &Room) -> Result<()> {
+    named::<IUIElement>(&room.root, "ControlBar")?.SetVisibility(Visibility::Visible)?;
+    let turn = room.bar_turn.fetch_add(1, Ordering::Relaxed) + 1;
+    if room.full.get() {
+        hide_bar_after(room, turn);
+    }
+    Ok(())
+}
+
+fn hide_bar_after(room: &Room, turn: u64) {
+    let Some(shell) = shell() else { return };
+    let Some(backend) = shell.backend.get().cloned() else { return };
+    let (turns, dispatcher, opening) = (room.bar_turn.clone(), shell.dispatcher.clone(), run());
+    backend.spawn(async move {
+        tokio::time::sleep(BAR_STAYS).await;
+        if turns.load(Ordering::Relaxed) == turn {
+            post(&dispatcher, move || {
+                if opening == run()
+                    && let Some(room) = self::room()
+                {
+                    let _ = hide_bar(&room, turn);
+                }
+            });
+        }
+    });
+}
+
+/// Hides the bar, unless someone is at it: then it looks again later.
+fn hide_bar(room: &Room, turn: u64) -> Result<()> {
+    if !room.full.get() {
+        return Ok(());
+    }
+    let typing = named::<IControl>(&room.root, "SendText")?.FocusState()? != FocusState::Unfocused;
+    if typing || room.over_bar.get() {
+        hide_bar_after(room, turn);
+        return Ok(());
+    }
+    named::<IUIElement>(&room.root, "ControlBar")?.SetVisibility(Visibility::Collapsed)
+}
+
+fn toggle_danmaku() {
+    let Some(room) = room() else { return };
+    let overlay = room.overlay.borrow().clone();
+    let Some(overlay) = overlay else { return };
+    let color = if overlay.toggle() { WHITE } else { DIMMED };
+    if let (Ok(button), Ok(brush)) =
+        (named::<IControl>(&room.root, "DanmakuSwitch"), SolidColorBrush::CreateInstanceWithColor(color))
+    {
+        let _ = button.SetForeground(&brush);
+    }
 }
 
 /// The window left fullscreen by itself: the page follows.
@@ -521,7 +608,7 @@ pub fn key(key: VirtualKey) -> bool {
     let Some(room) = room() else { return false };
     let typing = named::<IControl>(&room.root, "SendText")
         .and_then(|c| c.FocusState())
-        .is_ok_and(|f| f != crate::xaml::FocusState::Unfocused);
+        .is_ok_and(|f| f != FocusState::Unfocused);
     if key == VirtualKey::Escape && room.full.get() {
         let _ = set_full(&room, false);
         return true;
@@ -531,11 +618,7 @@ pub fn key(key: VirtualKey) -> bool {
     }
     match key {
         VirtualKey::F => toggle_full(),
-        VirtualKey::D => {
-            if let Some(overlay) = room.overlay.borrow().as_ref() {
-                overlay.toggle();
-            }
-        }
+        VirtualKey::D => toggle_danmaku(),
         _ => return false,
     }
     true

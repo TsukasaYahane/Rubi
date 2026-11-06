@@ -52,6 +52,8 @@ struct Slot {
     shift: ITranslateTransform,
     /// The item it shows, so text and colour change only when that does.
     shows: Cell<Option<usize>>,
+    /// On screen. Apart from `shows`, which a new placing clears while the slot stays visible.
+    visible: Cell<bool>,
 }
 
 /// Who holds an overlay: answers placed in the background find it through here.
@@ -92,7 +94,7 @@ impl Overlay {
             let element = slot.cast::<IUIElement>()?;
             let shift = element.RenderTransform()?.cast::<ITranslateTransform>()?;
             children.Append(&slot.cast::<UIElement>()?)?;
-            slots.push(Slot { layers, element, shift, shows: Cell::new(None) });
+            slots.push(Slot { layers, element, shift, shows: Cell::new(None), visible: Cell::new(false) });
         }
         let overlay = Rc::new(Self {
             host,
@@ -279,13 +281,15 @@ impl Overlay {
                         top.SetForeground(&brush(item.color)?)?;
                     }
                     slot.element.SetVisibility(Visibility::Visible)?;
+                    slot.visible.set(true);
                 }
                 slot.shift.SetX(x)?;
                 slot.shift.SetY(y)?;
             }
         }
         for slot in &self.slots[used..] {
-            if slot.shows.take().is_some() {
+            slot.shows.set(None);
+            if slot.visible.take() {
                 slot.element.SetVisibility(Visibility::Collapsed)?;
             }
         }
