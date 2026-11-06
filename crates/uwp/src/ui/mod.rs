@@ -14,6 +14,7 @@ pub mod settings;
 pub mod shell;
 pub mod splitter;
 pub mod video_list;
+pub mod watch;
 
 use std::cell::Cell;
 use std::rc::Rc;

@@ -21,6 +21,7 @@ use crate::ui::player_actions::Actions;
 use crate::ui::player_side::Side;
 use crate::ui::shell::shell;
 use crate::ui::splitter;
+use crate::ui::watch;
 use crate::ui::{load, named, on_click, post, set_text, soon};
 use crate::xaml::{
     AdaptiveMediaSource, AdaptiveMediaSourceCreationStatus, ApplicationView, DataWriter, FocusManager, FocusState,
@@ -35,8 +36,10 @@ use crate::xaml::{
 
 /// Quality asked for; the core caps it to what the account may play.
 const DASH_TYPE: &str = "application/dash+xml";
-/// What the arrow keys move by, in the player's 100 ns units.
-const SEEK_STEP: i64 = 50_000_000;
+/// The player's 100 ns units.
+const TICKS_PER_SECOND: i64 = 10_000_000;
+/// What the arrow keys move by.
+const SEEK_STEP: i64 = 5 * TICKS_PER_SECOND;
 /// Width of the side pane beside the 竖屏 picture.
 const FEED_PANE: f64 = 340.0;
 /// How long the page must hold still before the video takes its new size.
@@ -419,6 +422,12 @@ fn pause(on: bool) {
     });
 }
 
+/// Whether the video is playing, and how far into it, in seconds.
+pub fn progress() -> Option<(bool, u64)> {
+    let position = playing_session()?.Position().ok()?;
+    Some((is_playing(), (position.duration / TICKS_PER_SECOND).max(0) as u64))
+}
+
 fn toggle_play() {
     pause(is_playing());
 }
@@ -497,6 +506,7 @@ fn apply_layout(root: &IFrameworkElement) -> Result<()> {
 
 /// Stops the video and lets its player go.
 pub fn leave() {
+    watch::stop();
     let _ = set_full(false);
     PAUSED_FOR_BLUR.set(false);
     RUN.fetch_add(1, Ordering::Relaxed);
@@ -660,6 +670,7 @@ fn shown(source: std::result::Result<(MediaSource, u64, u32), String>, uploader:
         Ok((source, cid, duration_ms)) => {
             let session = play(&page.root, &source)?;
             page.cid.set(cid);
+            watch::start(&page.bvid, cid);
             let overlay = Overlay::attach(&page.root, session)?;
             if let Some(shell) = shell()
                 && let Some(backend) = shell.backend.get().cloned()
