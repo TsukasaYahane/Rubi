@@ -221,3 +221,14 @@ Windows.UI.Xaml.IFrameworkElement2
 Windows.UI.Xaml.ElementTheme
 Windows.UI.Xaml.Controls.ITextBox2
 Windows.UI.Xaml.Input.IKeyRoutedEventArgs
+Windows.UI.Xaml.IUIElement4
+Windows.UI.Xaml.Input.ContextRequestedEventArgs
+Windows.UI.Xaml.Input.IContextRequestedEventArgs
+Windows.UI.Xaml.IRoutedEventArgs
+Windows.UI.Xaml.Controls.IMenuFlyout2
+Windows.ApplicationModel.DataTransfer.Clipboard
+Windows.ApplicationModel.DataTransfer.IClipboardStatics
+Windows.ApplicationModel.DataTransfer.DataPackage
+Windows.ApplicationModel.DataTransfer.IDataPackage
+Windows.Foundation.Point
+Windows.ApplicationModel.DataTransfer.DataPackage::CreateInstance

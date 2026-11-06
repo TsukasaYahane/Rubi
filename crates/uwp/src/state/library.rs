@@ -104,6 +104,14 @@ pub fn date(unix: i64) -> String {
     format!("{year}-{month:02}-{day:02}")
 }
 
+pub fn video_link(bvid: &str) -> String {
+    format!("https://www.bilibili.com/video/{bvid}")
+}
+
+pub fn room_link(room_id: u64) -> String {
+    format!("https://live.bilibili.com/{room_id}")
+}
+
 pub fn folder_line(folder: &FavFolder) -> String {
     let reach = if folder.private { "私密" } else { "公开" };
     let default = if folder.default { " · 默认" } else { "" };

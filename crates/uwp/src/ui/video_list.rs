@@ -11,10 +11,10 @@ use windows_collections::IVector;
 use windows_core::{IInspectable, Interface, Ref, Result};
 
 use crate::backend::Backend;
-use crate::state::library::{Row, row_size};
+use crate::state::library::{Row, row_size, video_link};
 use crate::ui::rows::{Covers, add_rows, on_row, on_row_click};
 use crate::ui::shell::shell;
-use crate::ui::{feed, keep, load, named, on_click, post, set_text};
+use crate::ui::{card_menu, feed, keep, load, named, on_click, post, set_text};
 use crate::xaml::{
     IContentControl, IFrameworkElement, IImage, IItemsControl, IItemsControl2, IItemsWrapGrid, IListViewBase,
     IPropertyValue, ISelector, ITextBlock, IUIElement, ListViewSelectionMode, PropertyValue, SelectionChangedEventArgs,
@@ -192,6 +192,14 @@ impl VideoList {
             if let Some(row) = row {
                 let _ = feed::route(&row.bvid, &row.title, &row.owner);
             }
+        })?;
+        let asking = Rc::downgrade(&shown);
+        card_menu::attach(&list, move |at| {
+            let shown = asking.upgrade()?;
+            let rows = shown.rows.borrow();
+            let row = rows.get(at)?;
+            let later = (shown.source.get() != Source::Later).then(|| row.bvid.clone());
+            Some(card_menu::Target { later, link: video_link(&row.bvid) })
         })?;
         let counting = Rc::downgrade(&shown);
         keep(list.cast::<ISelector>()?.SelectionChanged(

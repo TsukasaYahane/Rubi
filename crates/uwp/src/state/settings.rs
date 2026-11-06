@@ -72,6 +72,8 @@ pub const WEIGHT_MAX: f64 = 0.6;
 
 pub const QUALITIES: [(u32, &str); 3] = [(80, "1080P"), (64, "720P"), (32, "480P")];
 
+const DEFAULT_LIVE_VOLUME: u8 = 70;
+
 /// This app's own preferences, kept in a small file beside the panes' widths.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct Prefs {
@@ -79,11 +81,13 @@ pub struct Prefs {
     pub words: bool,
     pub pause_on_blur: bool,
     pub shortcuts: bool,
+    /// Volume in live rooms, 0 to 100.
+    pub live_volume: u8,
 }
 
 impl Default for Prefs {
     fn default() -> Self {
-        Self { words: false, pause_on_blur: true, shortcuts: true }
+        Self { words: false, pause_on_blur: true, shortcuts: true, live_volume: DEFAULT_LIVE_VOLUME }
     }
 }
 
@@ -98,6 +102,7 @@ impl Prefs {
                 "words" => prefs.words = on,
                 "pause_on_blur" => prefs.pause_on_blur = on,
                 "shortcuts" => prefs.shortcuts = on,
+                "live_volume" => prefs.live_volume = value.parse().map_or(DEFAULT_LIVE_VOLUME, |v: u8| v.min(100)),
                 _ => {}
             }
         }
@@ -106,10 +111,11 @@ impl Prefs {
 
     pub fn to_text(self) -> String {
         format!(
-            "words={} pause_on_blur={} shortcuts={}",
+            "words={} pause_on_blur={} shortcuts={} live_volume={}",
             u8::from(self.words),
             u8::from(self.pause_on_blur),
-            u8::from(self.shortcuts)
+            u8::from(self.shortcuts),
+            self.live_volume
         )
     }
 }
@@ -147,8 +153,11 @@ mod tests {
 
     #[test]
     fn prefs_survive_a_round_trip() {
-        let prefs = Prefs { words: true, pause_on_blur: false, shortcuts: true };
+        let prefs = Prefs { words: true, pause_on_blur: false, shortcuts: true, live_volume: 35 };
         assert_eq!(Prefs::parse(&prefs.to_text()), prefs);
+        assert_eq!(Prefs::parse("live_volume=250").live_volume, 100);
+        assert_eq!(Prefs::parse("live_volume=loud").live_volume, DEFAULT_LIVE_VOLUME);
+        assert_eq!(Prefs::parse("words=1"), Prefs { words: true, ..Prefs::default() });
         assert_eq!(Prefs::parse("nonsense words"), Prefs::default());
         assert_eq!(Prefs::parse(""), Prefs::default());
     }

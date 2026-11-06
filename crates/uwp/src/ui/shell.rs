@@ -3,6 +3,8 @@
 use std::cell::{Cell, OnceCell, RefCell};
 use std::rc::Rc;
 use std::sync::Arc;
+use std::sync::atomic::{AtomicU64, Ordering};
+use std::time::Duration;
 
 use windows_core::{IInspectable, Interface, Ref, Result};
 
@@ -14,7 +16,7 @@ use crate::state::settings::Prefs;
 use crate::ui::home::HomePage;
 use crate::ui::keep;
 use crate::ui::splitter::{self, BAR_TEMPLATE};
-use crate::ui::{follow, live, live_room, load, me, named, on_click, player, post};
+use crate::ui::{follow, live, live_room, load, me, named, on_click, player, post, set_text};
 use crate::xaml::{
     ApplicationData, ApplicationView, Color, CoreApplication, CoreDispatcher, CoreWindow, CoreWindowActivationState,
     GridLength, GridUnitType, IApplicationData, IApplicationView3, IContentControl, IControl, ICoreApplicationView3,
@@ -35,6 +37,11 @@ pub enum Tab {
     Live,
     Me,
 }
+
+/// How long a toast stays.
+const TOAST_FOR: Duration = Duration::from_secs(2);
+/// Bumped by each toast: only the last one takes it away.
+static TOASTS: AtomicU64 = AtomicU64::new(0);
 
 const TABS: [(Tab, &str); 4] = [(Tab::Home, "Home"), (Tab::Follow, "Follow"), (Tab::Live, "Live"), (Tab::Me, "Me")];
 
@@ -85,6 +92,10 @@ const LAYOUT: &str = r##"
   </StackPanel>
   <ContentControl x:Name="Page" Grid.Column="2" Grid.Row="1" HorizontalContentAlignment="Stretch"
                   VerticalContentAlignment="Stretch" IsTabStop="False" />
+  <Border x:Name="Toast" Grid.Column="2" Grid.Row="1" HorizontalAlignment="Center" VerticalAlignment="Bottom"
+          Margin="0,0,0,24" Padding="14,7" Background="#E6000000" Visibility="Collapsed" IsHitTestVisible="False">
+    <TextBlock x:Name="ToastText" FontSize="13" Foreground="White" TextWrapping="Wrap" />
+  </Border>
   <Grid x:Name="Bottom" Grid.Column="2" Grid.Row="2" BorderThickness="0,1,0,0"
         BorderBrush="{ThemeResource SystemControlForegroundBaseLowBrush}">
     <Grid.ColumnDefinitions>
@@ -267,6 +278,26 @@ fn window_resized() -> Result<()> {
         shell.apply_class()?;
     }
     Ok(())
+}
+
+/// Shows a short word at the foot of the window for a moment.
+pub fn toast(text: &str) {
+    let Some(shell) = shell() else { return };
+    let _ = set_text(&shell.root, "ToastText", text);
+    let _ = visible(&shell.root, "Toast", true);
+    let turn = TOASTS.fetch_add(1, Ordering::Relaxed) + 1;
+    let Some(backend) = shell.backend.get().cloned() else { return };
+    let dispatcher = shell.dispatcher.clone();
+    backend.spawn(async move {
+        tokio::time::sleep(TOAST_FOR).await;
+        post(&dispatcher, move || {
+            if TOASTS.load(Ordering::Relaxed) == turn
+                && let Some(shell) = self::shell()
+            {
+                let _ = visible(&shell.root, "Toast", false);
+            }
+        });
+    });
 }
 
 /// Switches to `tab`; leaving a video page or the login stops what it was doing.

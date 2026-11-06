@@ -2,6 +2,7 @@
 //! through [`post`] as plain data.
 
 pub mod card_grid;
+pub mod card_menu;
 pub mod danmaku;
 pub mod feed;
 pub mod follow;

@@ -12,10 +12,11 @@ use windows_core::{IInspectable, Interface, Ref, Result};
 
 use crate::backend::Backend;
 use crate::state::layout::grid_cell;
+use crate::state::library::{room_link, video_link};
 use crate::state::live::room_line;
 use crate::ui::rows::{Covers, add_rows, on_row, on_row_click};
 use crate::ui::shell::shell;
-use crate::ui::{feed, keep, live_room, load, post};
+use crate::ui::{card_menu, feed, keep, live_room, load, post};
 use crate::xaml::{
     Color, IBorder, IFrameworkElement, IImage, IItemsControl, IItemsControl2, IItemsWrapGrid, ITextBlock, IUIElement,
     SizeChangedEventArgs, SolidColorBrush, Stretch, UIElement, Visibility,
@@ -229,6 +230,15 @@ impl CardGrid {
             if let Some(shown) = clicking.upgrade() {
                 let _ = shown.open_row(at);
             }
+        })?;
+        let asking = Rc::downgrade(&shown);
+        card_menu::attach(&grid, move |at| {
+            let shown = asking.upgrade()?;
+            let cards = shown.cards.borrow();
+            Some(match &cards.get(at)?.target {
+                Target::Video { bvid, .. } => card_menu::Target { later: Some(bvid.clone()), link: video_link(bvid) },
+                Target::Room { id, .. } => card_menu::Target { later: None, link: room_link(*id) },
+            })
         })?;
         let sizing = Rc::downgrade(&shown);
         keep(grid.SizeChanged(move |_: Ref<IInspectable>, _: Ref<SizeChangedEventArgs>| {

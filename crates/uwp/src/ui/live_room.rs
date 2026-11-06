@@ -15,6 +15,7 @@ use windows_core::{Interface, Ref, Result};
 use crate::state::layout::WindowClass;
 use crate::state::library::count;
 use crate::state::live::CHAT_MOST;
+use crate::state::settings::Prefs;
 use crate::ui::danmaku::{Host, Overlay};
 use crate::ui::rows::{add_rows, on_row};
 use crate::ui::shell::shell;
@@ -22,8 +23,9 @@ use crate::ui::{keep, load, media, named, on_click, on_enter, post, set_text, so
 use crate::xaml::{
     Color, ElementTheme, FrameworkElement, Grid, GridLength, GridUnitType, IColumnDefinition, IContentControl,
     IControl, IFontIcon, IFrameworkElement, IFrameworkElement2, IItemsControl, IMediaPlayer, IMediaPlayerElement,
-    IPanel, IRowDefinition, ITextBlock, ITextBox, IUIElement, MediaPlayer, MediaSource, SizeChangedEventArgs,
-    SolidColorBrush, Thickness, UIElement, VirtualKey, Visibility,
+    IPanel, IRangeBase, IRowDefinition, ITextBlock, ITextBox, IUIElement, MediaPlayer, MediaSource,
+    RangeBaseValueChangedEventArgs, SizeChangedEventArgs, SolidColorBrush, Thickness, UIElement, VirtualKey,
+    Visibility,
 };
 
 /// Width of the danmaku list beside the picture.
@@ -62,13 +64,20 @@ const LAYOUT: &str = r##"
       <Grid VerticalAlignment="Top">
         <Grid.ColumnDefinitions>
           <ColumnDefinition Width="Auto" /><ColumnDefinition Width="*" /><ColumnDefinition Width="Auto" />
+          <ColumnDefinition Width="Auto" /><ColumnDefinition Width="Auto" />
         </Grid.ColumnDefinitions>
         <Button x:Name="Back" Background="Transparent" BorderThickness="0" Padding="12,8" Foreground="White">
           <FontIcon Glyph="&#xE72B;" FontSize="16" />
         </Button>
         <TextBlock x:Name="Online" Grid.Column="1" HorizontalAlignment="Right" VerticalAlignment="Center"
                    FontSize="12" Foreground="White" />
-        <Button x:Name="Full" Grid.Column="2" Margin="8" Background="#59000000" Foreground="White"
+        <Button x:Name="Mute" Grid.Column="2" Margin="8,0,0,0" Background="Transparent" Foreground="White"
+                BorderThickness="0" Padding="8,6" VerticalAlignment="Center">
+          <FontIcon x:Name="MuteIcon" Glyph="&#xE767;" FontSize="16" />
+        </Button>
+        <Slider x:Name="Volume" Grid.Column="3" Width="96" Minimum="0" Maximum="100" StepFrequency="1"
+                VerticalAlignment="Center" IsThumbToolTipEnabled="False" />
+        <Button x:Name="Full" Grid.Column="4" Margin="8" Background="#59000000" Foreground="White"
                 BorderThickness="0" Padding="10,6">
           <FontIcon x:Name="FullIcon" Glyph="&#xE740;" FontSize="16" />
         </Button>
@@ -135,6 +144,7 @@ struct Room {
     chat: RefCell<Vec<String>>,
     next_danmaku: Cell<u64>,
     full: Cell<bool>,
+    muted: Cell<bool>,
     /// The send bar sits under the list, not the picture.
     send_below_chat: Cell<bool>,
 }
@@ -158,10 +168,23 @@ fn overlay_of(asked: u64) -> Option<Rc<Overlay>> {
     room().and_then(|r| r.overlay.borrow().clone())
 }
 
+/// Remembers the volume for the next room.
+fn keep_volume(room: &Room) {
+    let (Some(shell), Ok(level)) = (shell(), named::<IRangeBase>(&room.root, "Volume").and_then(|v| v.Value())) else {
+        return;
+    };
+    let level = level as u8;
+    let prefs = shell.prefs();
+    if prefs.live_volume != level {
+        let _ = shell.set_prefs(Prefs { live_volume: level, ..prefs });
+    }
+}
+
 /// Leaves the room on show, if there is one.
 pub fn leave() {
     RUN.fetch_add(1, Ordering::Relaxed);
     let Some(room) = ROOM.with_borrow_mut(Option::take) else { return };
+    keep_volume(&room);
     let _ = set_full(&room, false);
     let video = named::<IMediaPlayerElement>(&room.root, "Video");
     let _ = video.and_then(|v| v.SetMediaPlayer(None::<&MediaPlayer>));
@@ -198,11 +221,21 @@ pub fn open(room_id: u64, title: &str, uploader: &str) -> Result<()> {
         chat: RefCell::default(),
         next_danmaku: Cell::new(1),
         full: Cell::new(false),
+        muted: Cell::new(false),
         send_below_chat: Cell::new(false),
     });
     ROOM.with_borrow_mut(|r| *r = Some(shown.clone()));
     on_click(&root, "Back", go_back)?;
     on_click(&root, "Full", toggle_full)?;
+    on_click(&root, "Mute", toggle_mute)?;
+    let volume = named::<IRangeBase>(&root, "Volume")?;
+    volume.SetValue(f64::from(shell.prefs().live_volume))?;
+    keep(volume.ValueChanged(|_: Ref<windows_core::IInspectable>, _: Ref<RangeBaseValueChangedEventArgs>| {
+        if let Some(room) = room() {
+            room.muted.set(false);
+            let _ = apply_volume(&room);
+        }
+    })?);
     on_click(&root, "SendButton", send)?;
     on_enter(&root, "SendText", send)?;
     let chat = named::<IFrameworkElement>(&root, "Chat")?;
@@ -273,6 +306,7 @@ fn playing(source: std::result::Result<MediaSource, Stop>) -> Result<()> {
     player.cast::<IMediaPlayer>()?.Play()?;
     *room.player.borrow_mut() = Some(player);
     *room.source.borrow_mut() = Some(source);
+    apply_volume(&room)?;
     let opened = room.opened;
     let overlay = Overlay::attach(
         &room.root,
@@ -409,6 +443,25 @@ fn move_send_bar(root: &IFrameworkElement, below_chat: bool) -> Result<()> {
     })?;
     let theme = if below_chat { ElementTheme::Default } else { ElementTheme::Dark };
     bar.cast::<IFrameworkElement2>()?.SetRequestedTheme(theme)
+}
+
+fn apply_volume(room: &Room) -> Result<()> {
+    let level = named::<IRangeBase>(&room.root, "Volume")?.Value()?;
+    let silent = room.muted.get() || level <= 0.0;
+    named::<IFontIcon>(&room.root, "MuteIcon")?.SetGlyph(if silent { "\u{E74F}" } else { "\u{E767}" })?;
+    if let Some(player) = room.player.borrow().as_ref() {
+        let player = player.cast::<IMediaPlayer>()?;
+        player.SetVolume(level / 100.0)?;
+        player.SetIsMuted(room.muted.get())?;
+    }
+    Ok(())
+}
+
+fn toggle_mute() {
+    if let Some(room) = room() {
+        room.muted.set(!room.muted.get());
+        let _ = apply_volume(&room);
+    }
 }
 
 fn go_back() {
