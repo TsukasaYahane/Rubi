@@ -10,15 +10,17 @@ use crate::backend::Backend;
 use crate::session;
 use crate::state::layout::WindowClass;
 use crate::state::panes::{self, Widths};
+use crate::state::settings::Prefs;
 use crate::ui::home::HomePage;
 use crate::ui::keep;
 use crate::ui::splitter::{self, BAR_TEMPLATE};
 use crate::ui::{load, me, named, on_click, player, post};
 use crate::xaml::{
-    ApplicationData, ApplicationView, Color, CoreApplication, CoreDispatcher, CoreWindow, GridLength, GridUnitType,
-    IApplicationData, IApplicationView3, IContentControl, IControl, ICoreApplicationView3, ICoreWindow,
-    IFrameworkElement, IRowDefinition, IStorageItem, IUIElement, IUISettings3, IWindow, IWindow2, KeyEventArgs,
-    SolidColorBrush, UIColorType, UIElement, UISettings, Visibility, Window, WindowSizeChangedEventArgs,
+    ApplicationData, ApplicationView, Color, CoreApplication, CoreDispatcher, CoreWindow, CoreWindowActivationState,
+    GridLength, GridUnitType, IApplicationData, IApplicationView3, IContentControl, IControl, ICoreApplicationView3,
+    ICoreWindow, IFrameworkElement, IRowDefinition, IStorageItem, IUIElement, IUISettings3, IWindow, IWindow2,
+    IWindowActivatedEventArgs, KeyEventArgs, SolidColorBrush, UIColorType, UIElement, UISettings, Visibility, Window,
+    WindowActivatedEventArgs, WindowSizeChangedEventArgs,
 };
 
 const COBALT: Color = Color { a: 255, r: 0x00, g: 0x50, b: 0xEF };
@@ -73,13 +75,13 @@ const LAYOUT: &str = r##"
   <StackPanel x:Name="Rail" Grid.RowSpan="3" Padding="0,6,0,0"
               Background="{ThemeResource SystemControlBackgroundChromeMediumLowBrush}">
     <Button x:Name="RailHome" Style="{StaticResource Nav}"><StackPanel Orientation="Horizontal">
-      <FontIcon Glyph="&#xE80F;" FontSize="20" /><TextBlock x:Name="LabelHome" Margin="12,0,0,0" Text="首页" /></StackPanel></Button>
+      <FontIcon x:Name="RailIconHome" Glyph="&#xE80F;" FontSize="20" /><TextBlock x:Name="LabelHome" Margin="12,0,0,0" Text="首页" /></StackPanel></Button>
     <Button x:Name="RailFollow" Style="{StaticResource Nav}"><StackPanel Orientation="Horizontal">
-      <FontIcon Glyph="&#xEB51;" FontSize="20" /><TextBlock x:Name="LabelFollow" Margin="12,0,0,0" Text="关注" /></StackPanel></Button>
+      <FontIcon x:Name="RailIconFollow" Glyph="&#xEB51;" FontSize="20" /><TextBlock x:Name="LabelFollow" Margin="12,0,0,0" Text="关注" /></StackPanel></Button>
     <Button x:Name="RailLive" Style="{StaticResource Nav}"><StackPanel Orientation="Horizontal">
-      <FontIcon Glyph="&#xE93E;" FontSize="20" /><TextBlock x:Name="LabelLive" Margin="12,0,0,0" Text="直播" /></StackPanel></Button>
+      <FontIcon x:Name="RailIconLive" Glyph="&#xE93E;" FontSize="20" /><TextBlock x:Name="LabelLive" Margin="12,0,0,0" Text="直播" /></StackPanel></Button>
     <Button x:Name="RailMe" Style="{StaticResource Nav}"><StackPanel Orientation="Horizontal">
-      <FontIcon Glyph="&#xE77B;" FontSize="20" /><TextBlock x:Name="LabelMe" Margin="12,0,0,0" Text="我的" /></StackPanel></Button>
+      <FontIcon x:Name="RailIconMe" Glyph="&#xE77B;" FontSize="20" /><TextBlock x:Name="LabelMe" Margin="12,0,0,0" Text="我的" /></StackPanel></Button>
   </StackPanel>
   <ContentControl x:Name="Page" Grid.Column="2" Grid.Row="1" HorizontalContentAlignment="Stretch"
                   VerticalContentAlignment="Stretch" IsTabStop="False" />
@@ -89,13 +91,13 @@ const LAYOUT: &str = r##"
       <ColumnDefinition /><ColumnDefinition /><ColumnDefinition /><ColumnDefinition />
     </Grid.ColumnDefinitions>
     <Button x:Name="BarHome" Style="{StaticResource Bar}"><StackPanel>
-      <FontIcon Glyph="&#xE80F;" FontSize="20" /><TextBlock Text="首页" FontSize="11" /></StackPanel></Button>
+      <FontIcon x:Name="BarIconHome" Glyph="&#xE80F;" FontSize="20" /><TextBlock Text="首页" FontSize="11" /></StackPanel></Button>
     <Button x:Name="BarFollow" Grid.Column="1" Style="{StaticResource Bar}"><StackPanel>
-      <FontIcon Glyph="&#xEB51;" FontSize="20" /><TextBlock Text="关注" FontSize="11" /></StackPanel></Button>
+      <FontIcon x:Name="BarIconFollow" Glyph="&#xEB51;" FontSize="20" /><TextBlock Text="关注" FontSize="11" /></StackPanel></Button>
     <Button x:Name="BarLive" Grid.Column="2" Style="{StaticResource Bar}"><StackPanel>
-      <FontIcon Glyph="&#xE93E;" FontSize="20" /><TextBlock Text="直播" FontSize="11" /></StackPanel></Button>
+      <FontIcon x:Name="BarIconLive" Glyph="&#xE93E;" FontSize="20" /><TextBlock Text="直播" FontSize="11" /></StackPanel></Button>
     <Button x:Name="BarMe" Grid.Column="3" Style="{StaticResource Bar}"><StackPanel>
-      <FontIcon Glyph="&#xE77B;" FontSize="20" /><TextBlock Text="我的" FontSize="11" /></StackPanel></Button>
+      <FontIcon x:Name="BarIconMe" Glyph="&#xE77B;" FontSize="20" /><TextBlock Text="我的" FontSize="11" /></StackPanel></Button>
   </Grid>
 </Grid>"##;
 
@@ -111,6 +113,7 @@ pub struct Shell {
     class: Cell<WindowClass>,
     /// Where the user dragged the panes to; kept in the app's folder.
     widths: Cell<Widths>,
+    prefs: Cell<Prefs>,
     folder: String,
     tab: Cell<Tab>,
     immersive: Cell<bool>,
@@ -135,6 +138,7 @@ pub fn start() -> Result<()> {
     let folder = ApplicationData::Current()?.cast::<IApplicationData>()?.LocalFolder()?;
     let data_dir = folder.cast::<IStorageItem>()?.Path()?;
     let widths = std::fs::read_to_string(panes_file(&data_dir)).map(|t| Widths::parse(&t)).unwrap_or_default();
+    let prefs = std::fs::read_to_string(prefs_file(&data_dir)).map(|t| Prefs::parse(&t)).unwrap_or_default();
     let shell = Rc::new(Shell {
         dispatcher: dispatcher.clone(),
         backend: OnceCell::new(),
@@ -142,6 +146,7 @@ pub fn start() -> Result<()> {
         page,
         class: Cell::new(WindowClass::of(window.Bounds()?.width as f64)),
         widths: Cell::new(widths),
+        prefs: Cell::new(prefs),
         folder: data_dir.clone(),
         tab: Cell::new(Tab::Home),
         immersive: Cell::new(false),
@@ -164,6 +169,15 @@ pub fn start() -> Result<()> {
                 && let Ok(key) = args.VirtualKey()
             {
                 player::key(key);
+            }
+        },
+    )?;
+    keep(revoker);
+    let revoker = CoreWindow::GetForCurrentThread()?.cast::<ICoreWindow>()?.Activated(
+        |_: Ref<CoreWindow>, args: Ref<WindowActivatedEventArgs>| {
+            let state = args.ok().and_then(|a| a.cast::<IWindowActivatedEventArgs>()?.WindowActivationState());
+            if let Ok(state) = state {
+                player::focus_changed(state != CoreWindowActivationState::Deactivated);
             }
         },
     )?;
@@ -195,6 +209,10 @@ fn extend_into_title_bar(window: &IWindow, root: &IFrameworkElement) -> Result<(
     // Clear buttons take no theme of their own: their glyphs follow the system's text colour.
     let text = UISettings::new()?.cast::<IUISettings3>()?.GetColorValue(UIColorType::Foreground)?;
     bar.SetButtonForegroundColor(Some(text))
+}
+
+fn prefs_file(data_dir: &str) -> std::path::PathBuf {
+    std::path::Path::new(data_dir).join("prefs.txt")
 }
 
 fn panes_file(data_dir: &str) -> std::path::PathBuf {
@@ -260,7 +278,7 @@ pub fn show_tab(tab: Tab) {
     shell.tab.set(tab);
     let shown = match tab {
         Tab::Home => shell.show_home(),
-        Tab::Me => me::show(&shell),
+        Tab::Me => me::show(),
         Tab::Follow | Tab::Live => load(PLACEHOLDER).and_then(|p| shell.set_page(&p)),
     };
     let _ = shown.and_then(|()| shell.mark_tab());
@@ -282,6 +300,17 @@ impl Shell {
         self.widths.set(widths);
     }
 
+    pub fn prefs(&self) -> Prefs {
+        self.prefs.get()
+    }
+
+    /// Keeps `prefs` for the next start, and shows the style at once.
+    pub fn set_prefs(&self, prefs: Prefs) -> Result<()> {
+        self.prefs.set(prefs);
+        let _ = std::fs::write(prefs_file(&self.folder), prefs.to_text());
+        self.apply_rail()
+    }
+
     fn rail_width(&self) -> f64 {
         self.widths.get().rail.unwrap_or_else(|| self.class.get().rail_width())
     }
@@ -290,9 +319,13 @@ impl Shell {
     fn apply_rail(&self) -> Result<()> {
         let width = self.rail_width();
         named::<IFrameworkElement>(&self.root, "Rail")?.SetWidth(width)?;
+        let wide_enough = panes::rail_has_labels(width);
+        let words = self.prefs.get().words;
         for (_, name) in TABS {
-            let wide_enough = panes::rail_has_labels(width);
             visible(&self.root, &format!("Label{name}"), wide_enough)?;
+            // A narrow rail has no labels to stand in for its icons.
+            visible(&self.root, &format!("RailIcon{name}"), !(words && wide_enough))?;
+            visible(&self.root, &format!("BarIcon{name}"), !words)?;
         }
         Ok(())
     }
@@ -345,6 +378,7 @@ impl Shell {
             home.resized();
         }
         player::resized();
+        me::resized();
         self.mark_tab()
     }
 

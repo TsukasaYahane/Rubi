@@ -23,6 +23,15 @@ pub fn load() -> Session {
     stored().ok().and_then(|json| serde_json::from_str(&json).ok()).unwrap_or_default()
 }
 
+/// Forgets the stored session; there being none is fine.
+pub fn clear() -> Result<()> {
+    let vault = vault()?;
+    match vault.Retrieve(RESOURCE, USER) {
+        Ok(credential) => vault.Remove(&credential),
+        Err(_) => Ok(()),
+    }
+}
+
 /// Replaces the stored session.
 pub fn save(session: &Session) -> Result<()> {
     let Ok(json) = serde_json::to_string(session) else { return Ok(()) };

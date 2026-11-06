@@ -7,7 +7,8 @@ use std::sync::Arc;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::{Duration, Instant};
 
-use rubi_core::{Playback, SendDanmaku, pick_streams};
+use rubi_core::{MAX_FREE_QN, Playback, SendDanmaku, pick_streams};
+use windows_collections::IVector;
 use windows_core::{Error, HRESULT, Interface, Ref, Result};
 
 use crate::state::layout::WindowClass;
@@ -22,18 +23,20 @@ use crate::ui::shell::shell;
 use crate::ui::splitter;
 use crate::ui::{load, named, on_click, post, set_text, soon};
 use crate::xaml::{
-    AdaptiveMediaSource, AdaptiveMediaSourceCreationStatus, ApplicationView, DataWriter, FocusState, FrameworkElement,
-    Grid, GridLength, GridUnitType, HorizontalAlignment, HttpClient, IApplicationView3, IClosable, IColumnDefinition,
-    IControl, IDataWriter, IFontIcon, IFrameworkElement, IInputStream, IMediaPlaybackSession, IMediaPlaybackSource,
-    IMediaPlayer, IMediaPlayer3, IMediaPlayerElement, IMediaPlayerFailedEventArgs, IMediaPlayerSource2, IOutputStream,
-    IRandomAccessStream, IRowDefinition, ITextBox, IUIElement, InMemoryRandomAccessStream, MediaPlaybackSession,
-    MediaPlayer, MediaPlayerFailedEventArgs, MediaSource, SizeChangedEventArgs, Uri, VerticalAlignment, VirtualKey,
-    Visibility,
+    AdaptiveMediaSource, AdaptiveMediaSourceCreationStatus, ApplicationView, DataWriter, FocusManager, FocusState,
+    FrameworkElement, Grid, GridLength, GridUnitType, HorizontalAlignment, HttpClient, IApplicationView3, IButtonBase,
+    IClosable, IColumnDefinition, IContentControl, IControl, IDataWriter, IFontIcon, IFrameworkElement,
+    IFrameworkElement4, IInputStream, IMediaPlaybackSession, IMediaPlaybackSource, IMediaPlayer, IMediaPlayer3,
+    IMediaPlayerElement, IMediaPlayerFailedEventArgs, IMediaPlayerSource2, IOutputStream, IPanel, IRandomAccessStream,
+    IRangeBase, IRowDefinition, ITextBox, IUIElement, InMemoryRandomAccessStream, MediaPlaybackSession,
+    MediaPlaybackState, MediaPlayer, MediaPlayerFailedEventArgs, MediaSource, SizeChangedEventArgs, UIElement, Uri,
+    VerticalAlignment, VirtualKey, Visibility,
 };
 
 /// Quality asked for; the core caps it to what the account may play.
-const QUALITY: u32 = 80;
 const DASH_TYPE: &str = "application/dash+xml";
+/// What the arrow keys move by, in the player's 100 ns units.
+const SEEK_STEP: i64 = 50_000_000;
 /// Width of the side pane beside the 竖屏 picture.
 const FEED_PANE: f64 = 340.0;
 /// How long the page must hold still before the video takes its new size.
@@ -178,6 +181,7 @@ static RUN: AtomicU64 = AtomicU64::new(0);
 thread_local! {
     /// The player of the page on show; on the UI thread.
     static PLAYING: RefCell<Option<MediaPlayer>> = const { RefCell::new(None) };
+    static PAUSED_FOR_BLUR: Cell<bool> = const { Cell::new(false) };
     /// What `PLAYING` plays: closing it lets go of its connections.
     static SOURCE: RefCell<Option<MediaSource>> = const { RefCell::new(None) };
     /// The page on show, while there is one.
@@ -369,17 +373,74 @@ pub fn key(key: VirtualKey) -> bool {
     if typing {
         return false;
     }
+    if key == VirtualKey::Escape && page.full.get() {
+        let _ = set_full(false);
+        return true;
+    }
+    if !shell().is_some_and(|s| s.prefs().shortcuts) {
+        return false;
+    }
     match key {
+        VirtualKey::Space if !focus_takes(key) => toggle_play(),
+        VirtualKey::Left if !focus_takes(key) => seek_by(-SEEK_STEP),
+        VirtualKey::Right if !focus_takes(key) => seek_by(SEEK_STEP),
         VirtualKey::F => toggle_full(),
         VirtualKey::D => toggle_danmaku(),
-        VirtualKey::Escape if page.full.get() => {
-            let _ = set_full(false);
-        }
         VirtualKey::Up | VirtualKey::PageUp if page.feed => feed::step(-1),
         VirtualKey::Down | VirtualKey::PageDown if page.feed => feed::step(1),
         _ => return false,
     }
     true
+}
+
+/// Whether the focused control has its own use for `key`: a button for the space bar, a slider
+/// for the arrows. Clicked buttons do not keep the focus, so this is someone moving by keyboard.
+fn focus_takes(key: VirtualKey) -> bool {
+    let Ok(focused) = FocusManager::GetFocusedElement() else { return false };
+    if key == VirtualKey::Space { focused.cast::<IButtonBase>().is_ok() } else { focused.cast::<IRangeBase>().is_ok() }
+}
+
+fn playing_session() -> Option<IMediaPlaybackSession> {
+    PLAYING.with(|p| {
+        let session = p.borrow().as_ref()?.cast::<IMediaPlayer3>().and_then(|m| m.PlaybackSession()).ok()?;
+        session.cast().ok()
+    })
+}
+
+fn is_playing() -> bool {
+    playing_session().and_then(|s| s.PlaybackState().ok()) == Some(MediaPlaybackState::Playing)
+}
+
+fn pause(on: bool) {
+    PLAYING.with(|p| {
+        if let Some(player) = p.borrow().as_ref().and_then(|m| m.cast::<IMediaPlayer>().ok()) {
+            let _ = if on { player.Pause() } else { player.Play() };
+        }
+    });
+}
+
+fn toggle_play() {
+    pause(is_playing());
+}
+
+fn seek_by(step: i64) {
+    let Some(session) = playing_session() else { return };
+    if let Ok(position) = session.Position() {
+        let _ = session.SetPosition(windows_time::TimeSpan { duration: (position.duration + step).max(0) });
+    }
+}
+
+/// Pauses when the window loses the focus, and picks up again when it returns, if that is what
+/// paused it.
+pub fn focus_changed(active: bool) {
+    if !active {
+        if shell().is_some_and(|s| s.prefs().pause_on_blur) && is_playing() {
+            pause(true);
+            PAUSED_FOR_BLUR.set(true);
+        }
+    } else if PAUSED_FOR_BLUR.replace(false) {
+        pause(false);
+    }
 }
 
 /// Shows a line under the title.
@@ -437,6 +498,7 @@ fn apply_layout(root: &IFrameworkElement) -> Result<()> {
 /// Stops the video and lets its player go.
 pub fn leave() {
     let _ = set_full(false);
+    PAUSED_FOR_BLUR.set(false);
     RUN.fetch_add(1, Ordering::Relaxed);
     // The element lets go first: it must not be left holding a closed player.
     if let Some(page) = page() {
@@ -478,6 +540,7 @@ pub fn open(feed: bool, bvid: &str, title: &str, uploader: &str) -> Result<()> {
     set_text(&root, "Title", title)?;
     set_text(&root, "Meta", &format!("{uploader} · 正在打开…"))?;
     on_click(&root, "Back", go_back)?;
+    settle_buttons(&root)?;
     if feed {
         feed::attach(&root)?;
     }
@@ -546,7 +609,8 @@ pub fn open(feed: bool, bvid: &str, title: &str, uploader: &str) -> Result<()> {
         });
     });
     backend.spawn(async move {
-        let source = match core.services.videos.playback(&bvid, QUALITY).await {
+        let quality = core.services.preferences.settings().playback.preferred_quality.min(MAX_FREE_QN);
+        let source = match core.services.videos.playback(&bvid, quality).await {
             Ok(playback) => open_source(&playback)
                 .map(|source| (source, playback.cid, playback.url.duration_ms as u32))
                 .map_err(|e| e.message()),
@@ -558,6 +622,28 @@ pub fn open(feed: bool, bvid: &str, title: &str, uploader: &str) -> Result<()> {
             }
         });
     });
+    Ok(())
+}
+
+/// The page's buttons do not take the focus when clicked, so the space bar goes on pausing the
+/// video and never repeats the last button; in the words style they show no icons.
+fn settle_buttons(root: &IFrameworkElement) -> Result<()> {
+    let words = shell().is_some_and(|s| s.prefs().words);
+    let plain = ["Back", "Full", "SendButton", "Prev", "Next", "Normal", "TabComments", "TabRelated"];
+    let acting = ["ActLike", "ActCoin", "ActFav", "ActLater", "ActDanmaku", "ActFollow", "ActComment"];
+    for name in plain.into_iter().chain(acting) {
+        if let Ok(button) = named::<IFrameworkElement4>(root, name) {
+            button.SetAllowFocusOnInteraction(false)?;
+        }
+    }
+    if words {
+        for name in acting {
+            if let Ok(button) = named::<IContentControl>(root, name) {
+                let parts = button.Content()?.cast::<IPanel>()?.Children()?.cast::<IVector<UIElement>>()?;
+                parts.GetAt(0)?.cast::<IUIElement>()?.SetVisibility(Visibility::Collapsed)?;
+            }
+        }
+    }
     Ok(())
 }
 

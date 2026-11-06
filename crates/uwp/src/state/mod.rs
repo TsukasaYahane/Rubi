@@ -6,3 +6,4 @@ pub mod layout;
 pub mod manifest;
 pub mod panes;
 pub mod qr;
+pub mod settings;

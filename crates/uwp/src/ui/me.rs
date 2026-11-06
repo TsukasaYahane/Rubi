@@ -1,5 +1,7 @@
-//! 我的: who is signed in, or the QR code to sign in with. The rest of the page comes later.
+//! 我的: who is signed in, and the settings by category. Beside each other on a wide window, one
+//! above the other on a narrow one. 账号 holds signing in with the QR code, and signing out.
 
+use std::cell::{Cell, RefCell};
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::Duration;
 
@@ -7,35 +9,221 @@ use rubi_core::QrState;
 use windows_core::{Interface, Result};
 
 use crate::session;
-use crate::state::qr;
-use crate::ui::shell::{Shell, shell};
-use crate::ui::{load, named, post, set_text};
-use crate::xaml::{IContentControl, IFrameworkElement, UIElement};
+use crate::state::layout::WindowClass;
+use crate::state::settings::Category;
+use crate::state::{qr, settings::escape};
+use crate::ui::shell::shell;
+use crate::ui::{load, named, on_click, post, set_text, settings};
+use crate::xaml::{
+    BitmapImage, Color, IContentControl, IControl, IFrameworkElement, IImage, IUIElement, SolidColorBrush, UIElement,
+    Uri, Visibility,
+};
 
 /// How often the login is asked about.
 const POLL_EVERY: Duration = Duration::from_secs(2);
-/// Bumped when the page is left or shown again: a poll from an earlier showing stops.
+const COBALT: Color = Color { a: 255, r: 0, g: 0x50, b: 0xEF };
+const DIM: Color = Color { a: 255, r: 0x76, g: 0x76, b: 0x76 };
+/// Bumped when the page or the category changes: a poll from an earlier showing stops.
 static RUN: AtomicU64 = AtomicU64::new(0);
 
-const LAYOUT: &str = r##"
+const HEAD: &str = r##"
+<Grid Margin="16,14" ColumnSpacing="12">
+  <Grid.ColumnDefinitions><ColumnDefinition Width="56" /><ColumnDefinition Width="*" /></Grid.ColumnDefinitions>
+  <Grid Width="56" Height="56" Background="#0050EF">
+    <TextBlock Text="R" FontSize="22" Foreground="White" HorizontalAlignment="Center" VerticalAlignment="Center" />
+    <Image x:Name="Face" Stretch="UniformToFill" />
+  </Grid>
+  <StackPanel Grid.Column="1" VerticalAlignment="Center">
+    <TextBlock x:Name="Name" Text="游客" FontSize="18" FontWeight="Light" TextTrimming="CharacterEllipsis" />
+    <TextBlock x:Name="Meta" Text="未登录" FontSize="12" TextWrapping="Wrap"
+               Foreground="{ThemeResource SystemControlForegroundBaseMediumBrush}" />
+  </StackPanel>
+</Grid>"##;
+
+/// Side by side; `<!--head-->` and `<!--cats-->` are filled in.
+const WIDE: &str = r##"
+<Grid xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+      xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml">
+  <Grid.ColumnDefinitions><ColumnDefinition Width="<!--left-->" /><ColumnDefinition Width="*" /></Grid.ColumnDefinitions>
+  <Border BorderThickness="0,0,1,0" BorderBrush="{ThemeResource SystemControlForegroundBaseLowBrush}">
+    <StackPanel><!--head--><!--cats--></StackPanel>
+  </Border>
+  <ScrollViewer Grid.Column="1">
+    <Grid>
+      <Grid.ColumnDefinitions><ColumnDefinition MaxWidth="<!--max-->" /><ColumnDefinition Width="Auto" /></Grid.ColumnDefinitions>
+      <ContentControl x:Name="Body" IsTabStop="False" HorizontalContentAlignment="Stretch" />
+    </Grid>
+  </ScrollViewer>
+</Grid>"##;
+
+/// One above the other, the categories in a row that scrolls.
+const NARROW: &str = r##"
+<ScrollViewer xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+              xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml">
+  <StackPanel>
+    <!--head-->
+    <ScrollViewer HorizontalScrollBarVisibility="Hidden" HorizontalScrollMode="Enabled" VerticalScrollMode="Disabled"
+                  VerticalScrollBarVisibility="Disabled"><StackPanel Orientation="Horizontal"><!--cats--></StackPanel></ScrollViewer>
+    <ContentControl x:Name="Body" IsTabStop="False" HorizontalContentAlignment="Stretch" />
+  </StackPanel>
+</ScrollViewer>"##;
+
+const ACCOUNT: &str = r##"
 <StackPanel xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
-            xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml" Margin="16">
-  <TextBlock x:Name="Name" Text="我的" FontSize="20" FontWeight="Light" />
+            xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml" Padding="16,12">
+  <TextBlock Text="账号" FontSize="20" FontWeight="Light" />
   <TextBlock x:Name="Status" Margin="0,8,0,12" FontSize="14" TextWrapping="Wrap"
              Foreground="{ThemeResource SystemControlForegroundBaseMediumBrush}" />
   <ContentControl x:Name="Code" IsTabStop="False" HorizontalAlignment="Left" />
+  <Button x:Name="SignOut" Content="退出登录" Visibility="Collapsed" Background="Transparent" BorderThickness="0"
+          Padding="0,4" Foreground="#0050EF" />
 </StackPanel>"##;
+
+fn cat_buttons() -> String {
+    Category::ALL
+        .iter()
+        .enumerate()
+        .map(|(at, c)| {
+            format!(
+                r##"<Button x:Name="Cat{at}" Content="{}" Background="Transparent" BorderThickness="0" Height="44"
+                     Padding="16,0" HorizontalAlignment="Stretch" HorizontalContentAlignment="Left" />"##,
+                escape(c.label())
+            )
+        })
+        .collect()
+}
+
+fn layout(class: WindowClass) -> String {
+    let (left, max) = if class == WindowClass::Wide { ("260", "680") } else { ("220", "9999") };
+    let frame = if class == WindowClass::Narrow { NARROW } else { WIDE };
+    frame
+        .replace("<!--left-->", left)
+        .replace("<!--max-->", max)
+        .replace("<!--head-->", HEAD)
+        .replace("<!--cats-->", &cat_buttons())
+}
+
+/// The page on show.
+#[derive(Clone)]
+struct Shown {
+    root: IFrameworkElement,
+    body: Option<IFrameworkElement>,
+    class: WindowClass,
+}
+
+thread_local! {
+    static SHOWN: RefCell<Option<Shown>> = const { RefCell::new(None) };
+    static CATEGORY: Cell<Option<Category>> = const { Cell::new(None) };
+}
+
+fn shown() -> Option<Shown> {
+    SHOWN.with(|s| s.borrow().clone())
+}
 
 /// Stops a login under way.
 pub fn leave() {
     RUN.fetch_add(1, Ordering::Relaxed);
+    SHOWN.with(|s| *s.borrow_mut() = None);
 }
 
-pub fn show(shell: &Shell) -> Result<()> {
-    let root = load(LAYOUT)?;
+pub fn show() -> Result<()> {
+    let Some(shell) = shell() else { return Ok(()) };
+    let class = shell.class();
+    let root = load(&layout(class))?;
     shell.set_page(&root)?;
+    SHOWN.with(|s| *s.borrow_mut() = Some(Shown { root: root.clone(), body: None, class }));
+    for (at, category) in Category::ALL.into_iter().enumerate() {
+        on_click(&root, &format!("Cat{at}"), move || {
+            let _ = open(category);
+        })?;
+    }
+    show_head();
+    let signed_in = shell.backend.get().is_some_and(|b| b.services.account.is_logged_in());
+    let category = CATEGORY.get().unwrap_or(if signed_in { Category::Look } else { Category::Account });
+    open(category)
+}
+
+/// Follows a new window class, if the page is on show.
+pub fn resized() {
+    let Some(page) = shown() else { return };
+    if shell().is_some_and(|s| s.class() != page.class) {
+        RUN.fetch_add(1, Ordering::Relaxed);
+        let _ = show();
+    }
+}
+
+/// Shows the category again, as saved now.
+pub fn refresh() {
+    if let Some(category) = CATEGORY.get() {
+        let _ = open(category);
+    }
+}
+
+/// A line on the settings page, about what just happened.
+pub fn note(text: &str) {
+    if let Some(body) = shown().and_then(|p| p.body) {
+        let _ = set_text(&body, "Note", text);
+    }
+}
+
+fn open(category: Category) -> Result<()> {
+    let (Some(page), Some(shell)) = (shown(), shell()) else { return Ok(()) };
+    RUN.fetch_add(1, Ordering::Relaxed);
+    CATEGORY.set(Some(category));
+    for (at, each) in Category::ALL.into_iter().enumerate() {
+        let color = if each == category { COBALT } else { DIM };
+        named::<IControl>(&page.root, &format!("Cat{at}"))?
+            .SetForeground(&SolidColorBrush::CreateInstanceWithColor(color)?)?;
+    }
+    let body = match (category, shell.backend.get()) {
+        (Category::Account, _) | (_, None) => load(ACCOUNT)?,
+        (_, Some(backend)) => settings::build(category, backend)?,
+    };
+    named::<IContentControl>(&page.root, "Body")?.SetContent(&body.cast::<UIElement>()?)?;
+    SHOWN.with(|s| {
+        if let Some(shown) = s.borrow_mut().as_mut() {
+            shown.body = Some(body.clone());
+        }
+    });
+    if category == Category::Account {
+        on_click(&body, "SignOut", sign_out)?;
+        run_account(&body)?;
+    }
+    Ok(())
+}
+
+/// Who is signed in, for the head of the page.
+fn show_head() {
+    let Some(shell) = shell() else { return };
+    let Some(backend) = shell.backend.get().cloned() else { return };
+    if !backend.services.account.is_logged_in() {
+        return;
+    }
+    let (dispatcher, core) = (shell.dispatcher.clone(), backend.clone());
+    let run = RUN.load(Ordering::Relaxed);
+    backend.spawn(async move {
+        let Ok(who) = core.services.account.whoami().await else { return };
+        let profile = core.services.space.profile(who.mid).await.ok();
+        post(&dispatcher, move || {
+            if RUN.load(Ordering::Relaxed) < run {
+                return;
+            }
+            let Some(page) = shown() else { return };
+            let _ = set_text(&page.root, "Name", &who.uname);
+            let Some(p) = profile else { return };
+            let line = format!("Lv{} · 关注 {} · 粉丝 {}", p.level, p.followings, p.fans);
+            let _ = set_text(&page.root, "Meta", &line);
+            if let Ok(bitmap) = Uri::CreateUri(&p.face).and_then(|u| BitmapImage::CreateInstanceWithUriSource(&u)) {
+                let _ = named::<IImage>(&page.root, "Face").and_then(|f| f.SetSource(&bitmap));
+            }
+        });
+    });
+}
+
+fn run_account(body: &IFrameworkElement) -> Result<()> {
+    let Some(shell) = shell() else { return Ok(()) };
     let Some(backend) = shell.backend.get().cloned() else {
-        return set_text(&root, "Status", "正在打开…");
+        return set_text(body, "Status", "正在打开…");
     };
     let run = RUN.load(Ordering::Relaxed);
     let dispatcher = shell.dispatcher.clone();
@@ -51,7 +239,7 @@ pub fn show(shell: &Shell) -> Result<()> {
         let account = &core.services.account;
         if account.is_logged_in() {
             match account.whoami().await {
-                Ok(who) => tell(Update::SignedIn(who.uname)),
+                Ok(who) => tell(Update::SignedIn(who.uname, who.mid)),
                 Err(e) => tell(Update::Status(format!("读取账号失败：{e}"))),
             }
             return;
@@ -68,8 +256,9 @@ pub fn show(shell: &Shell) -> Result<()> {
                 Ok(QrState::Scanned) => tell(Update::Status("已扫码，请在手机上确认".into())),
                 Ok(QrState::Expired) => return tell(Update::Status("二维码已过期，重新打开这一页".into())),
                 Ok(QrState::Success(session)) => {
-                    let who = account.whoami().await.map(|w| w.uname).unwrap_or_default();
-                    return tell(Update::Saved(session, who));
+                    let who = account.whoami().await.ok();
+                    let (name, mid) = who.map(|w| (w.uname, w.mid)).unwrap_or_default();
+                    return tell(Update::Saved(session, name, mid));
                 }
                 Err(e) => return tell(Update::Status(format!("登录失败：{e}"))),
             }
@@ -82,25 +271,24 @@ pub fn show(shell: &Shell) -> Result<()> {
 enum Update {
     Status(String),
     Code(String),
-    SignedIn(String),
-    Saved(rubi_core::Session, String),
+    SignedIn(String, u64),
+    Saved(rubi_core::Session, String, u64),
 }
 
 impl Update {
     fn apply(self) -> Result<()> {
-        let Some(root) = current_page() else { return Ok(()) };
+        let Some(body) = shown().and_then(|p| p.body) else { return Ok(()) };
         match self {
-            Self::Status(text) => set_text(&root, "Status", &text),
-            Self::Code(url) => show_code(&root, &url),
-            Self::SignedIn(name) => signed_in(&root, &name),
-            Self::Saved(session, name) => {
+            Self::Status(text) => set_text(&body, "Status", &text),
+            Self::Code(url) => show_code(&body, &url),
+            Self::SignedIn(name, mid) => signed_in(&body, &name, mid),
+            Self::Saved(session, name, mid) => {
                 let stored = session::save(&session);
-                if let Some(home) = shell().and_then(|s| s.home_page()) {
-                    home.reload();
-                }
-                signed_in(&root, &name)?;
+                reload_home();
+                signed_in(&body, &name, mid)?;
+                show_head();
                 if stored.is_err() {
-                    set_text(&root, "Status", "已登录，但保存失败：下次启动要重新登录")?;
+                    set_text(&body, "Status", "已登录，但保存失败：下次启动要重新登录")?;
                 }
                 Ok(())
             }
@@ -108,25 +296,37 @@ impl Update {
     }
 }
 
-fn current_page() -> Option<IFrameworkElement> {
-    shell()?.current_page().ok()
+fn reload_home() {
+    if let Some(home) = shell().and_then(|s| s.home_page()) {
+        home.reload();
+    }
 }
 
-fn signed_in(root: &IFrameworkElement, name: &str) -> Result<()> {
-    set_text(root, "Name", name)?;
-    set_text(root, "Status", "已登录")?;
-    named::<IContentControl>(root, "Code")?.SetContent(None::<&windows_core::IInspectable>)
+fn signed_in(body: &IFrameworkElement, name: &str, mid: u64) -> Result<()> {
+    set_text(body, "Status", &format!("{name} · mid {mid} · 凭证保存在系统凭据库"))?;
+    named::<IContentControl>(body, "Code")?.SetContent(None::<&windows_core::IInspectable>)?;
+    named::<IUIElement>(body, "SignOut")?.SetVisibility(Visibility::Visible)
+}
+
+fn sign_out() {
+    let Some(shell) = shell() else { return };
+    if let Some(backend) = shell.backend.get() {
+        backend.services.account.logout();
+    }
+    let _ = session::clear();
+    reload_home();
+    let _ = show();
 }
 
 /// The QR code, on white with its quiet zone, whatever the theme.
-fn show_code(root: &IFrameworkElement, url: &str) -> Result<()> {
-    let Some((side, data)) = qr::path_data(url) else { return set_text(root, "Status", "二维码生成失败") };
+fn show_code(body: &IFrameworkElement, url: &str) -> Result<()> {
+    let Some((side, data)) = qr::path_data(url) else { return set_text(body, "Status", "二维码生成失败") };
     let code = load(&format!(
         r##"<Border xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation" Background="White" Padding="14">
           <Viewbox Width="220" Height="220"><Canvas Width="{side}" Height="{side}">
             <Path Fill="Black" Data="{data}" />
           </Canvas></Viewbox></Border>"##
     ))?;
-    named::<IContentControl>(root, "Code")?.SetContent(&code.cast::<UIElement>()?)?;
-    set_text(root, "Status", "用 B 站手机客户端扫码登录")
+    named::<IContentControl>(body, "Code")?.SetContent(&code.cast::<UIElement>()?)?;
+    set_text(body, "Status", "用 B 站手机客户端扫码登录")
 }

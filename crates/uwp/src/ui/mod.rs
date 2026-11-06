@@ -9,6 +9,7 @@ pub mod player;
 pub mod player_actions;
 pub mod player_side;
 pub mod rows;
+pub mod settings;
 pub mod shell;
 pub mod splitter;
 
