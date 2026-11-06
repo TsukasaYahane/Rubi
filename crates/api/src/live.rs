@@ -143,12 +143,12 @@ impl LiveApi for WebLive {
         let csrf = self.http.session().csrf().map(str::to_owned).ok_or(ApiError::NotLoggedIn)?;
         let body = self
             .http
-            .post_form_from(
+            .post_multipart_from(
                 SEND,
                 &format!("{LIVE_REFERER}{room_id}"),
                 params![
-                    "bubble" => 0, "msg" => text, "color" => 0xFF_FFFF, "mode" => 1, "room_type" => 0,
-                    "jumpfrom" => 0, "reply_mid" => 0, "reply_attr" => 0, "replay_dmid" => "", "statistics" => "{\"appId\":100,\"platform\":5}",
+                    "bubble" => 0, "msg" => text, "color" => 0xFF_FFFF, "mode" => 1,
+                    "statistics" => r#"{"appId":100,"platform":5}"#,
                     "fontsize" => 25, "rnd" => now_secs(), "roomid" => room_id, "csrf_token" => csrf,
                 ],
             )

@@ -1,7 +1,7 @@
 use std::sync::RwLock;
 use std::time::Duration;
 
-use reqwest::header::{COOKIE, REFERER, SET_COOKIE, USER_AGENT};
+use reqwest::header::{COOKIE, ORIGIN, REFERER, SET_COOKIE, USER_AGENT};
 use serde_json::Value;
 use tokio::sync::Mutex;
 
@@ -173,15 +173,23 @@ impl HttpClient {
         unwrap_envelope(json_body(resp).await?)
     }
 
-    /// POST form like `post_form`, from the page at `referer`, for endpoints that look at where a
-    /// request comes from. Gives the whole answer: some say no with a success code.
-    pub async fn post_form_from(&self, url: &str, referer: &str, mut form: Params) -> Result<Value> {
+    /// POST a multipart form from the page at `referer`, for endpoints that look at where a request
+    /// comes from. Gives the whole answer: some say no with a success code.
+    pub async fn post_multipart_from(&self, url: &str, referer: &str, form: Params) -> Result<Value> {
         let csrf = self.session().csrf().map(str::to_owned).ok_or(ApiError::NotLoggedIn)?;
-        form.push(("csrf".into(), csrf));
+        let parts = form.into_iter().chain([("csrf".to_owned(), csrf)]);
+        let form = parts.fold(reqwest::multipart::Form::new(), |form, (name, value)| form.text(name, value));
         self.limiter.acquire().await;
-        let resp = self.decorate(self.client.post(url)).header(REFERER, referer).form(&form).send().await?;
-        let body = json_body(resp).await?;
-        unwrap_envelope(body.clone())?;
+        let origin = referer.splitn(4, '/').take(3).collect::<Vec<_>>().join("/");
+        let request = self.decorate_from(self.client.post(url), referer).header(ORIGIN, origin);
+        let body = json_body(request.multipart(form).send().await?).await?;
+        let mut checked = body.clone();
+        if checked["message"].as_str().is_none_or(str::is_empty)
+            && let Some(said) = body["msg"].as_str()
+        {
+            checked["message"] = said.into();
+        }
+        unwrap_envelope(checked)?;
         Ok(body)
     }
 
@@ -221,8 +229,12 @@ impl HttpClient {
     }
 
     fn decorate(&self, rb: reqwest::RequestBuilder) -> reqwest::RequestBuilder {
+        self.decorate_from(rb, REFERER_URL)
+    }
+
+    fn decorate_from(&self, rb: reqwest::RequestBuilder, referer: &str) -> reqwest::RequestBuilder {
         let cookie = self.session().cookie_header();
-        let rb = rb.header(REFERER, REFERER_URL).header(USER_AGENT, UA);
+        let rb = rb.header(REFERER, referer).header(USER_AGENT, UA);
         if cookie.is_empty() { rb } else { rb.header(COOKIE, cookie) }
     }
 
