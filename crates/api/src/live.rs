@@ -21,6 +21,8 @@ const ROOM_INFO: &str = "https://api.live.bilibili.com/xlive/web-room/v1/index/g
 const PLAY_INFO: &str = "https://api.live.bilibili.com/xlive/web-room/v2/index/getRoomPlayInfo";
 const DANMU_INFO: &str = "https://api.live.bilibili.com/xlive/web-room/v1/index/getDanmuInfo";
 const SEND: &str = "https://api.live.bilibili.com/msg/send";
+/// Which page the web client says it sends from.
+const SEND_LOCATION: &str = "444.8";
 const FOLLOWED: &str = "https://api.live.bilibili.com/xlive/web-ucenter/user/following";
 const LIVE_REFERER: &str = "https://live.bilibili.com/";
 /// Followed rooms asked for at a time.
@@ -146,9 +148,11 @@ impl LiveApi for WebLive {
             .post_multipart_from(
                 SEND,
                 &format!("{LIVE_REFERER}{room_id}"),
+                params!["web_location" => SEND_LOCATION],
                 params![
-                    "bubble" => 0, "msg" => text, "color" => 0xFF_FFFF, "mode" => 1,
-                    "statistics" => r#"{"appId":100,"platform":5}"#,
+                    "bubble" => 0, "msg" => text, "color" => 0xFF_FFFF, "mode" => 1, "room_type" => 0, "jumpfrom" => 0,
+                    "reply_mid" => 0, "reply_attr" => 0, "replay_dmid" => "", "reply_type" => 0, "reply_uname" => "",
+                    "statistics" => r#"{"appId":100,"platform":5}"#, "data_extend" => r#"{"trackid":"-99998"}"#,
                     "fontsize" => 25, "rnd" => now_secs(), "roomid" => room_id, "csrf_token" => csrf,
                 ],
             )

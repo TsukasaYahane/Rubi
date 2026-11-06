@@ -173,15 +173,18 @@ impl HttpClient {
         unwrap_envelope(json_body(resp).await?)
     }
 
-    /// POST a multipart form from the page at `referer`, for endpoints that look at where a request
-    /// comes from. Gives the whole answer: some say no with a success code.
-    pub async fn post_multipart_from(&self, url: &str, referer: &str, form: Params) -> Result<Value> {
+    /// POST a multipart form from the page at `referer`, with WBI-signed `query` parameters on the
+    /// URL, for endpoints that look at where a request comes from. Gives the whole answer: some say
+    /// no with a success code.
+    pub async fn post_multipart_from(&self, url: &str, referer: &str, query: Params, form: Params) -> Result<Value> {
         let csrf = self.session().csrf().map(str::to_owned).ok_or(ApiError::NotLoggedIn)?;
         let parts = form.into_iter().chain([("csrf".to_owned(), csrf)]);
         let form = parts.fold(reqwest::multipart::Form::new(), |form, (name, value)| form.text(name, value));
+        let mixin = self.wbi_keys().await?.mixin_key();
+        let query = wbi::sign(&query, &mixin, rubi_model::now_secs());
         self.limiter.acquire().await;
         let origin = referer.splitn(4, '/').take(3).collect::<Vec<_>>().join("/");
-        let request = self.decorate_from(self.client.post(url), referer).header(ORIGIN, origin);
+        let request = self.decorate_from(self.client.post(url), referer).header(ORIGIN, origin).query(&query);
         let body = json_body(request.multipart(form).send().await?).await?;
         let mut checked = body.clone();
         if checked["message"].as_str().is_none_or(str::is_empty)
