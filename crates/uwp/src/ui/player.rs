@@ -28,6 +28,7 @@ use crate::ui::player_side::Side;
 use crate::ui::quality;
 use crate::ui::shell::{shell, toast};
 use crate::ui::splitter;
+use crate::ui::twin_video::{SECOND_ELEMENT, TwinVideo};
 use crate::ui::watch;
 use crate::ui::{load, named, on_click, on_enter, post, set_text, soon};
 use crate::xaml::{
@@ -87,7 +88,9 @@ const LAYOUT: &str = r##"
         <FontIcon Glyph="&#xE72B;" FontSize="16" /><TextBlock Text="返回" Margin="10,0,0,0" />
       </StackPanel>
     </Button>
+    <Border Grid.Row="1" Background="Black" />
     <MediaPlayerElement x:Name="Video" Grid.Row="1" AreTransportControlsEnabled="False" Stretch="Uniform" />
+    <MediaPlayerElement Grid.Row="1" <!--second--> />
     <Canvas x:Name="Danmaku" Grid.Row="1" IsHitTestVisible="False" />
     <!--controls-->
     <ContentControl x:Name="SendBelowVideo" Grid.Row="2" IsTabStop="False" HorizontalContentAlignment="Stretch">
@@ -216,6 +219,7 @@ struct Page {
     /// The qualities on offer.
     offer: Rc<RefCell<Offer>>,
     bar: Rc<ControlBar>,
+    video: Rc<TwinVideo>,
     /// A new quality waiting to take over.
     standby: Rc<RefCell<Option<Standby>>>,
     /// The send bar sits in the control bar.
@@ -302,7 +306,7 @@ fn hold_video() -> Result<()> {
         return Ok(());
     }
     if !page.held.replace(true) {
-        let video = named::<IFrameworkElement>(&page.root, "Video")?;
+        let video = named::<IFrameworkElement>(&page.root, page.video.active())?;
         let (width, height) = (video.ActualWidth()?, video.ActualHeight()?);
         video.SetHorizontalAlignment(HorizontalAlignment::Left)?;
         video.SetVerticalAlignment(VerticalAlignment::Top)?;
@@ -331,7 +335,7 @@ fn release_video() -> Result<()> {
     if !page.held.replace(false) {
         return Ok(());
     }
-    let video = named::<IFrameworkElement>(&page.root, "Video")?;
+    let video = named::<IFrameworkElement>(&page.root, page.video.active())?;
     video.SetWidth(f64::NAN)?;
     video.SetHeight(f64::NAN)?;
     video.SetHorizontalAlignment(HorizontalAlignment::Stretch)?;
@@ -528,17 +532,14 @@ pub fn leave() {
     watch::stop();
     let _ = set_full(false);
     PAUSED_FOR_BLUR.set(false);
-    if let Some(page) = page() {
-        page.bar.keep_volume();
-        if let Some(standby) = page.standby.borrow_mut().take() {
-            media::close(Some(standby.player), Some(standby.source));
-        }
-    }
+    let waiting = page().and_then(|p| {
+        p.bar.keep_volume();
+        p.standby.borrow_mut().take()
+    });
     RUN.fetch_add(1, Ordering::Relaxed);
     // The element lets go first: it must not be left holding a closed player.
     if let Some(page) = page() {
-        let video = named::<IMediaPlayerElement>(&page.root, "Video");
-        let _ = video.and_then(|v| v.SetMediaPlayer(None::<&MediaPlayer>));
+        page.video.clear();
         // Leaving may come from an event of this very page: it goes when that is over.
         let old = page.root.clone();
         soon(&Rc::default(), move || {
@@ -546,6 +547,9 @@ pub fn leave() {
         });
     }
     PAGE.with(|p| *p.borrow_mut() = None);
+    if let Some(standby) = waiting {
+        media::close(Some(standby.player), Some(standby.source));
+    }
     media::close(PLAYING.with(|p| p.borrow_mut().take()), SOURCE.with(|s| s.borrow_mut().take()));
 }
 
@@ -570,7 +574,8 @@ pub fn open(feed: bool, bvid: &str, title: &str, uploader: &str) -> Result<()> {
         &layout
             .replace("<!--bar-->", splitter::BAR_TEMPLATE)
             .replace("<!--lists-->", LISTS)
-            .replace("<!--controls-->", &control_bar::markup(place)),
+            .replace("<!--controls-->", &control_bar::markup(place))
+            .replace("<!--second-->", SECOND_ELEMENT),
     )?;
     named::<IUIElement>(&root, "SeekRow")?.SetVisibility(Visibility::Visible)?;
     named::<IUIElement>(&root, "PlayPause")?.SetVisibility(Visibility::Visible)?;
@@ -605,6 +610,7 @@ pub fn open(feed: bool, bvid: &str, title: &str, uploader: &str) -> Result<()> {
             || page().map(|p| p.bar),
             set_sound,
         )?,
+        video: TwinVideo::new(&root, run, || page().map(|p| p.video)),
         standby: Rc::default(),
         send_in_full: Rc::default(),
         seek_held: Rc::new(Cell::new(Instant::now())),
@@ -785,6 +791,7 @@ fn quality_ready(source: std::result::Result<(MediaSource, Offer), String>) -> R
         return Ok(());
     }
     let player = media::standby(&source, false)?;
+    page.video.prepare(&player)?;
     *page.standby.borrow_mut() = Some(Standby { player, source, offer, handover: Handover::default() });
     let (dispatcher, run) = (shell.dispatcher.clone(), self::run());
     backend.spawn(async move {
@@ -841,7 +848,6 @@ fn handover_step() -> bool {
 
 fn take_over(page: &Page, standby: Standby, playing: bool) -> Result<()> {
     let Standby { player, source, offer, .. } = standby;
-    named::<IMediaPlayerElement>(&page.root, "Video")?.SetMediaPlayer(&player)?;
     report_failures(&player)?;
     let control = player.cast::<IMediaPlayer>()?;
     control.SetIsLoopingEnabled(page.feed)?;
@@ -850,8 +856,8 @@ fn take_over(page: &Page, standby: Standby, playing: bool) -> Result<()> {
     }
     let old = PLAYING.with(|p| p.borrow_mut().replace(player));
     let old_source = SOURCE.with(|s| s.borrow_mut().replace(source));
+    page.video.switch(old, old_source)?;
     page.bar.apply_sound()?;
-    media::close(old, old_source);
     quality::show(&page.root, &offer)?;
     *page.offer.borrow_mut() = offer;
     Ok(())

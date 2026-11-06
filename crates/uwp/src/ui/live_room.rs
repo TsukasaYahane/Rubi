@@ -23,6 +23,7 @@ use crate::ui::danmaku::{Host, Overlay};
 use crate::ui::quality;
 use crate::ui::rows::{add_rows, on_row};
 use crate::ui::shell::{shell, toast};
+use crate::ui::twin_video::{SECOND_ELEMENT, TwinVideo};
 use crate::ui::{keep, load, media, named, on_click, on_enter, post, set_text, soon};
 use crate::xaml::{
     Color, ElementTheme, FocusState, FrameworkElement, Grid, GridLength, GridUnitType, IColumnDefinition, IControl,
@@ -60,6 +61,7 @@ const LAYOUT: &str = r##"
     </Grid.RowDefinitions>
     <Grid x:Name="Stage" Background="Black" RequestedTheme="Dark">
       <MediaPlayerElement x:Name="Video" AreTransportControlsEnabled="False" Stretch="Uniform" />
+      <MediaPlayerElement <!--second--> />
       <Canvas x:Name="Danmaku" IsHitTestVisible="False" />
       <StackPanel x:Name="Notice" Visibility="Collapsed" HorizontalAlignment="Center" VerticalAlignment="Center"
                   IsHitTestVisible="False">
@@ -133,6 +135,7 @@ struct Room {
     next_danmaku: Cell<u64>,
     full: Cell<bool>,
     bar: Rc<ControlBar>,
+    video: Rc<TwinVideo>,
     standby: RefCell<Option<(MediaPlayer, MediaSource, Offer)>>,
     send_bar: Cell<SendPlace>,
     /// The qualities on offer.
@@ -162,13 +165,13 @@ fn overlay_of(asked: u64) -> Option<Rc<Overlay>> {
 pub fn leave() {
     RUN.fetch_add(1, Ordering::Relaxed);
     let Some(room) = ROOM.with_borrow_mut(Option::take) else { return };
-    if let Some((player, source, _)) = room.standby.borrow_mut().take() {
-        media::close(Some(player), Some(source));
-    }
+    let waiting = room.standby.borrow_mut().take();
     room.bar.keep_volume();
     let _ = set_full(&room, false);
-    let video = named::<IMediaPlayerElement>(&room.root, "Video");
-    let _ = video.and_then(|v| v.SetMediaPlayer(None::<&MediaPlayer>));
+    room.video.clear();
+    if let Some((player, source, _)) = waiting {
+        media::close(Some(player), Some(source));
+    }
     media::close(room.player.borrow_mut().take(), room.source.borrow_mut().take());
     let channel = room.channel.lock().unwrap_or_else(|e| e.into_inner()).take();
     if let (Some(channel), Some(backend)) = (channel, shell().and_then(|s| s.backend.get().cloned())) {
@@ -188,7 +191,8 @@ pub fn open(room_id: u64, title: &str, uploader: &str) -> Result<()> {
     crate::ui::player::leave();
     crate::ui::me::leave();
     leave();
-    let root = load(&LAYOUT.replace("<!--controls-->", &control_bar::markup("")))?;
+    let root =
+        load(&LAYOUT.replace("<!--controls-->", &control_bar::markup("")).replace("<!--second-->", SECOND_ELEMENT))?;
     set_text(&root, "Title", title)?;
     set_text(&root, "Meta", &format!("{uploader} · 正在打开…"))?;
     let shown = Rc::new(Room {
@@ -203,6 +207,7 @@ pub fn open(room_id: u64, title: &str, uploader: &str) -> Result<()> {
         next_danmaku: Cell::new(1),
         full: Cell::new(false),
         bar: ControlBar::attach(&root, "Stage", &["Back"], run, || room().map(|r| r.bar.clone()), set_sound)?,
+        video: TwinVideo::new(&root, run, || room().map(|r| r.video.clone())),
         standby: RefCell::default(),
         send_bar: Cell::new(SendPlace::BelowVideo),
         offer: RefCell::default(),
@@ -307,6 +312,7 @@ fn quality_ready(ready: std::result::Result<(MediaSource, Offer), Stop>) -> Resu
         return Ok(());
     }
     let player = media::standby(&source, true)?;
+    room.video.prepare(&player)?;
     *room.standby.borrow_mut() = Some((player, source, offer));
     let (dispatcher, opening) = (shell.dispatcher.clone(), run());
     backend.spawn(async move {
@@ -325,6 +331,7 @@ fn quality_ready(ready: std::result::Result<(MediaSource, Offer), Stop>) -> Resu
                 && let Some(room) = self::room()
                 && let Some((player, source, _)) = room.standby.borrow_mut().take()
             {
+                let _ = room.video.clear_next();
                 media::close(Some(player), Some(source));
                 toast("切换清晰度失败");
             }
@@ -344,11 +351,10 @@ fn standby_ready() -> bool {
     }
     let Some((player, source, offer)) = room.standby.borrow_mut().take() else { return true };
     let swapped = (|| {
-        named::<IMediaPlayerElement>(&room.root, "Video")?.SetMediaPlayer(&player)?;
         let old = room.player.borrow_mut().replace(player);
         let old_source = room.source.borrow_mut().replace(source);
+        room.video.switch(old, old_source)?;
         room.bar.apply_sound()?;
-        media::close(old, old_source);
         quality::show(&room.root, &offer)?;
         *room.offer.borrow_mut() = offer;
         Ok::<(), windows_core::Error>(())

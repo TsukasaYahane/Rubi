@@ -22,6 +22,7 @@ pub mod schedule;
 pub mod settings;
 pub mod shell;
 pub mod splitter;
+pub mod twin_video;
 pub mod video_list;
 pub mod watch;
 
