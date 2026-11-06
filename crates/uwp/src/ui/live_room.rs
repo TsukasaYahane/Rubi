@@ -23,7 +23,7 @@ use crate::xaml::{
     Color, ElementTheme, FrameworkElement, Grid, GridLength, GridUnitType, IColumnDefinition, IContentControl,
     IControl, IFontIcon, IFrameworkElement, IFrameworkElement2, IItemsControl, IMediaPlayer, IMediaPlayerElement,
     IPanel, IRowDefinition, ITextBlock, ITextBox, IUIElement, MediaPlayer, MediaSource, SizeChangedEventArgs,
-    SolidColorBrush, UIElement, VirtualKey, Visibility,
+    SolidColorBrush, Thickness, UIElement, VirtualKey, Visibility,
 };
 
 /// Width of the danmaku list beside the picture.
@@ -76,11 +76,13 @@ const LAYOUT: &str = r##"
     </Grid>
     <ContentControl x:Name="SendBelowVideo" Grid.Row="1" IsTabStop="False" HorizontalContentAlignment="Stretch">
       <Grid x:Name="SendBar" Padding="12,6">
+        <Grid.Resources><CornerRadius x:Key="ControlCornerRadius">0</CornerRadius></Grid.Resources>
         <Grid.ColumnDefinitions><ColumnDefinition Width="*" /><ColumnDefinition Width="Auto" /></Grid.ColumnDefinitions>
         <Grid.RowDefinitions><RowDefinition Height="Auto" /><RowDefinition Height="Auto" /></Grid.RowDefinitions>
         <TextBox x:Name="SendText" PlaceholderText="发个友善的弹幕…" MaxLength="30" BorderThickness="0,0,0,1"
-                 Background="Transparent" />
-        <Button x:Name="SendButton" Grid.Column="1" Background="Transparent" BorderThickness="0" Margin="8,0,0,0">
+                 Background="Transparent" MinHeight="36" VerticalContentAlignment="Center" />
+        <Button x:Name="SendButton" Grid.Column="1" Background="Transparent" BorderThickness="0" Margin="8,0,0,0"
+                Width="36" Height="36" Padding="0">
           <FontIcon Glyph="&#xE724;" FontSize="18" /></Button>
         <TextBlock x:Name="SendNote" Grid.Row="1" Grid.ColumnSpan="2" FontSize="12" Margin="0,4,0,0" TextWrapping="Wrap"
                    Visibility="Collapsed" IsTextSelectionEnabled="True" />
@@ -397,6 +399,14 @@ fn move_send_bar(root: &IFrameworkElement, below_chat: bool) -> Result<()> {
     }
     let color = if below_chat { Color { a: 0, r: 0, g: 0, b: 0 } } else { Color { a: 255, r: 0x11, g: 0x11, b: 0x11 } };
     bar.cast::<IPanel>()?.SetBackground(&SolidColorBrush::CreateInstanceWithColor(color)?)?;
+    // A box of its own under the list; under the picture a line is enough.
+    let edge = if below_chat { 1.0 } else { 0.0 };
+    named::<IControl>(root, "SendText")?.SetBorderThickness(Thickness {
+        left: edge,
+        top: edge,
+        right: edge,
+        bottom: 1.0,
+    })?;
     let theme = if below_chat { ElementTheme::Default } else { ElementTheme::Dark };
     bar.cast::<IFrameworkElement2>()?.SetRequestedTheme(theme)
 }
