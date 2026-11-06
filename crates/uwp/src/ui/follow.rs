@@ -86,13 +86,15 @@ const LAYOUT: &str = r##"
     <ListView.ItemContainerStyle>
       <Style TargetType="ListViewItem">
         <Setter Property="Padding" Value="16,12" />
-        <Setter Property="HorizontalContentAlignment" Value="Left" />
+        <Setter Property="HorizontalContentAlignment" Value="Stretch" />
         <Setter Property="VerticalContentAlignment" Value="Top" />
       </Style>
     </ListView.ItemContainerStyle>
     <ListView.ItemTemplate><DataTemplate>
-      <Grid MaxWidth="648">
-        <Grid.ColumnDefinitions><ColumnDefinition Width="46" /><ColumnDefinition Width="*" /></Grid.ColumnDefinitions>
+      <Grid>
+        <Grid.ColumnDefinitions>
+          <ColumnDefinition Width="46" /><ColumnDefinition MaxWidth="602" /><ColumnDefinition Width="Auto" />
+        </Grid.ColumnDefinitions>
         <Grid.RowDefinitions>
           <RowDefinition Height="Auto" /><RowDefinition Height="Auto" /><RowDefinition Height="Auto" />
           <RowDefinition Height="Auto" /><RowDefinition Height="Auto" /><RowDefinition Height="Auto" />

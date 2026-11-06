@@ -11,7 +11,11 @@ const DAY: i64 = 86_400;
 pub const CHAT_MOST: usize = 400;
 
 pub fn room_line(room: &LiveRoom) -> String {
-    format!("{} · {} 人气", room.uname, count(room.online))
+    if room.live && room.online > 0 {
+        format!("{} · {} 人气", room.uname, count(room.online))
+    } else {
+        room.uname.clone()
+    }
 }
 
 fn day_of(unix: i64) -> i64 {
@@ -72,7 +76,8 @@ mod tests {
 
     #[test]
     fn a_room_says_who_and_how_many() {
-        let room = LiveRoom { uname: "猫".into(), online: 32_000, ..LiveRoom::default() };
+        let room = LiveRoom { uname: "猫".into(), online: 32_000, live: true, ..LiveRoom::default() };
         assert_eq!(room_line(&room), "猫 · 3.2 万 人气");
+        assert_eq!(room_line(&LiveRoom { live: false, ..room }), "猫");
     }
 }

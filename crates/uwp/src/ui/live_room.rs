@@ -20,9 +20,10 @@ use crate::ui::rows::{add_rows, on_row};
 use crate::ui::shell::shell;
 use crate::ui::{keep, load, media, named, on_click, post, set_text, soon};
 use crate::xaml::{
-    FrameworkElement, Grid, GridLength, GridUnitType, IColumnDefinition, IControl, IFontIcon, IFrameworkElement,
-    IItemsControl, IMediaPlayer, IMediaPlayerElement, IRowDefinition, ITextBlock, ITextBox, IUIElement, MediaPlayer,
-    MediaSource, SizeChangedEventArgs, VirtualKey, Visibility,
+    Color, ElementTheme, FrameworkElement, Grid, GridLength, GridUnitType, IColumnDefinition, IContentControl,
+    IControl, IFontIcon, IFrameworkElement, IFrameworkElement2, IItemsControl, IMediaPlayer, IMediaPlayerElement,
+    IPanel, IRowDefinition, ITextBlock, ITextBox, IUIElement, MediaPlayer, MediaSource, SizeChangedEventArgs,
+    SolidColorBrush, UIElement, VirtualKey, Visibility,
 };
 
 /// Width of the danmaku list beside the picture.
@@ -64,13 +65,15 @@ const LAYOUT: &str = r##"
         </Button>
       </Grid>
     </Grid>
-    <Grid x:Name="SendBar" Grid.Row="1" Background="#111111" RequestedTheme="Dark" Padding="12,6">
-      <Grid.ColumnDefinitions><ColumnDefinition Width="*" /><ColumnDefinition Width="Auto" /></Grid.ColumnDefinitions>
-      <TextBox x:Name="SendText" PlaceholderText="发个友善的弹幕…" MaxLength="30" BorderThickness="0,0,0,1"
-               Background="Transparent" Foreground="White" />
-      <Button x:Name="SendButton" Grid.Column="1" Background="Transparent" BorderThickness="0" Margin="8,0,0,0"
-              Foreground="White"><FontIcon Glyph="&#xE724;" FontSize="18" /></Button>
-    </Grid>
+    <ContentControl x:Name="SendBelowVideo" Grid.Row="1" IsTabStop="False" HorizontalContentAlignment="Stretch">
+      <Grid x:Name="SendBar" Padding="12,6">
+        <Grid.ColumnDefinitions><ColumnDefinition Width="*" /><ColumnDefinition Width="Auto" /></Grid.ColumnDefinitions>
+        <TextBox x:Name="SendText" PlaceholderText="发个友善的弹幕…" MaxLength="30" BorderThickness="0,0,0,1"
+                 Background="Transparent" />
+        <Button x:Name="SendButton" Grid.Column="1" Background="Transparent" BorderThickness="0" Margin="8,0,0,0">
+          <FontIcon Glyph="&#xE724;" FontSize="18" /></Button>
+      </Grid>
+    </ContentControl>
     <StackPanel x:Name="Info" Grid.Row="2" Padding="16,10">
       <TextBlock x:Name="Title" FontSize="18" FontWeight="Light" TextTrimming="CharacterEllipsis" />
       <TextBlock x:Name="Meta" FontSize="12" TextWrapping="Wrap"
@@ -80,7 +83,9 @@ const LAYOUT: &str = r##"
   <Border x:Name="ChatPane" Grid.Column="1" BorderBrush="{ThemeResource SystemControlForegroundBaseLowBrush}"
           Background="{ThemeResource ApplicationPageBackgroundThemeBrush}">
     <Grid>
-      <Grid.RowDefinitions><RowDefinition Height="Auto" /><RowDefinition Height="*" /></Grid.RowDefinitions>
+      <Grid.RowDefinitions>
+        <RowDefinition Height="Auto" /><RowDefinition Height="*" /><RowDefinition Height="Auto" />
+      </Grid.RowDefinitions>
       <TextBlock Text="弹幕" FontSize="18" FontWeight="Light" Margin="14,8,14,4" />
       <ListView x:Name="Chat" Grid.Row="1" SelectionMode="None" IsItemClickEnabled="False">
         <ListView.ItemContainerTransitions><TransitionCollection /></ListView.ItemContainerTransitions>
@@ -98,6 +103,9 @@ const LAYOUT: &str = r##"
           <Grid><TextBlock FontSize="13" TextWrapping="Wrap" /></Grid>
         </DataTemplate></ListView.ItemTemplate>
       </ListView>
+      <Border Grid.Row="2" BorderThickness="0,1,0,0" BorderBrush="{ThemeResource SystemControlForegroundBaseLowBrush}">
+        <ContentControl x:Name="SendBelowChat" IsTabStop="False" HorizontalContentAlignment="Stretch" />
+      </Border>
     </Grid>
   </Border>
 </Grid>"##;
@@ -113,6 +121,8 @@ struct Room {
     chat: RefCell<Vec<String>>,
     next_danmaku: Cell<u64>,
     full: Cell<bool>,
+    /// The send bar sits under the list, not the picture.
+    send_below_chat: Cell<bool>,
 }
 
 thread_local! {
@@ -174,6 +184,7 @@ pub fn open(room_id: u64, title: &str, uploader: &str) -> Result<()> {
         chat: RefCell::default(),
         next_danmaku: Cell::new(1),
         full: Cell::new(false),
+        send_below_chat: Cell::new(false),
     });
     ROOM.with_borrow_mut(|r| *r = Some(shown.clone()));
     on_click(&root, "Back", go_back)?;
@@ -344,7 +355,23 @@ fn apply_layout(root: &IFrameworkElement) -> Result<()> {
     Grid::SetRow(&pane, if wide { 0 } else { 1 })?;
     named::<IUIElement>(root, "ChatPane")?.SetVisibility(shown(!full))?;
     named::<IUIElement>(root, "SendBar")?.SetVisibility(shown(!full))?;
-    named::<IUIElement>(root, "Info")?.SetVisibility(shown(!full))
+    named::<IUIElement>(root, "Info")?.SetVisibility(shown(!full))?;
+    move_send_bar(root, wide)
+}
+
+/// Under the list it wears the page's colours; under the picture, the picture's.
+fn move_send_bar(root: &IFrameworkElement, below_chat: bool) -> Result<()> {
+    let Some(room) = room() else { return Ok(()) };
+    let bar = named::<UIElement>(root, "SendBar")?;
+    let (from, to) = if below_chat { ("SendBelowVideo", "SendBelowChat") } else { ("SendBelowChat", "SendBelowVideo") };
+    if room.send_below_chat.replace(below_chat) != below_chat {
+        named::<IContentControl>(root, from)?.SetContent(None::<&windows_core::IInspectable>)?;
+        named::<IContentControl>(root, to)?.SetContent(&bar)?;
+    }
+    let color = if below_chat { Color { a: 0, r: 0, g: 0, b: 0 } } else { Color { a: 255, r: 0x11, g: 0x11, b: 0x11 } };
+    bar.cast::<IPanel>()?.SetBackground(&SolidColorBrush::CreateInstanceWithColor(color)?)?;
+    let theme = if below_chat { ElementTheme::Default } else { ElementTheme::Dark };
+    bar.cast::<IFrameworkElement2>()?.SetRequestedTheme(theme)
 }
 
 fn go_back() {

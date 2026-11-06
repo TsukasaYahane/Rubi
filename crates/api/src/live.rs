@@ -21,7 +21,10 @@ const ROOM_INFO: &str = "https://api.live.bilibili.com/xlive/web-room/v1/index/g
 const PLAY_INFO: &str = "https://api.live.bilibili.com/xlive/web-room/v2/index/getRoomPlayInfo";
 const DANMU_INFO: &str = "https://api.live.bilibili.com/xlive/web-room/v1/index/getDanmuInfo";
 const SEND: &str = "https://api.live.bilibili.com/msg/send";
+const FOLLOWED: &str = "https://api.live.bilibili.com/xlive/web-ucenter/user/following";
 const LIVE_REFERER: &str = "https://live.bilibili.com/";
+/// Followed rooms asked for at a time.
+const FOLLOWED_PAGE: u32 = 20;
 /// Used when the room's own host list is empty.
 const FALLBACK_HOST: &str = "wss://broadcastlv.chat.bilibili.com:443/sub";
 /// 原画, asked for first; the answer says what the room really offers.
@@ -42,6 +45,8 @@ pub trait LiveApi: Send + Sync {
     async fn areas(&self) -> Result<Vec<LiveArea>>;
     /// One page of a parent area's rooms (`area` 0 for all of them); also whether more follow.
     async fn area_rooms(&self, parent: u32, area: u32, page: u32) -> Result<(Vec<LiveRoom>, bool)>;
+    /// One page of followed UPs' rooms, those on air first; also whether more follow. Login required.
+    async fn followed_rooms(&self, page: u32) -> Result<(Vec<LiveRoom>, bool)>;
     async fn room(&self, room_id: u64) -> Result<LiveRoom>;
     async fn play(&self, room_id: u64, qn: u32) -> Result<LivePlay>;
     async fn danmu_server(&self, room_id: u64) -> Result<DanmuServer>;
@@ -89,6 +94,19 @@ impl LiveApi for WebLive {
             .await?;
         let rooms = rooms_in(&d["list"]);
         let more = !rooms.is_empty() && u64_of(&d["count"]) > u64::from(page * AREA_PAGE);
+        Ok((rooms, more))
+    }
+
+    async fn followed_rooms(&self, page: u32) -> Result<(Vec<LiveRoom>, bool)> {
+        let d = self
+            .http
+            .get_json(FOLLOWED, params!["page" => page, "page_size" => FOLLOWED_PAGE, "ignoreRecord" => 1], false)
+            .await?;
+        let rooms: Vec<LiveRoom> = d["list"]
+            .as_array()
+            .map(|l| l.iter().map(followed_room).filter(|r| r.room_id > 0).collect())
+            .unwrap_or_default();
+        let more = u64::from(page) < u64_of(&d["totalPage"]);
         Ok((rooms, more))
     }
 
@@ -164,6 +182,12 @@ pub(crate) fn room_of(v: &Value) -> LiveRoom {
         // Lists only carry rooms that are on air.
         live: v.get("live_status").is_none_or(|s| u64_of(s) == 1),
     }
+}
+
+/// A room in the followed list, which says who and whether on air but has no cover or viewers.
+fn followed_room(v: &Value) -> LiveRoom {
+    let room = room_of(v);
+    LiveRoom { cover: image_of(&v["face"]), area: String::new(), online: 0, ..room }
 }
 
 /// `getInfoByRoom`: the room header plus its anchor.
@@ -379,6 +403,16 @@ mod tests {
         let a =
             areas_of(&json!([{"id": 2, "name": "网游", "list": [{"id": "86", "parent_id": "2", "name": "英雄联盟"}]}]));
         assert_eq!(a[0].children[0], LiveSubArea { id: 86, parent_id: 2, name: "英雄联盟".into() });
+    }
+
+    /// 2026-11-06: `user/following` leaves cover, viewers and area empty.
+    #[test]
+    fn reads_followed_rooms() {
+        let room = followed_room(&json!({"roomid": 7, "uname": "猫", "title": "夜", "face": "//i0.hdslb.com/f.jpg",
+            "live_status": 1, "room_cover": "", "text_small": "", "area_name_v2": ""}));
+        assert_eq!((room.room_id, room.online, room.live), (7, 0, true));
+        assert_eq!(room.cover, "https://i0.hdslb.com/f.jpg");
+        assert!(!followed_room(&json!({"roomid": 8, "live_status": 0})).live);
     }
 
     #[test]

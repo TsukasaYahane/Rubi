@@ -14,7 +14,7 @@ use crate::state::library::Shelf;
 use crate::state::settings::Category;
 use crate::state::{qr, settings::escape};
 use crate::ui::shell::shell;
-use crate::ui::{follow, library, load, named, on_click, post, set_text, settings};
+use crate::ui::{follow, library, live, load, named, on_click, post, set_text, settings};
 use crate::xaml::{
     BitmapImage, Color, IContentControl, IControl, IFrameworkElement, IImage, IUIElement, SolidColorBrush, UIElement,
     Uri, Visibility,
@@ -430,6 +430,7 @@ impl Update {
 
 fn reload_home() {
     follow::forget();
+    live::forget();
     if let Some(home) = shell().and_then(|s| s.home_page()) {
         home.reload();
     }

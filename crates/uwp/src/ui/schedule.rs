@@ -8,15 +8,17 @@ use rubi_model::EsportsMatch;
 use windows_collections::IVector;
 use windows_core::{IInspectable, Interface, Result};
 
+use crate::state::layout::WindowClass;
 use crate::state::live::{score, state_text, when};
 use crate::ui::live::{chips, held, mark_chip};
-use crate::ui::rows::{add_rows, on_row};
+use crate::ui::rows::{Covers, add_rows, on_row};
 use crate::ui::shell::shell;
 use crate::ui::{load, on_click, post};
-use crate::xaml::{IFrameworkElement, IItemsControl, ITextBlock, UIElement};
+use crate::xaml::{IFrameworkElement, IImage, IItemsControl, ITextBlock, IUIElement, UIElement, Visibility};
 
 /// Rows from the end at which more load.
 const LOAD_AHEAD: usize = 6;
+const LOGO_DECODE_WIDTH: i32 = 56;
 
 const LIST: &str = r##"
 <ListView xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation" SelectionMode="None">
@@ -30,8 +32,8 @@ const LIST: &str = r##"
   <ListView.ItemTemplate><DataTemplate>
     <Grid>
       <Grid.ColumnDefinitions>
-        <ColumnDefinition Width="104" /><ColumnDefinition Width="*" /><ColumnDefinition Width="64" />
-        <ColumnDefinition Width="*" />
+        <ColumnDefinition Width="104" /><ColumnDefinition Width="*" /><ColumnDefinition Width="Auto" />
+        <ColumnDefinition Width="64" /><ColumnDefinition Width="Auto" /><ColumnDefinition Width="*" />
       </Grid.ColumnDefinitions>
       <Grid.RowDefinitions><RowDefinition Height="Auto" /><RowDefinition Height="Auto" /></Grid.RowDefinitions>
       <TextBlock FontSize="13" />
@@ -39,9 +41,11 @@ const LIST: &str = r##"
                  Foreground="{ThemeResource SystemControlForegroundBaseMediumBrush}" />
       <TextBlock Grid.Column="1" Grid.RowSpan="2" FontSize="14" VerticalAlignment="Center"
                  TextAlignment="Right" TextTrimming="CharacterEllipsis" />
-      <TextBlock Grid.Column="2" Grid.RowSpan="2" FontSize="15" VerticalAlignment="Center" TextAlignment="Center" />
-      <TextBlock Grid.Column="3" Grid.RowSpan="2" FontSize="14" VerticalAlignment="Center"
+      <TextBlock Grid.Column="3" Grid.RowSpan="2" FontSize="15" VerticalAlignment="Center" TextAlignment="Center" />
+      <TextBlock Grid.Column="5" Grid.RowSpan="2" FontSize="14" VerticalAlignment="Center"
                  TextTrimming="CharacterEllipsis" />
+      <Image Grid.Column="2" Grid.RowSpan="2" Width="28" Height="28" Margin="8,0,0,0" VerticalAlignment="Center" />
+      <Image Grid.Column="4" Grid.RowSpan="2" Width="28" Height="28" Margin="0,0,8,0" VerticalAlignment="Center" />
     </Grid>
   </DataTemplate></ListView.ItemTemplate>
 </ListView>"##;
@@ -57,6 +61,13 @@ pub struct Schedule {
     turn: Cell<u64>,
     said: RefCell<String>,
     game_chips: RefCell<Option<IFrameworkElement>>,
+    covers: Covers,
+    /// Team logos show.
+    logos: Cell<bool>,
+}
+
+fn wide() -> bool {
+    shell().is_some_and(|s| s.class() == WindowClass::Wide)
 }
 
 fn now() -> i64 {
@@ -77,6 +88,8 @@ impl Schedule {
             turn: Cell::new(0),
             said: RefCell::default(),
             game_chips: RefCell::default(),
+            covers: Covers::default(),
+            logos: Cell::new(wide()),
         });
         let filling = Rc::downgrade(&shown);
         on_row(&list, move |at, parts| filling.upgrade().map_or(Ok(()), |s| s.fill(at, parts)))?;
@@ -202,6 +215,19 @@ impl Schedule {
         Ok(())
     }
 
+    /// Follows the window: rows on screen are filled again when logos come or go.
+    pub fn resized(&self) {
+        let logos = wide();
+        if self.logos.replace(logos) != logos {
+            let _ = self.refill();
+        }
+    }
+
+    fn refill(&self) -> Result<()> {
+        self.list.cast::<IItemsControl>()?.Items()?.cast::<IVector<IInspectable>>()?.Clear()?;
+        add_rows(&self.list, 0, self.matches.borrow().len())
+    }
+
     fn fill(&self, at: usize, parts: &IVector<UIElement>) -> Result<()> {
         let matches = self.matches.borrow();
         let Some(game) = matches.get(at) else { return Ok(()) };
@@ -214,6 +240,15 @@ impl Schedule {
         ];
         for (part, text) in texts.iter().enumerate() {
             parts.GetAt(part as u32)?.cast::<ITextBlock>()?.SetText(text)?;
+        }
+        let logos = self.logos.get();
+        for (part, team) in [(5, &game.home), (6, &game.away)] {
+            let on = logos && !team.logo.is_empty();
+            let logo = parts.GetAt(part)?;
+            logo.cast::<IUIElement>()?.SetVisibility(if on { Visibility::Visible } else { Visibility::Collapsed })?;
+            if on {
+                logo.cast::<IImage>()?.SetSource(&self.covers.get(&team.logo, LOGO_DECODE_WIDTH)?)?;
+            }
         }
         let near_end = at + LOAD_AHEAD >= matches.len();
         drop(matches);

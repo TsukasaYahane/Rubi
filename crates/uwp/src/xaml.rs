@@ -871,6 +871,53 @@ impl windows_core::RuntimeName for BindingBase {
 unsafe impl Send for BindingBase {}
 unsafe impl Sync for BindingBase {}
 #[repr(transparent)]
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct BindingExpression(windows_core::IUnknown);
+windows_core::imp::interface_hierarchy!(BindingExpression, windows_core::IUnknown, windows_core::IInspectable);
+windows_core::imp::required_hierarchy!(BindingExpression, BindingExpressionBase);
+impl windows_core::RuntimeType for BindingExpression {
+    const SIGNATURE: windows_core::imp::ConstBuffer =
+        windows_core::imp::ConstBuffer::for_class::<Self, IBindingExpression>();
+}
+unsafe impl windows_core::Interface for BindingExpression {
+    type Vtable = <IBindingExpression as windows_core::Interface>::Vtable;
+    const IID: windows_core::GUID = <IBindingExpression as windows_core::Interface>::IID;
+}
+impl core::ops::Deref for BindingExpression {
+    type Target = IBindingExpression;
+    fn deref(&self) -> &Self::Target {
+        unsafe { core::mem::transmute(self) }
+    }
+}
+impl windows_core::RuntimeName for BindingExpression {
+    const NAME: &'static str = "Windows.UI.Xaml.Data.BindingExpression";
+}
+unsafe impl Send for BindingExpression {}
+unsafe impl Sync for BindingExpression {}
+#[repr(transparent)]
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct BindingExpressionBase(windows_core::IUnknown);
+windows_core::imp::interface_hierarchy!(BindingExpressionBase, windows_core::IUnknown, windows_core::IInspectable);
+impl windows_core::RuntimeType for BindingExpressionBase {
+    const SIGNATURE: windows_core::imp::ConstBuffer =
+        windows_core::imp::ConstBuffer::for_class::<Self, IBindingExpressionBase>();
+}
+unsafe impl windows_core::Interface for BindingExpressionBase {
+    type Vtable = <IBindingExpressionBase as windows_core::Interface>::Vtable;
+    const IID: windows_core::GUID = <IBindingExpressionBase as windows_core::Interface>::IID;
+}
+impl core::ops::Deref for BindingExpressionBase {
+    type Target = IBindingExpressionBase;
+    fn deref(&self) -> &Self::Target {
+        unsafe { core::mem::transmute(self) }
+    }
+}
+impl windows_core::RuntimeName for BindingExpressionBase {
+    const NAME: &'static str = "Windows.UI.Xaml.Data.BindingExpressionBase";
+}
+unsafe impl Send for BindingExpressionBase {}
+unsafe impl Sync for BindingExpressionBase {}
+#[repr(transparent)]
 #[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
 pub struct BitmapCreateOptions(pub u32);
 impl BitmapCreateOptions {
@@ -2145,6 +2192,33 @@ impl windows_core::RuntimeType for CreationCollisionOption {
 }
 #[repr(transparent)]
 #[derive(Clone, Debug, Eq, PartialEq)]
+pub struct DataContextChangedEventArgs(windows_core::IUnknown);
+windows_core::imp::interface_hierarchy!(
+    DataContextChangedEventArgs,
+    windows_core::IUnknown,
+    windows_core::IInspectable
+);
+impl windows_core::RuntimeType for DataContextChangedEventArgs {
+    const SIGNATURE: windows_core::imp::ConstBuffer =
+        windows_core::imp::ConstBuffer::for_class::<Self, IDataContextChangedEventArgs>();
+}
+unsafe impl windows_core::Interface for DataContextChangedEventArgs {
+    type Vtable = <IDataContextChangedEventArgs as windows_core::Interface>::Vtable;
+    const IID: windows_core::GUID = <IDataContextChangedEventArgs as windows_core::Interface>::IID;
+}
+impl core::ops::Deref for DataContextChangedEventArgs {
+    type Target = IDataContextChangedEventArgs;
+    fn deref(&self) -> &Self::Target {
+        unsafe { core::mem::transmute(self) }
+    }
+}
+impl windows_core::RuntimeName for DataContextChangedEventArgs {
+    const NAME: &'static str = "Windows.UI.Xaml.DataContextChangedEventArgs";
+}
+unsafe impl Send for DataContextChangedEventArgs {}
+unsafe impl Sync for DataContextChangedEventArgs {}
+#[repr(transparent)]
+#[derive(Clone, Debug, Eq, PartialEq)]
 pub struct DataTemplate(windows_core::IUnknown);
 windows_core::imp::interface_hierarchy!(DataTemplate, windows_core::IUnknown, windows_core::IInspectable);
 windows_core::imp::required_hierarchy!(DataTemplate, FrameworkTemplate, DependencyObject);
@@ -2885,6 +2959,21 @@ impl<F: Fn(windows_core::Ref<windows_core::IInspectable>, windows_core::Ref<Drag
             windows_core::HRESULT(0)
         }
     }
+}
+#[repr(transparent)]
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
+pub struct ElementTheme(pub i32);
+impl ElementTheme {
+    pub const Default: Self = Self(0);
+    pub const Light: Self = Self(1);
+    pub const Dark: Self = Self(2);
+}
+impl windows_core::imp::TypeKind for ElementTheme {
+    type TypeKind = windows_core::imp::CopyType;
+}
+impl windows_core::RuntimeType for ElementTheme {
+    const SIGNATURE: windows_core::imp::ConstBuffer =
+        windows_core::imp::ConstBuffer::from_slice(b"enum(Windows.UI.Xaml.ElementTheme;i4)");
 }
 #[repr(transparent)]
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -6214,6 +6303,30 @@ impl windows_core::RuntimeType for IBindingBase {
 pub struct IBindingBase_Vtbl {
     pub base__: windows_core::IInspectable_Vtbl,
 }
+windows_core::imp::define_interface!(
+    IBindingExpression,
+    IBindingExpression_Vtbl,
+    0x516a19a5_c2fd_4a9e_9fd3_9aa42f995a3c
+);
+impl windows_core::RuntimeType for IBindingExpression {
+    const SIGNATURE: windows_core::imp::ConstBuffer = windows_core::imp::ConstBuffer::for_interface::<Self>();
+}
+#[repr(C)]
+pub struct IBindingExpression_Vtbl {
+    pub base__: windows_core::IInspectable_Vtbl,
+}
+windows_core::imp::define_interface!(
+    IBindingExpressionBase,
+    IBindingExpressionBase_Vtbl,
+    0xfded3154_e954_4f67_8fb6_6ed79b3a1cb3
+);
+impl windows_core::RuntimeType for IBindingExpressionBase {
+    const SIGNATURE: windows_core::imp::ConstBuffer = windows_core::imp::ConstBuffer::for_interface::<Self>();
+}
+#[repr(C)]
+pub struct IBindingExpressionBase_Vtbl {
+    pub base__: windows_core::IInspectable_Vtbl,
+}
 windows_core::imp::define_interface!(IBitmapImage, IBitmapImage_Vtbl, 0x31af3271_e3b4_442d_a341_4c0226b2725b);
 impl windows_core::RuntimeType for IBitmapImage {
     const SIGNATURE: windows_core::imp::ConstBuffer = windows_core::imp::ConstBuffer::for_interface::<Self>();
@@ -8619,6 +8732,18 @@ pub struct ICredentialFactory_Vtbl {
         *mut *mut core::ffi::c_void,
     ) -> windows_core::HRESULT,
 }
+windows_core::imp::define_interface!(
+    IDataContextChangedEventArgs,
+    IDataContextChangedEventArgs_Vtbl,
+    0x7da68e21_0b8f_4f9f_a143_f8e7780136a2
+);
+impl windows_core::RuntimeType for IDataContextChangedEventArgs {
+    const SIGNATURE: windows_core::imp::ConstBuffer = windows_core::imp::ConstBuffer::for_interface::<Self>();
+}
+#[repr(C)]
+pub struct IDataContextChangedEventArgs_Vtbl {
+    pub base__: windows_core::IInspectable_Vtbl,
+}
 windows_core::imp::define_interface!(IDataTemplate, IDataTemplate_Vtbl, 0x9910aec7_8ab5_4118_9bc6_09f45a35073d);
 impl windows_core::RuntimeType for IDataTemplate {
     const SIGNATURE: windows_core::imp::ConstBuffer = windows_core::imp::ConstBuffer::for_interface::<Self>();
@@ -9990,6 +10115,84 @@ pub struct IFrameworkElement_Vtbl {
         *mut core::ffi::c_void,
         *mut core::ffi::c_void,
         *mut core::ffi::c_void,
+    ) -> windows_core::HRESULT,
+}
+windows_core::imp::define_interface!(
+    IFrameworkElement2,
+    IFrameworkElement2_Vtbl,
+    0xf19104be_422a_4904_a52f_ee72010429e5
+);
+impl windows_core::RuntimeType for IFrameworkElement2 {
+    const SIGNATURE: windows_core::imp::ConstBuffer = windows_core::imp::ConstBuffer::for_interface::<Self>();
+}
+impl IFrameworkElement2 {
+    pub fn RequestedTheme(&self) -> windows_core::Result<ElementTheme> {
+        unsafe {
+            let mut result__ = core::mem::zeroed();
+            (windows_core::Interface::vtable(self).RequestedTheme)(windows_core::Interface::as_raw(self), &mut result__)
+                .map(|| result__)
+        }
+    }
+    pub fn SetRequestedTheme(&self, value: ElementTheme) -> windows_core::Result<()> {
+        unsafe {
+            (windows_core::Interface::vtable(self).SetRequestedTheme)(windows_core::Interface::as_raw(self), value).ok()
+        }
+    }
+    pub fn DataContextChanged<F>(&self, handler: F) -> windows_core::Result<windows_core::EventRevoker>
+    where
+        F: Fn(windows_core::Ref<FrameworkElement>, windows_core::Ref<DataContextChangedEventArgs>) + 'static,
+    {
+        let handler: TypedEventHandler<FrameworkElement, DataContextChangedEventArgs> = {
+            let com = windows_core::imp::DelegateBox::<
+                TypedEventHandler<FrameworkElement, DataContextChangedEventArgs>,
+                F,
+            >::new(
+                &TypedEventHandlerBox::<FrameworkElement, DataContextChangedEventArgs, F>::VTABLE, handler
+            );
+            unsafe { core::mem::transmute(windows_core::imp::box_new(com)) }
+        };
+        unsafe {
+            let mut result__ = core::mem::zeroed();
+            let token__ = (windows_core::Interface::vtable(self).DataContextChanged)(
+                windows_core::Interface::as_raw(self),
+                windows_core::Interface::as_raw(&handler),
+                &mut result__,
+            )
+            .map(|| result__)?;
+            Ok(windows_core::EventRevoker::new(
+                self.clone(),
+                token__,
+                windows_core::Interface::vtable(self).RemoveDataContextChanged,
+            ))
+        }
+    }
+    pub fn GetBindingExpression<P0>(&self, dp: P0) -> windows_core::Result<BindingExpression>
+    where
+        P0: windows_core::Param<DependencyProperty>,
+    {
+        unsafe {
+            let mut result__ = core::mem::zeroed();
+            (windows_core::Interface::vtable(self).GetBindingExpression)(
+                windows_core::Interface::as_raw(self),
+                dp.param().abi(),
+                &mut result__,
+            )
+            .and_then(|| windows_core::imp::Type::from_abi(result__))
+        }
+    }
+}
+#[repr(C)]
+pub struct IFrameworkElement2_Vtbl {
+    pub base__: windows_core::IInspectable_Vtbl,
+    pub RequestedTheme: unsafe extern "system" fn(*mut core::ffi::c_void, *mut ElementTheme) -> windows_core::HRESULT,
+    pub SetRequestedTheme: unsafe extern "system" fn(*mut core::ffi::c_void, ElementTheme) -> windows_core::HRESULT,
+    pub DataContextChanged:
+        unsafe extern "system" fn(*mut core::ffi::c_void, *mut core::ffi::c_void, *mut i64) -> windows_core::HRESULT,
+    pub RemoveDataContextChanged: unsafe extern "system" fn(*mut core::ffi::c_void, i64) -> windows_core::HRESULT,
+    pub GetBindingExpression: unsafe extern "system" fn(
+        *mut core::ffi::c_void,
+        *mut core::ffi::c_void,
+        *mut *mut core::ffi::c_void,
     ) -> windows_core::HRESULT,
 }
 windows_core::imp::define_interface!(

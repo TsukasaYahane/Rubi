@@ -10,6 +10,9 @@ use rubi_model::{LiveArea, LiveCategory, LiveEvent, LivePlay, LiveRoom};
 use crate::error::{CoreError, Result};
 use crate::ports::RuleSource;
 
+/// Rooms on air looked up per page of the followed list.
+const LOOKED_UP: usize = 12;
+
 /// What a room shows of each kind of extra; `true` holds it back.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct LiveFilter {
@@ -72,6 +75,23 @@ impl Live {
     /// One page of a parent area's rooms, busiest first; also whether more follow.
     pub async fn area_rooms(&self, parent: u32, page: u32) -> Result<(Vec<LiveRoom>, bool)> {
         Ok(self.api.area_rooms(parent, 0, page.max(1)).await?)
+    }
+
+    /// One page of followed UPs' rooms, also whether more follow. Login required. The list has no
+    /// covers or viewers, so the rooms on air are looked up one by one; one that fails keeps what
+    /// the list said.
+    pub async fn followed(&self, page: u32) -> Result<(Vec<LiveRoom>, bool)> {
+        let (mut rooms, more) = self.api.followed_rooms(page.max(1)).await?;
+        for room in rooms.iter_mut().filter(|r| r.live).take(LOOKED_UP) {
+            if let Ok(found) = self.api.room(room.room_id).await {
+                room.online = found.online;
+                room.area = found.area;
+                if !found.cover.is_empty() {
+                    room.cover = found.cover;
+                }
+            }
+        }
+        Ok((rooms, more))
     }
 
     pub async fn room(&self, room_id: u64) -> Result<LiveRoom> {

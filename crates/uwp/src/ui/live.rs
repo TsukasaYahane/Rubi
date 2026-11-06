@@ -21,6 +21,9 @@ const COBALT: Color = Color { a: 255, r: 0, g: 0x50, b: 0xEF };
 const DIM: Color = Color { a: 255, r: 0x76, g: 0x76, b: 0x76 };
 const CLEAR: Color = Color { a: 0, r: 0, g: 0, b: 0 };
 const WHITE: Color = Color { a: 255, r: 255, g: 255, b: 255 };
+const TABS: usize = 3;
+const FOLLOWED_TAB: usize = 1;
+const SCHEDULE_TAB: usize = 2;
 /// Top areas shown beside 推荐.
 const AREAS_SHOWN: usize = 12;
 
@@ -43,7 +46,8 @@ const LAYOUT: &str = r##"
           <Setter Property="FontWeight" Value="Light" />
         </Style>
       </StackPanel.Resources>
-      <Button x:Name="Tab0" Content="直播" /><Button x:Name="Tab1" Content="赛事" />
+      <Button x:Name="Tab0" Content="直播" /><Button x:Name="Tab1" Content="关注" />
+      <Button x:Name="Tab2" Content="赛事" />
     </StackPanel>
     <TextBlock x:Name="Status" Grid.Column="1" FontSize="13" VerticalAlignment="Center" TextTrimming="CharacterEllipsis"
                Foreground="{ThemeResource SystemControlForegroundBaseMediumBrush}" />
@@ -91,6 +95,7 @@ pub fn mark_chip(row: &IFrameworkElement, count: usize, on: usize) -> Result<()>
 pub struct LivePage {
     root: IFrameworkElement,
     rooms: Rc<CardGrid>,
+    followed: Rc<CardGrid>,
     schedule: Rc<Schedule>,
     tab: Cell<usize>,
     areas: RefCell<Vec<LiveArea>>,
@@ -106,19 +111,26 @@ impl LivePage {
                 page.show_status();
             }
         })?;
+        let followed = CardGrid::new(|| {
+            if let Some(page) = held() {
+                page.show_status();
+            }
+        })?;
         let schedule = Schedule::new()?;
         let lists = named::<IPanel>(&root, "Lists")?.Children()?.cast::<IVector<UIElement>>()?;
         lists.Append(&rooms.element().cast::<UIElement>()?)?;
+        lists.Append(&followed.element().cast::<UIElement>()?)?;
         lists.Append(&schedule.root().cast::<UIElement>()?)?;
         let page = Rc::new(Self {
             root,
             rooms,
+            followed,
             schedule,
             tab: Cell::new(0),
             areas: RefCell::default(),
             area_chips: RefCell::default(),
         });
-        for tab in 0..2 {
+        for tab in 0..TABS {
             let weak = Rc::downgrade(&page);
             on_click(&page.root, &format!("Tab{tab}"), move || {
                 if let Some(page) = weak.upgrade() {
@@ -138,8 +150,9 @@ impl LivePage {
         let tab = self.tab.get();
         let shown = |on| if on { Visibility::Visible } else { Visibility::Collapsed };
         self.rooms.element().cast::<IUIElement>()?.SetVisibility(shown(tab == 0))?;
-        self.schedule.root().cast::<IUIElement>()?.SetVisibility(shown(tab == 1))?;
-        for at in 0..2 {
+        self.followed.element().cast::<IUIElement>()?.SetVisibility(shown(tab == FOLLOWED_TAB))?;
+        self.schedule.root().cast::<IUIElement>()?.SetVisibility(shown(tab == SCHEDULE_TAB))?;
+        for at in 0..TABS {
             let color = if at == tab { COBALT } else { DIM };
             named::<IControl>(&self.root, &format!("Tab{at}"))?
                 .SetForeground(&SolidColorBrush::CreateInstanceWithColor(color)?)?;
@@ -153,6 +166,10 @@ impl LivePage {
             if let Some(row) = self.area_chips.borrow().as_ref() {
                 chips_host.SetContent(&row.cast::<UIElement>()?)?;
             }
+        } else if tab == FOLLOWED_TAB {
+            if self.followed.source().is_none() && signed_in() {
+                self.followed.open(Source::FollowedRooms)?;
+            }
         } else {
             self.schedule.start()?;
             if let Some(row) = self.schedule.chips() {
@@ -164,11 +181,13 @@ impl LivePage {
     }
 
     fn show_status(&self) {
-        if self.tab.get() == 0 {
-            let _ = set_text(&self.root, "Status", &self.rooms.said());
-        } else {
-            let _ = set_text(&self.root, "Status", &self.schedule.said());
-        }
+        let said = match self.tab.get() {
+            0 => self.rooms.said(),
+            FOLLOWED_TAB if !signed_in() => "登录后查看关注的直播".to_owned(),
+            FOLLOWED_TAB => self.followed.said(),
+            _ => self.schedule.said(),
+        };
+        let _ = set_text(&self.root, "Status", &said);
     }
 
     fn load_areas(self: &Rc<Self>) {
@@ -235,6 +254,17 @@ pub fn held() -> Option<Rc<LivePage>> {
     PAGE.with_borrow(Clone::clone)
 }
 
+fn signed_in() -> bool {
+    shell().and_then(|s| s.backend.get().cloned()).is_some_and(|b| b.services.account.is_logged_in())
+}
+
+/// Forgets whose rooms were listed: the account changed.
+pub fn forget() {
+    if let Some(page) = held() {
+        let _ = page.followed.forget();
+    }
+}
+
 /// Shows the 直播 tab.
 pub fn show() -> Result<()> {
     let Some(shell) = shell() else { return Ok(()) };
@@ -256,5 +286,7 @@ pub fn show() -> Result<()> {
 pub fn resized() {
     if let Some(page) = held() {
         page.rooms.resized();
+        page.followed.resized();
+        page.schedule.resized();
     }
 }

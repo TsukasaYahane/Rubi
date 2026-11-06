@@ -17,8 +17,8 @@ use crate::ui::rows::{Covers, add_rows, on_row, on_row_click};
 use crate::ui::shell::shell;
 use crate::ui::{feed, keep, live_room, load, post};
 use crate::xaml::{
-    IFrameworkElement, IImage, IItemsControl, IItemsControl2, IItemsWrapGrid, ITextBlock, IUIElement,
-    SizeChangedEventArgs, UIElement, Visibility,
+    Color, IBorder, IFrameworkElement, IImage, IItemsControl, IItemsControl2, IItemsWrapGrid, ITextBlock, IUIElement,
+    SizeChangedEventArgs, SolidColorBrush, UIElement, Visibility,
 };
 
 /// Cards asked for at a time.
@@ -27,6 +27,10 @@ const PAGE: usize = 30;
 const PER_SOURCE: usize = 20;
 /// Rows from the end at which the next page loads.
 const LOAD_AHEAD: usize = 8;
+const COBALT: Color = Color { a: 255, r: 0, g: 0x50, b: 0xEF };
+const GREY: Color = Color { a: 255, r: 0x76, g: 0x76, b: 0x76 };
+/// How much of a cover shows while the room is off air.
+const OFF_AIR_OPACITY: f64 = 0.45;
 /// Width covers are decoded at, in pixels.
 const COVER_DECODE_WIDTH: i32 = 480;
 
@@ -78,7 +82,8 @@ pub struct Tile {
     title: String,
     line: String,
     cover: String,
-    live: bool,
+    /// A room, and whether it is on air.
+    live: Option<bool>,
     target: Target,
 }
 
@@ -89,7 +94,7 @@ impl Tile {
             line: format!("{} · {} 播放", card.owner.name, card.stats.view),
             title: card.title,
             cover: card.cover,
-            live: false,
+            live: None,
             target: Target::Video { bvid: card.bvid, owner: card.owner.name },
         }
     }
@@ -100,7 +105,7 @@ impl Tile {
             line: room_line(&room),
             title: room.title,
             cover: room.cover,
-            live: true,
+            live: Some(room.live),
             target: Target::Room { id: room.room_id, owner: room.uname },
         }
     }
@@ -116,6 +121,8 @@ pub enum Source {
     Zone(u32),
     /// Live rooms: the recommended ones, or a parent area's.
     Rooms(Option<u32>),
+    /// Rooms of followed UPs, those on air first.
+    FollowedRooms,
 }
 
 impl Source {
@@ -146,6 +153,11 @@ impl Source {
             Self::Rooms(None) => {
                 let rooms = services.live.recommended().await?;
                 Ok((rooms.into_iter().map(Tile::room).collect(), false))
+            }
+            Self::FollowedRooms => {
+                let (mut rooms, more) = services.live.followed(page).await?;
+                rooms.sort_by_key(|r| !r.live);
+                Ok((rooms.into_iter().map(Tile::room).collect(), more))
             }
             Self::Rooms(Some(area)) => {
                 let (rooms, more) = services.live.area_rooms(area, page).await?;
@@ -346,12 +358,25 @@ impl CardGrid {
         let Some(card) = cards.get(at) else { return Ok(()) };
 
         let cover = parts.GetAt(0)?;
-        cover.cast::<IImage>()?.SetSource(&self.covers.get(&card.cover, COVER_DECODE_WIDTH)?)?;
+        // A card without a picture still has its words.
+        if let Ok(picture) = self.covers.get(&card.cover, COVER_DECODE_WIDTH) {
+            cover.cast::<IImage>()?.SetSource(&picture)?;
+        }
 
         parts.GetAt(1)?.cast::<ITextBlock>()?.SetText(&card.title)?;
         parts.GetAt(2)?.cast::<ITextBlock>()?.SetText(&card.line)?;
-        let badge = if card.live { Visibility::Visible } else { Visibility::Collapsed };
-        parts.GetAt(3)?.cast::<IUIElement>()?.SetVisibility(badge)?;
+        let badge = parts.GetAt(3)?;
+        badge.cast::<IUIElement>()?.SetVisibility(if card.live.is_some() {
+            Visibility::Visible
+        } else {
+            Visibility::Collapsed
+        })?;
+        let on_air = card.live.unwrap_or(true);
+        let tag = badge.cast::<IBorder>()?;
+        let color = if on_air { COBALT } else { GREY };
+        tag.SetBackground(&SolidColorBrush::CreateInstanceWithColor(color)?)?;
+        tag.Child()?.cast::<ITextBlock>()?.SetText(if on_air { "直播中" } else { "未开播" })?;
+        cover.cast::<IUIElement>()?.SetOpacity(if on_air { 1.0 } else { OFF_AIR_OPACITY })?;
 
         let near_end = at + LOAD_AHEAD >= cards.len();
         drop(cards);

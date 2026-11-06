@@ -217,3 +217,5 @@ Windows.System.Launcher
 Windows.System.ILauncherStatics
 Windows.UI.Xaml.Controls.IBorder
 Windows.UI.Xaml.Controls.Border
+Windows.UI.Xaml.IFrameworkElement2
+Windows.UI.Xaml.ElementTheme
