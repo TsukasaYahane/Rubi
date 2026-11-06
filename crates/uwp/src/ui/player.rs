@@ -23,7 +23,7 @@ use crate::ui::player_side::Side;
 use crate::ui::shell::shell;
 use crate::ui::splitter;
 use crate::ui::watch;
-use crate::ui::{load, named, on_click, post, set_text, soon};
+use crate::ui::{load, named, on_click, on_enter, post, set_text, soon};
 use crate::xaml::{
     AdaptiveMediaSource, DataWriter, FocusManager, FocusState, FrameworkElement, Grid, GridLength, GridUnitType,
     HorizontalAlignment, IButtonBase, IColumnDefinition, IContentControl, IControl, IDataWriter, IFontIcon,
@@ -561,6 +561,7 @@ pub fn open(feed: bool, bvid: &str, title: &str, uploader: &str) -> Result<()> {
     on_click(&root, "ActDanmaku", toggle_danmaku)?;
     on_click(&root, "Full", toggle_full)?;
     on_click(&root, "SendButton", send_danmaku)?;
+    on_enter(&root, "SendText", send_danmaku)?;
     let pending = Rc::new(Cell::new(false));
     let revoker = root.SizeChanged(move |sender: Ref<windows_core::IInspectable>, _: Ref<SizeChangedEventArgs>| {
         // From the sender: a handler holding its own source would keep the page for good.

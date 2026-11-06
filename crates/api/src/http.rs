@@ -173,6 +173,18 @@ impl HttpClient {
         unwrap_envelope(json_body(resp).await?)
     }
 
+    /// POST form like `post_form`, from the page at `referer`, for endpoints that look at where a
+    /// request comes from. Gives the whole answer: some say no with a success code.
+    pub async fn post_form_from(&self, url: &str, referer: &str, mut form: Params) -> Result<Value> {
+        let csrf = self.session().csrf().map(str::to_owned).ok_or(ApiError::NotLoggedIn)?;
+        form.push(("csrf".into(), csrf));
+        self.limiter.acquire().await;
+        let resp = self.decorate(self.client.post(url)).header(REFERER, referer).form(&form).send().await?;
+        let body = json_body(resp).await?;
+        unwrap_envelope(body.clone())?;
+        Ok(body)
+    }
+
     /// POST form like `post_form`, with WBI-signed `query` parameters on the URL (as the web
     /// private-message sender does).
     pub async fn post_form_signed(&self, url: &str, query: Params, mut form: Params) -> Result<Value> {

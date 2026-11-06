@@ -18,18 +18,21 @@ use crate::state::live::CHAT_MOST;
 use crate::ui::danmaku::{Host, Overlay};
 use crate::ui::rows::{add_rows, on_row};
 use crate::ui::shell::shell;
-use crate::ui::{keep, load, media, named, on_click, post, set_text, soon};
+use crate::ui::{keep, load, media, named, on_click, on_enter, post, set_text, soon};
 use crate::xaml::{
     Color, ElementTheme, FrameworkElement, Grid, GridLength, GridUnitType, IColumnDefinition, IContentControl,
     IControl, IFontIcon, IFrameworkElement, IFrameworkElement2, IItemsControl, IMediaPlayer, IMediaPlayerElement,
-    IPanel, IRowDefinition, ITextBlock, ITextBox, IUIElement, MediaPlayer, MediaSource, SizeChangedEventArgs,
-    SolidColorBrush, UIElement, VirtualKey, Visibility,
+    IPanel, IRowDefinition, ITextBlock, ITextBox, ITextBox2, IUIElement, MediaPlayer, MediaSource,
+    SizeChangedEventArgs, SolidColorBrush, UIElement, VirtualKey, Visibility,
 };
 
 /// Width of the danmaku list beside the picture.
 const CHAT_WIDTH: f64 = 320.0;
 /// How far ahead of now a new danmaku starts, so it does not appear mid-way.
 const DANMAKU_LEAD_MS: u32 = 200;
+/// The icons of what is shown over the picture.
+const OFF_AIR_GLYPH: &str = "\u{E93E}";
+const FAILED_GLYPH: &str = "\u{E7BA}";
 
 /// Bumped when a room opens or is left: answers for another are dropped.
 static RUN: AtomicU64 = AtomicU64::new(0);
@@ -50,6 +53,12 @@ const LAYOUT: &str = r##"
     <Grid x:Name="Stage" Background="Black" RequestedTheme="Dark">
       <MediaPlayerElement x:Name="Video" AreTransportControlsEnabled="False" Stretch="Uniform" />
       <Canvas x:Name="Danmaku" IsHitTestVisible="False" />
+      <StackPanel x:Name="Notice" Visibility="Collapsed" HorizontalAlignment="Center" VerticalAlignment="Center"
+                  IsHitTestVisible="False">
+        <FontIcon x:Name="NoticeIcon" FontSize="44" Foreground="#CCFFFFFF" HorizontalAlignment="Center" />
+        <TextBlock x:Name="NoticeText" FontSize="15" Foreground="White" Margin="24,12,24,0" TextWrapping="Wrap"
+                   TextAlignment="Center" />
+      </StackPanel>
       <Grid VerticalAlignment="Top">
         <Grid.ColumnDefinitions>
           <ColumnDefinition Width="Auto" /><ColumnDefinition Width="*" /><ColumnDefinition Width="Auto" />
@@ -190,6 +199,7 @@ pub fn open(room_id: u64, title: &str, uploader: &str) -> Result<()> {
     on_click(&root, "Back", go_back)?;
     on_click(&root, "Full", toggle_full)?;
     on_click(&root, "SendButton", send)?;
+    on_enter(&root, "SendText", send)?;
     let chat = named::<IFrameworkElement>(&root, "Chat")?;
     on_row(&chat, |at, parts| {
         let Some(room) = room() else { return Ok(()) };
@@ -207,26 +217,26 @@ pub fn open(room_id: u64, title: &str, uploader: &str) -> Result<()> {
 
     let opening = run();
     let (dispatcher, core) = (shell.dispatcher.clone(), backend.clone());
-    let uploader = uploader.to_owned();
+    set_text(&root, "Meta", uploader)?;
     backend.spawn(async move {
         let started = match core.services.live.play(room_id, None).await {
-            Ok((play, _)) if !play.live => Err("主播现在没有开播".to_owned()),
+            Ok((play, _)) if !play.live => Err(Stop::OffAir),
             Ok((play, headers)) => {
                 let tries = play.streams.iter().filter(|s| s.protocol == LiveProtocol::Hls);
-                let mut made = Err("这个直播间没有系统能播放的流".to_owned());
+                let mut made = Err(Stop::Failed("这个直播间没有系统能播放的流".to_owned()));
                 for stream in tries {
-                    made = media::stream_source(&stream.url, &headers).map_err(|e| e.message());
+                    made = media::stream_source(&stream.url, &headers).map_err(|e| Stop::Failed(e.message()));
                     if made.is_ok() {
                         break;
                     }
                 }
                 made
             }
-            Err(e) => Err(e.to_string()),
+            Err(e) => Err(Stop::Failed(e.to_string())),
         };
         post(&dispatcher, move || {
             if opening == run() {
-                let _ = playing(started, &uploader);
+                let _ = playing(started);
             }
         });
     });
@@ -234,11 +244,25 @@ pub fn open(room_id: u64, title: &str, uploader: &str) -> Result<()> {
     Ok(())
 }
 
-fn playing(source: std::result::Result<MediaSource, String>, uploader: &str) -> Result<()> {
+/// Why nothing plays.
+enum Stop {
+    OffAir,
+    Failed(String),
+}
+
+/// Says over the picture why nothing plays.
+fn notice(root: &IFrameworkElement, glyph: &str, text: &str) -> Result<()> {
+    named::<IFontIcon>(root, "NoticeIcon")?.SetGlyph(glyph)?;
+    set_text(root, "NoticeText", text)?;
+    named::<IUIElement>(root, "Notice")?.SetVisibility(Visibility::Visible)
+}
+
+fn playing(source: std::result::Result<MediaSource, Stop>) -> Result<()> {
     let Some(room) = room() else { return Ok(()) };
     let source = match source {
         Ok(source) => source,
-        Err(problem) => return set_text(&room.root, "Meta", &format!("{uploader} · 无法播放：{problem}")),
+        Err(Stop::OffAir) => return notice(&room.root, OFF_AIR_GLYPH, "主播现在没有开播"),
+        Err(Stop::Failed(problem)) => return notice(&room.root, FAILED_GLYPH, &format!("无法播放：{problem}")),
     };
     let player = media::play(&named::<IMediaPlayerElement>(&room.root, "Video")?, &source)?;
     player.cast::<IMediaPlayer>()?.Play()?;
@@ -251,7 +275,7 @@ fn playing(source: std::result::Result<MediaSource, String>, uploader: &str) -> 
         Host { run, find: overlay_of },
     )?;
     *room.overlay.borrow_mut() = Some(overlay);
-    set_text(&room.root, "Meta", uploader)
+    Ok(())
 }
 
 /// Reads the room's messages until it is left.
@@ -311,7 +335,7 @@ fn heard(events: Vec<LiveEvent>) -> Result<()> {
             LiveEvent::Online { count: viewers } => {
                 set_text(&room.root, "Online", &format!("{} 人气", count(viewers)))?
             }
-            LiveEvent::Status { live: false } => set_text(&room.root, "Meta", "直播已结束")?,
+            LiveEvent::Status { live: false } => notice(&room.root, OFF_AIR_GLYPH, "直播已结束")?,
             _ => {}
         }
     }
@@ -446,15 +470,18 @@ fn send() {
     let _ = field.SetText("");
     let (dispatcher, core, room_id, opening) = (shell.dispatcher.clone(), backend.clone(), room.room_id, run());
     backend.spawn(async move {
-        if let Err(problem) = core.services.live.send(room_id, &text).await {
-            let text = format!("发送失败：{problem}");
-            post(&dispatcher, move || {
-                if opening == run()
-                    && let Some(room) = self::room()
-                {
-                    let _ = set_text(&room.root, "Meta", &text);
-                }
-            });
-        }
+        let said = match core.services.live.send(room_id, &text).await {
+            Ok(()) => "已发送".to_owned(),
+            Err(problem) => format!("发送失败：{problem}"),
+        };
+        post(&dispatcher, move || {
+            if opening == run()
+                && let Some(room) = self::room()
+                && let Ok(field) = named::<ITextBox2>(&room.root, "SendText")
+            {
+                // Where the eye is after sending.
+                let _ = field.SetPlaceholderText(&said);
+            }
+        });
     });
 }

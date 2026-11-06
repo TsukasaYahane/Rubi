@@ -30,7 +30,7 @@ use windows_core::{EventRevoker, IInspectable, Interface, Ref, Result};
 
 use crate::xaml::{
     CoreDispatcher, CoreDispatcherPriority, DispatchedHandler, IButtonBase, ICoreDispatcher, IFrameworkElement,
-    ITextBlock, RoutedEventArgs, XamlReader,
+    IKeyRoutedEventArgs, ITextBlock, IUIElement, KeyRoutedEventArgs, RoutedEventArgs, VirtualKey, XamlReader,
 };
 
 /// Runs `job` on the UI thread.
@@ -76,6 +76,19 @@ pub fn named<T: Interface>(root: &IFrameworkElement, name: &str) -> Result<T> {
 
 pub fn set_text(root: &IFrameworkElement, name: &str, text: &str) -> Result<()> {
     named::<ITextBlock>(root, name)?.SetText(text)
+}
+
+/// Calls `action` when Enter goes down in the box named `name`.
+pub fn on_enter(root: &IFrameworkElement, name: &str, action: impl Fn() + 'static) -> Result<()> {
+    keep(named::<IUIElement>(root, name)?.KeyDown(move |_: Ref<IInspectable>, args: Ref<KeyRoutedEventArgs>| {
+        if let Ok(args) = args.ok().and_then(|a| a.cast::<IKeyRoutedEventArgs>())
+            && args.Key().is_ok_and(|k| k == VirtualKey::Enter)
+        {
+            let _ = args.SetHandled(true);
+            action();
+        }
+    })?);
+    Ok(())
 }
 
 /// Calls `action` when the button named `name` is clicked, for as long as the process runs:

@@ -141,16 +141,19 @@ impl LiveApi for WebLive {
 
     async fn send(&self, room_id: u64, text: &str) -> Result<()> {
         let csrf = self.http.session().csrf().map(str::to_owned).ok_or(ApiError::NotLoggedIn)?;
-        self.http
-            .post_form(
+        let body = self
+            .http
+            .post_form_from(
                 SEND,
+                &format!("{LIVE_REFERER}{room_id}"),
                 params![
-                    "bubble" => 0, "msg" => text, "color" => 0xFF_FFFF, "mode" => 1, "fontsize" => 25,
-                    "rnd" => now_secs(), "roomid" => room_id, "csrf_token" => csrf,
+                    "bubble" => 0, "msg" => text, "color" => 0xFF_FFFF, "mode" => 1, "room_type" => 0,
+                    "jumpfrom" => 0, "reply_mid" => 0, "reply_attr" => 0, "replay_dmid" => "", "statistics" => "{\"appId\":100,\"platform\":5}",
+                    "fontsize" => 25, "rnd" => now_secs(), "roomid" => room_id, "csrf_token" => csrf,
                 ],
             )
             .await?;
-        Ok(())
+        refusal_of(body["message"].as_str().unwrap_or_default()).map_or(Ok(()), |why| Err(ApiError::from_code(-1, why)))
     }
 
     fn identity(&self) -> (u64, String) {
@@ -160,6 +163,16 @@ impl LiveApi for WebLive {
 
     fn stream_headers(&self) -> Vec<(String, String)> {
         vec![("Referer".into(), LIVE_REFERER.into()), ("User-Agent".into(), UA.into())]
+    }
+}
+
+/// Why a room turned a danmaku down: it answers success, with a letter or a line in `message`.
+fn refusal_of(message: &str) -> Option<String> {
+    match message {
+        "" | "0" | "ok" => None,
+        "f" => Some("弹幕被系统屏蔽".into()),
+        "k" => Some("弹幕被房间屏蔽".into()),
+        other => Some(other.to_owned()),
     }
 }
 
@@ -403,6 +416,14 @@ mod tests {
         let a =
             areas_of(&json!([{"id": 2, "name": "网游", "list": [{"id": "86", "parent_id": "2", "name": "英雄联盟"}]}]));
         assert_eq!(a[0].children[0], LiveSubArea { id: 86, parent_id: 2, name: "英雄联盟".into() });
+    }
+
+    #[test]
+    fn a_danmaku_turned_down_says_why() {
+        assert_eq!(refusal_of(""), None);
+        assert_eq!(refusal_of("0"), None);
+        assert_eq!(refusal_of("f").as_deref(), Some("弹幕被系统屏蔽"));
+        assert_eq!(refusal_of("msg in 1s").as_deref(), Some("msg in 1s"));
     }
 
     /// 2026-11-06: `user/following` leaves cover, viewers and area empty.

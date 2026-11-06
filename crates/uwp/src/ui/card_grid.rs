@@ -18,7 +18,7 @@ use crate::ui::shell::shell;
 use crate::ui::{feed, keep, live_room, load, post};
 use crate::xaml::{
     Color, IBorder, IFrameworkElement, IImage, IItemsControl, IItemsControl2, IItemsWrapGrid, ITextBlock, IUIElement,
-    SizeChangedEventArgs, SolidColorBrush, UIElement, Visibility,
+    SizeChangedEventArgs, SolidColorBrush, Stretch, UIElement, Visibility,
 };
 
 /// Cards asked for at a time.
@@ -358,6 +358,9 @@ impl CardGrid {
         let Some(card) = cards.get(at) else { return Ok(()) };
 
         let cover = parts.GetAt(0)?;
+        // A room's cover comes in any shape, and shows whole.
+        let fit = if card.live.is_some() { Stretch::Uniform } else { Stretch::UniformToFill };
+        cover.cast::<IImage>()?.SetStretch(fit)?;
         // A card without a picture still has its words.
         if let Ok(picture) = self.covers.get(&card.cover, COVER_DECODE_WIDTH) {
             cover.cast::<IImage>()?.SetSource(&picture)?;

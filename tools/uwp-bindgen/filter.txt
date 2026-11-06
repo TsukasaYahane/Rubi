@@ -219,3 +219,5 @@ Windows.UI.Xaml.Controls.IBorder
 Windows.UI.Xaml.Controls.Border
 Windows.UI.Xaml.IFrameworkElement2
 Windows.UI.Xaml.ElementTheme
+Windows.UI.Xaml.Controls.ITextBox2
+Windows.UI.Xaml.Input.IKeyRoutedEventArgs
