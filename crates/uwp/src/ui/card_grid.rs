@@ -2,21 +2,23 @@
 //! on screen, which also stands in for data binding: nothing Rust defines has to be known to XAML.
 
 use std::cell::{Cell, RefCell};
-use std::collections::HashSet;
-use std::rc::Rc;
+use std::collections::{HashMap, HashSet};
+use std::rc::{Rc, Weak};
+use std::sync::atomic::{AtomicU64, Ordering};
 
-use rubi_model::VideoCard;
+use rubi_model::{LiveRoom, VideoCard};
 use windows_collections::IVector;
 use windows_core::{IInspectable, Interface, Ref, Result};
 
 use crate::backend::Backend;
 use crate::state::layout::grid_cell;
+use crate::state::live::room_line;
 use crate::ui::rows::{Covers, add_rows, on_row, on_row_click};
 use crate::ui::shell::shell;
-use crate::ui::{feed, keep, load, post};
+use crate::ui::{feed, keep, live_room, load, post};
 use crate::xaml::{
-    IFrameworkElement, IImage, IItemsControl, IItemsControl2, IItemsWrapGrid, ITextBlock, SizeChangedEventArgs,
-    UIElement,
+    IFrameworkElement, IImage, IItemsControl, IItemsControl2, IItemsWrapGrid, ITextBlock, IUIElement,
+    SizeChangedEventArgs, UIElement, Visibility,
 };
 
 /// Cards asked for at a time.
@@ -55,10 +57,54 @@ const GRID: &str = r##"<GridView xmlns="http://schemas.microsoft.com/winfx/2006/
                    Height="38" Margin="0,6,0,0" />
         <TextBlock Grid.Row="2" FontSize="12" MaxLines="1" TextTrimming="CharacterEllipsis" Height="18"
                    Margin="0,2,0,0" Foreground="{ThemeResource SystemControlForegroundBaseMediumBrush}" />
+        <Border Background="#0050EF" Padding="5,1" Margin="4" HorizontalAlignment="Left" VerticalAlignment="Top"
+                Visibility="Collapsed"><TextBlock Text="直播中" FontSize="11" Foreground="White" /></Border>
       </Grid>
     </DataTemplate>
   </GridView.ItemTemplate>
 </GridView>"##;
+
+/// What a card opens.
+#[derive(Debug, Clone, PartialEq, Eq)]
+enum Target {
+    Video { bvid: String, owner: String },
+    Room { id: u64, owner: String },
+}
+
+/// One card.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Tile {
+    key: String,
+    title: String,
+    line: String,
+    cover: String,
+    live: bool,
+    target: Target,
+}
+
+impl Tile {
+    fn video(card: VideoCard) -> Self {
+        Self {
+            key: card.bvid.clone(),
+            line: format!("{} · {} 播放", card.owner.name, card.stats.view),
+            title: card.title,
+            cover: card.cover,
+            live: false,
+            target: Target::Video { bvid: card.bvid, owner: card.owner.name },
+        }
+    }
+
+    fn room(room: LiveRoom) -> Self {
+        Self {
+            key: room.room_id.to_string(),
+            line: room_line(&room),
+            title: room.title,
+            cover: room.cover,
+            live: true,
+            target: Target::Room { id: room.room_id, owner: room.uname },
+        }
+    }
+}
 
 /// What a grid shows.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -68,12 +114,15 @@ pub enum Source {
     Ranking,
     /// A zone's feed, by its v2 main region.
     Zone(u32),
+    /// Live rooms: the recommended ones, or a parent area's.
+    Rooms(Option<u32>),
 }
 
 impl Source {
     /// Page `page` of the list, from 1, and whether another may follow.
-    async fn fetch(self, core: &Backend, page: u32) -> rubi_core::Result<(Vec<VideoCard>, bool)> {
+    async fn fetch(self, core: &Backend, page: u32) -> rubi_core::Result<(Vec<Tile>, bool)> {
         let services = &core.services;
+        let videos = |cards: Vec<VideoCard>| cards.into_iter().map(Tile::video).collect::<Vec<_>>();
         match self {
             Self::Recommended => {
                 if page == 1 {
@@ -81,18 +130,26 @@ impl Source {
                     services.home.refresh(PER_SOURCE).await?;
                 }
                 let cards = services.home.next_page(PAGE)?.into_iter().map(|r| r.card).collect();
-                Ok((cards, true))
+                Ok((videos(cards), true))
             }
             Self::Popular => {
                 let cards = services.discover.popular(page).await?;
                 let more = !cards.is_empty();
-                Ok((cards, more))
+                Ok((videos(cards), more))
             }
-            Self::Ranking => Ok((services.discover.ranking().await?, false)),
+            Self::Ranking => Ok((videos(services.discover.ranking().await?), false)),
             Self::Zone(region) => {
                 let cards = services.discover.zone_feed(region, page).await?;
                 let more = !cards.is_empty();
-                Ok((cards, more))
+                Ok((videos(cards), more))
+            }
+            Self::Rooms(None) => {
+                let rooms = services.live.recommended().await?;
+                Ok((rooms.into_iter().map(Tile::room).collect(), false))
+            }
+            Self::Rooms(Some(area)) => {
+                let (rooms, more) = services.live.area_rooms(area, page).await?;
+                Ok((rooms.into_iter().map(Tile::room).collect(), more))
             }
         }
     }
@@ -103,14 +160,21 @@ impl Source {
 }
 
 /// A page of cards and whether another may follow, or why there is none.
-pub type Answer = std::result::Result<(Vec<VideoCard>, bool), String>;
+type Answer = std::result::Result<(Vec<Tile>, bool), String>;
+
+static NEXT_ID: AtomicU64 = AtomicU64::new(1);
+
+thread_local! {
+    static GRIDS: RefCell<HashMap<u64, Weak<CardGrid>>> = RefCell::default();
+}
 
 pub struct CardGrid {
-    /// Which tab of the home page this is.
-    tab: usize,
+    id: u64,
+    /// Told when the grid has something new to say.
+    spoke: Box<dyn Fn()>,
     grid: IFrameworkElement,
     source: Cell<Option<Source>>,
-    cards: RefCell<Vec<VideoCard>>,
+    cards: RefCell<Vec<Tile>>,
     seen: RefCell<HashSet<String>>,
     page: Cell<u32>,
     ended: Cell<bool>,
@@ -127,10 +191,11 @@ pub struct CardGrid {
 }
 
 impl CardGrid {
-    pub fn new(tab: usize) -> Result<Rc<Self>> {
+    pub fn new(spoke: impl Fn() + 'static) -> Result<Rc<Self>> {
         let grid = load(GRID)?;
         let shown = Rc::new(Self {
-            tab,
+            id: NEXT_ID.fetch_add(1, Ordering::Relaxed),
+            spoke: Box::new(spoke),
             grid: grid.clone(),
             source: Cell::new(None),
             cards: RefCell::default(),
@@ -144,6 +209,7 @@ impl CardGrid {
             fitted: Cell::new((0.0, 0)),
             covers: Covers::default(),
         });
+        GRIDS.with_borrow_mut(|g| g.insert(shown.id, Rc::downgrade(&shown)));
         let filling = Rc::downgrade(&shown);
         on_row(&grid, move |at, parts| filling.upgrade().map_or(Ok(()), |s| s.fill_row(at, parts)))?;
         let clicking = Rc::downgrade(&shown);
@@ -200,9 +266,7 @@ impl CardGrid {
 
     pub fn say(&self, text: &str) {
         *self.said.borrow_mut() = text.to_owned();
-        if let Some(home) = shell().and_then(|s| s.home_page()) {
-            home.grid_spoke(self.tab);
-        }
+        (self.spoke)();
     }
 
     fn load_page(&self) {
@@ -212,19 +276,19 @@ impl CardGrid {
         if self.ended.get() || self.loading.replace(true) {
             return;
         }
-        let (tab, turn, page) = (self.tab, self.turn.get(), self.page.get());
+        let (id, turn, page) = (self.id, self.turn.get(), self.page.get());
         let (dispatcher, core) = (shell.dispatcher.clone(), backend.clone());
         backend.spawn(async move {
             let answer = source.fetch(&core, page).await.map_err(|e| e.to_string());
             post(&dispatcher, move || {
-                if let Some(home) = crate::ui::shell::shell().and_then(|s| s.home_page()) {
-                    home.grid_answered(tab, turn, answer);
+                if let Some(grid) = GRIDS.with_borrow(|g| g.get(&id).and_then(Weak::upgrade)) {
+                    let _ = grid.answered(turn, answer);
                 }
             });
         });
     }
 
-    pub fn answered(&self, turn: u64, answer: Answer) -> Result<()> {
+    fn answered(&self, turn: u64, answer: Answer) -> Result<()> {
         if turn != self.turn.get() {
             return Ok(());
         }
@@ -234,7 +298,7 @@ impl CardGrid {
                 self.ended.set(!more);
                 self.page.set(self.page.get() + 1);
                 let mut seen = self.seen.borrow_mut();
-                let fresh: Vec<VideoCard> = cards.into_iter().filter(|c| seen.insert(c.bvid.clone())).collect();
+                let fresh: Vec<Tile> = cards.into_iter().filter(|c| seen.insert(c.key.clone())).collect();
                 drop(seen);
                 let from = self.cards.borrow().len();
                 self.cards.borrow_mut().extend(fresh);
@@ -285,7 +349,9 @@ impl CardGrid {
         cover.cast::<IImage>()?.SetSource(&self.covers.get(&card.cover, COVER_DECODE_WIDTH)?)?;
 
         parts.GetAt(1)?.cast::<ITextBlock>()?.SetText(&card.title)?;
-        parts.GetAt(2)?.cast::<ITextBlock>()?.SetText(&format!("{} · {} 播放", card.owner.name, card.stats.view))?;
+        parts.GetAt(2)?.cast::<ITextBlock>()?.SetText(&card.line)?;
+        let badge = if card.live { Visibility::Visible } else { Visibility::Collapsed };
+        parts.GetAt(3)?.cast::<IUIElement>()?.SetVisibility(badge)?;
 
         let near_end = at + LOAD_AHEAD >= cards.len();
         drop(cards);
@@ -296,9 +362,10 @@ impl CardGrid {
     }
 
     fn open_row(&self, at: usize) -> Result<()> {
-        if let Some(card) = self.cards.borrow().get(at) {
-            feed::route(&card.bvid, &card.title, &card.owner.name)?;
+        let Some(card) = self.cards.borrow().get(at).cloned() else { return Ok(()) };
+        match card.target {
+            Target::Video { bvid, owner } => feed::route(&bvid, &card.title, &owner),
+            Target::Room { id, owner } => live_room::open(id, &card.title, &owner),
         }
-        Ok(())
     }
 }

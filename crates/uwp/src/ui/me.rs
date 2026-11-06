@@ -14,7 +14,7 @@ use crate::state::library::Shelf;
 use crate::state::settings::Category;
 use crate::state::{qr, settings::escape};
 use crate::ui::shell::shell;
-use crate::ui::{library, load, named, on_click, post, set_text, settings};
+use crate::ui::{follow, library, load, named, on_click, post, set_text, settings};
 use crate::xaml::{
     BitmapImage, Color, IContentControl, IControl, IFrameworkElement, IImage, IUIElement, SolidColorBrush, UIElement,
     Uri, Visibility,
@@ -28,13 +28,13 @@ const DIM: Color = Color { a: 255, r: 0x76, g: 0x76, b: 0x76 };
 static RUN: AtomicU64 = AtomicU64::new(0);
 
 const HEAD: &str = r##"
-<Grid Margin="16,14" ColumnSpacing="12">
+<Grid Margin="16,14">
   <Grid.ColumnDefinitions><ColumnDefinition Width="56" /><ColumnDefinition Width="*" /></Grid.ColumnDefinitions>
   <Grid Width="56" Height="56" Background="#0050EF">
     <TextBlock Text="R" FontSize="22" Foreground="White" HorizontalAlignment="Center" VerticalAlignment="Center" />
     <Image x:Name="Face" Stretch="UniformToFill" />
   </Grid>
-  <StackPanel Grid.Column="1" VerticalAlignment="Center">
+  <StackPanel Grid.Column="1" Margin="12,0,0,0" VerticalAlignment="Center">
     <TextBlock x:Name="Name" FontSize="18" FontWeight="Light" TextTrimming="CharacterEllipsis" />
     <TextBlock x:Name="Meta" FontSize="12" TextWrapping="Wrap"
                Foreground="{ThemeResource SystemControlForegroundBaseMediumBrush}" />
@@ -429,6 +429,7 @@ impl Update {
 }
 
 fn reload_home() {
+    follow::forget();
     if let Some(home) = shell().and_then(|s| s.home_page()) {
         home.reload();
     }

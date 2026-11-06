@@ -78,6 +78,13 @@ impl Following {
         Ok((self.kept(items)?, more))
     }
 
+    /// Every followed UP's posts, newest first, the rule table applied as in
+    /// [`up_posts`](Self::up_posts); also the next offset.
+    pub async fn posts(&self, offset: Option<&str>) -> Result<(Vec<Dynamic>, Option<String>)> {
+        let (items, next) = self.dynamics.followed_posts(offset).await?;
+        Ok((self.kept(items)?, next))
+    }
+
     pub async fn up_posts(&self, mid: u64, offset: Option<&str>) -> Result<(Vec<Dynamic>, Option<String>)> {
         let (items, next) = self.dynamics.up_dynamics(mid, offset).await?;
         Ok((self.kept(items)?, next))

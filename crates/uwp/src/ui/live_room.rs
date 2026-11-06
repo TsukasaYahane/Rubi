@@ -1,0 +1,433 @@
+//! A 直播 room: the picture with danmaku over it and beside it. Gift banners, popups and effects
+//! stay out, as the core's filter holds them back by default.
+
+use std::cell::{Cell, RefCell};
+use std::rc::Rc;
+use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::{Arc, Mutex};
+use std::time::Instant;
+
+use rubi_core::{LiveChannel, LiveFilter};
+use rubi_model::{Danmaku, LiveEvent, LiveProtocol};
+use windows_collections::IVector;
+use windows_core::{Interface, Ref, Result};
+
+use crate::state::layout::WindowClass;
+use crate::state::library::count;
+use crate::state::live::CHAT_MOST;
+use crate::ui::danmaku::{Host, Overlay};
+use crate::ui::rows::{add_rows, on_row};
+use crate::ui::shell::shell;
+use crate::ui::{keep, load, media, named, on_click, post, set_text, soon};
+use crate::xaml::{
+    FrameworkElement, Grid, GridLength, GridUnitType, IColumnDefinition, IControl, IFontIcon, IFrameworkElement,
+    IItemsControl, IMediaPlayer, IMediaPlayerElement, IRowDefinition, ITextBlock, ITextBox, IUIElement, MediaPlayer,
+    MediaSource, SizeChangedEventArgs, VirtualKey, Visibility,
+};
+
+/// Width of the danmaku list beside the picture.
+const CHAT_WIDTH: f64 = 320.0;
+/// How far ahead of now a new danmaku starts, so it does not appear mid-way.
+const DANMAKU_LEAD_MS: u32 = 200;
+
+/// Bumped when a room opens or is left: answers for another are dropped.
+static RUN: AtomicU64 = AtomicU64::new(0);
+
+const LAYOUT: &str = r##"
+<Grid xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+      xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml">
+  <Grid.ColumnDefinitions>
+    <ColumnDefinition Width="*" /><ColumnDefinition x:Name="ChatColumn" Width="320" />
+  </Grid.ColumnDefinitions>
+  <Grid.RowDefinitions>
+    <RowDefinition x:Name="MainRow" Height="*" /><RowDefinition x:Name="ChatRow" Height="0" />
+  </Grid.RowDefinitions>
+  <Grid>
+    <Grid.RowDefinitions>
+      <RowDefinition x:Name="VideoRow" Height="*" /><RowDefinition Height="Auto" /><RowDefinition Height="Auto" />
+    </Grid.RowDefinitions>
+    <Grid x:Name="Stage" Background="Black" RequestedTheme="Dark">
+      <MediaPlayerElement x:Name="Video" AreTransportControlsEnabled="False" Stretch="Uniform" />
+      <Canvas x:Name="Danmaku" IsHitTestVisible="False" />
+      <Grid VerticalAlignment="Top">
+        <Grid.ColumnDefinitions>
+          <ColumnDefinition Width="Auto" /><ColumnDefinition Width="*" /><ColumnDefinition Width="Auto" />
+        </Grid.ColumnDefinitions>
+        <Button x:Name="Back" Background="Transparent" BorderThickness="0" Padding="12,8" Foreground="White">
+          <FontIcon Glyph="&#xE72B;" FontSize="16" />
+        </Button>
+        <TextBlock x:Name="Online" Grid.Column="1" HorizontalAlignment="Right" VerticalAlignment="Center"
+                   FontSize="12" Foreground="White" />
+        <Button x:Name="Full" Grid.Column="2" Margin="8" Background="#59000000" Foreground="White"
+                BorderThickness="0" Padding="10,6">
+          <FontIcon x:Name="FullIcon" Glyph="&#xE740;" FontSize="16" />
+        </Button>
+      </Grid>
+    </Grid>
+    <Grid x:Name="SendBar" Grid.Row="1" Background="#111111" RequestedTheme="Dark" Padding="12,6">
+      <Grid.ColumnDefinitions><ColumnDefinition Width="*" /><ColumnDefinition Width="Auto" /></Grid.ColumnDefinitions>
+      <TextBox x:Name="SendText" PlaceholderText="发个友善的弹幕…" MaxLength="30" BorderThickness="0,0,0,1"
+               Background="Transparent" Foreground="White" />
+      <Button x:Name="SendButton" Grid.Column="1" Background="Transparent" BorderThickness="0" Margin="8,0,0,0"
+              Foreground="White"><FontIcon Glyph="&#xE724;" FontSize="18" /></Button>
+    </Grid>
+    <StackPanel x:Name="Info" Grid.Row="2" Padding="16,10">
+      <TextBlock x:Name="Title" FontSize="18" FontWeight="Light" TextTrimming="CharacterEllipsis" />
+      <TextBlock x:Name="Meta" FontSize="12" TextWrapping="Wrap"
+                 Foreground="{ThemeResource SystemControlForegroundBaseMediumBrush}" />
+    </StackPanel>
+  </Grid>
+  <Border x:Name="ChatPane" Grid.Column="1" BorderBrush="{ThemeResource SystemControlForegroundBaseLowBrush}"
+          Background="{ThemeResource ApplicationPageBackgroundThemeBrush}">
+    <Grid>
+      <Grid.RowDefinitions><RowDefinition Height="Auto" /><RowDefinition Height="*" /></Grid.RowDefinitions>
+      <TextBlock Text="弹幕" FontSize="18" FontWeight="Light" Margin="14,8,14,4" />
+      <ListView x:Name="Chat" Grid.Row="1" SelectionMode="None" IsItemClickEnabled="False">
+        <ListView.ItemContainerTransitions><TransitionCollection /></ListView.ItemContainerTransitions>
+        <ListView.ItemsPanel><ItemsPanelTemplate>
+          <ItemsStackPanel ItemsUpdatingScrollMode="KeepLastItemInView" />
+        </ItemsPanelTemplate></ListView.ItemsPanel>
+        <ListView.ItemContainerStyle>
+          <Style TargetType="ListViewItem">
+            <Setter Property="MinHeight" Value="0" />
+            <Setter Property="Padding" Value="14,3" />
+            <Setter Property="HorizontalContentAlignment" Value="Stretch" />
+          </Style>
+        </ListView.ItemContainerStyle>
+        <ListView.ItemTemplate><DataTemplate>
+          <Grid><TextBlock FontSize="13" TextWrapping="Wrap" /></Grid>
+        </DataTemplate></ListView.ItemTemplate>
+      </ListView>
+    </Grid>
+  </Border>
+</Grid>"##;
+
+struct Room {
+    root: IFrameworkElement,
+    room_id: u64,
+    opened: Instant,
+    player: RefCell<Option<MediaPlayer>>,
+    source: RefCell<Option<MediaSource>>,
+    overlay: RefCell<Option<Rc<Overlay>>>,
+    channel: Arc<Mutex<Option<Arc<LiveChannel>>>>,
+    chat: RefCell<Vec<String>>,
+    next_danmaku: Cell<u64>,
+    full: Cell<bool>,
+}
+
+thread_local! {
+    static ROOM: RefCell<Option<Rc<Room>>> = const { RefCell::new(None) };
+}
+
+fn room() -> Option<Rc<Room>> {
+    ROOM.with_borrow(Clone::clone)
+}
+
+fn run() -> u64 {
+    RUN.load(Ordering::Relaxed)
+}
+
+fn overlay_of(asked: u64) -> Option<Rc<Overlay>> {
+    if asked != run() {
+        return None;
+    }
+    room().and_then(|r| r.overlay.borrow().clone())
+}
+
+/// Leaves the room on show, if there is one.
+pub fn leave() {
+    RUN.fetch_add(1, Ordering::Relaxed);
+    let Some(room) = ROOM.with_borrow_mut(Option::take) else { return };
+    let _ = set_full(&room, false);
+    let video = named::<IMediaPlayerElement>(&room.root, "Video");
+    let _ = video.and_then(|v| v.SetMediaPlayer(None::<&MediaPlayer>));
+    media::close(room.player.borrow_mut().take(), room.source.borrow_mut().take());
+    let channel = room.channel.lock().unwrap_or_else(|e| e.into_inner()).take();
+    if let (Some(channel), Some(backend)) = (channel, shell().and_then(|s| s.backend.get().cloned())) {
+        backend.spawn(async move { channel.close().await });
+    }
+    // Leaving may come from an event of this very page: it goes when that is over.
+    let old = room.root.clone();
+    soon(&Rc::default(), move || {
+        let _ = &old;
+    });
+}
+
+/// Opens room `room_id`.
+pub fn open(room_id: u64, title: &str, uploader: &str) -> Result<()> {
+    let Some(shell) = shell() else { return Ok(()) };
+    let Some(backend) = shell.backend.get().cloned() else { return Ok(()) };
+    crate::ui::player::leave();
+    crate::ui::me::leave();
+    leave();
+    let root = load(LAYOUT)?;
+    set_text(&root, "Title", title)?;
+    set_text(&root, "Meta", &format!("{uploader} · 正在打开…"))?;
+    let shown = Rc::new(Room {
+        root: root.clone(),
+        room_id,
+        opened: Instant::now(),
+        player: RefCell::default(),
+        source: RefCell::default(),
+        overlay: RefCell::default(),
+        channel: Arc::default(),
+        chat: RefCell::default(),
+        next_danmaku: Cell::new(1),
+        full: Cell::new(false),
+    });
+    ROOM.with_borrow_mut(|r| *r = Some(shown.clone()));
+    on_click(&root, "Back", go_back)?;
+    on_click(&root, "Full", toggle_full)?;
+    on_click(&root, "SendButton", send)?;
+    let chat = named::<IFrameworkElement>(&root, "Chat")?;
+    on_row(&chat, |at, parts| {
+        let Some(room) = room() else { return Ok(()) };
+        let lines = room.chat.borrow();
+        let Some(line) = lines.get(at) else { return Ok(()) };
+        parts.GetAt(0)?.cast::<ITextBlock>()?.SetText(line)
+    })?;
+    keep(root.SizeChanged(|sender: Ref<windows_core::IInspectable>, _: Ref<SizeChangedEventArgs>| {
+        if let Ok(root) = sender.ok().and_then(|s| s.cast::<IFrameworkElement>()) {
+            let _ = apply_layout(&root);
+        }
+    })?);
+    shell.set_page(&root)?;
+    apply_layout(&root)?;
+
+    let opening = run();
+    let (dispatcher, core) = (shell.dispatcher.clone(), backend.clone());
+    let uploader = uploader.to_owned();
+    backend.spawn(async move {
+        let started = match core.services.live.play(room_id, None).await {
+            Ok((play, _)) if !play.live => Err("主播现在没有开播".to_owned()),
+            Ok((play, headers)) => {
+                let tries = play.streams.iter().filter(|s| s.protocol == LiveProtocol::Hls);
+                let mut made = Err("这个直播间没有系统能播放的流".to_owned());
+                for stream in tries {
+                    made = media::stream_source(&stream.url, &headers).map_err(|e| e.message());
+                    if made.is_ok() {
+                        break;
+                    }
+                }
+                made
+            }
+            Err(e) => Err(e.to_string()),
+        };
+        post(&dispatcher, move || {
+            if opening == run() {
+                let _ = playing(started, &uploader);
+            }
+        });
+    });
+    listen(room_id, opening);
+    Ok(())
+}
+
+fn playing(source: std::result::Result<MediaSource, String>, uploader: &str) -> Result<()> {
+    let Some(room) = room() else { return Ok(()) };
+    let source = match source {
+        Ok(source) => source,
+        Err(problem) => return set_text(&room.root, "Meta", &format!("{uploader} · 无法播放：{problem}")),
+    };
+    let player = media::play(&named::<IMediaPlayerElement>(&room.root, "Video")?, &source)?;
+    player.cast::<IMediaPlayer>()?.Play()?;
+    *room.player.borrow_mut() = Some(player);
+    *room.source.borrow_mut() = Some(source);
+    let opened = room.opened;
+    let overlay = Overlay::attach(
+        &room.root,
+        Box::new(move || opened.elapsed().as_millis() as u32),
+        Host { run, find: overlay_of },
+    )?;
+    *room.overlay.borrow_mut() = Some(overlay);
+    set_text(&room.root, "Meta", uploader)
+}
+
+/// Reads the room's messages until it is left.
+fn listen(room_id: u64, opening: u64) {
+    let Some(shell) = shell() else { return };
+    let Some(backend) = shell.backend.get().cloned() else { return };
+    let Some(shown) = room() else { return };
+    let (dispatcher, core, held) = (shell.dispatcher.clone(), backend.clone(), shown.channel.clone());
+    backend.spawn(async move {
+        let Ok(channel) = core.services.live.channel(room_id, LiveFilter::default()).await else {
+            post(&dispatcher, move || {
+                if opening == run()
+                    && let Some(room) = room()
+                {
+                    let _ = set_text(&room.root, "Online", "弹幕连接失败");
+                }
+            });
+            return;
+        };
+        let channel = Arc::new(channel);
+        *held.lock().unwrap_or_else(|e| e.into_inner()) = Some(channel.clone());
+        if opening != run() {
+            channel.close().await;
+            return;
+        }
+        while let Ok(Some(batch)) = channel.next().await {
+            post(&dispatcher, move || {
+                if opening == run() {
+                    let _ = heard(batch.events);
+                }
+            });
+        }
+    });
+}
+
+fn heard(events: Vec<LiveEvent>) -> Result<()> {
+    let Some(room) = room() else { return Ok(()) };
+    let list = named::<IFrameworkElement>(&room.root, "Chat")?;
+    let now = room.opened.elapsed().as_millis() as u32 + DANMAKU_LEAD_MS;
+    let mut fresh = Vec::new();
+    let from = room.chat.borrow().len();
+    for event in events {
+        match event {
+            LiveEvent::Danmaku { uname, text, color } => {
+                room.chat.borrow_mut().push(format!("{uname}：{text}"));
+                let id = room.next_danmaku.replace(room.next_danmaku.get() + 1);
+                fresh.push(Danmaku {
+                    id,
+                    progress_ms: now,
+                    mode: 1,
+                    font_size: 25,
+                    color,
+                    content: text,
+                    ..Danmaku::default()
+                });
+            }
+            LiveEvent::Online { count: viewers } => {
+                set_text(&room.root, "Online", &format!("{} 人气", count(viewers)))?
+            }
+            LiveEvent::Status { live: false } => set_text(&room.root, "Meta", "直播已结束")?,
+            _ => {}
+        }
+    }
+    let to = room.chat.borrow().len();
+    if to > CHAT_MOST {
+        room.chat.borrow_mut().drain(..CHAT_MOST / 2);
+        let items = list.cast::<IItemsControl>()?.Items()?.cast::<IVector<windows_core::IInspectable>>()?;
+        items.Clear()?;
+        add_rows(&list, 0, room.chat.borrow().len())?;
+    } else {
+        add_rows(&list, from, to)?;
+    }
+    if let Some(overlay) = room.overlay.borrow().as_ref() {
+        overlay.add_live(fresh);
+    }
+    Ok(())
+}
+
+/// The list beside the picture on a wide window, below it otherwise.
+fn apply_layout(root: &IFrameworkElement) -> Result<()> {
+    let Some(shell) = shell() else { return Ok(()) };
+    let full = room().is_some_and(|r| r.full.get());
+    let wide = shell.class() == WindowClass::Wide;
+    let shown = |on| if on { Visibility::Visible } else { Visibility::Collapsed };
+    let pixels = |value| GridLength { value, grid_unit_type: GridUnitType::Pixel };
+    let fill = GridLength { value: 1.0, grid_unit_type: GridUnitType::Star };
+    let auto = GridLength { value: 0.0, grid_unit_type: GridUnitType::Auto };
+    let (chat_column, main_row, chat_row, video_row) = if full {
+        (pixels(0.0), fill, pixels(0.0), fill)
+    } else if wide {
+        (pixels(CHAT_WIDTH), fill, pixels(0.0), fill)
+    } else {
+        (pixels(0.0), auto, fill, pixels((root.ActualWidth()? * 9.0 / 16.0).floor()))
+    };
+    named::<IColumnDefinition>(root, "ChatColumn")?.SetWidth(chat_column)?;
+    named::<IRowDefinition>(root, "MainRow")?.SetHeight(main_row)?;
+    named::<IRowDefinition>(root, "ChatRow")?.SetHeight(chat_row)?;
+    named::<IRowDefinition>(root, "VideoRow")?.SetHeight(video_row)?;
+    let pane = named::<FrameworkElement>(root, "ChatPane")?;
+    Grid::SetColumn(&pane, if wide { 1 } else { 0 })?;
+    Grid::SetRow(&pane, if wide { 0 } else { 1 })?;
+    named::<IUIElement>(root, "ChatPane")?.SetVisibility(shown(!full))?;
+    named::<IUIElement>(root, "SendBar")?.SetVisibility(shown(!full))?;
+    named::<IUIElement>(root, "Info")?.SetVisibility(shown(!full))
+}
+
+fn go_back() {
+    if let Some(shell) = shell() {
+        shell.back();
+    }
+}
+
+fn toggle_full() {
+    if let Some(room) = room() {
+        let _ = set_full(&room, !room.full.get());
+    }
+}
+
+fn set_full(room: &Room, on: bool) -> Result<()> {
+    if room.full.replace(on) == on {
+        return Ok(());
+    }
+    let Some(shell) = shell() else { return Ok(()) };
+    shell.fill_screen(on)?;
+    named::<IFontIcon>(&room.root, "FullIcon")?.SetGlyph(if on { "\u{E73F}" } else { "\u{E740}" })?;
+    apply_layout(&room.root)
+}
+
+/// The window left fullscreen by itself: the page follows.
+pub fn window_changed() {
+    if let (Some(room), Some(shell)) = (room(), shell())
+        && room.full.get()
+        && !shell.is_filling_screen()
+    {
+        let _ = set_full(&room, false);
+    }
+}
+
+/// Keys of the room; false when the key is not one of them.
+pub fn key(key: VirtualKey) -> bool {
+    let Some(room) = room() else { return false };
+    let typing = named::<IControl>(&room.root, "SendText")
+        .and_then(|c| c.FocusState())
+        .is_ok_and(|f| f != crate::xaml::FocusState::Unfocused);
+    if key == VirtualKey::Escape && room.full.get() {
+        let _ = set_full(&room, false);
+        return true;
+    }
+    if typing || !shell().is_some_and(|s| s.prefs().shortcuts) {
+        return false;
+    }
+    match key {
+        VirtualKey::F => toggle_full(),
+        VirtualKey::D => {
+            if let Some(overlay) = room.overlay.borrow().as_ref() {
+                overlay.toggle();
+            }
+        }
+        _ => return false,
+    }
+    true
+}
+
+fn send() {
+    let (Some(room), Some(shell)) = (room(), shell()) else { return };
+    let Some(backend) = shell.backend.get().cloned() else { return };
+    if !backend.services.account.is_logged_in() {
+        crate::ui::shell::show_tab(crate::ui::shell::Tab::Me);
+        return;
+    }
+    let Ok(field) = named::<ITextBox>(&room.root, "SendText") else { return };
+    let text = field.Text().map(|t| t.to_string()).unwrap_or_default();
+    if text.trim().is_empty() {
+        return;
+    }
+    let _ = field.SetText("");
+    let (dispatcher, core, room_id, opening) = (shell.dispatcher.clone(), backend.clone(), room.room_id, run());
+    backend.spawn(async move {
+        if let Err(problem) = core.services.live.send(room_id, &text).await {
+            let text = format!("发送失败：{problem}");
+            post(&dispatcher, move || {
+                if opening == run()
+                    && let Some(room) = self::room()
+                {
+                    let _ = set_text(&room.root, "Meta", &text);
+                }
+            });
+        }
+    });
+}

@@ -7,7 +7,7 @@ use std::rc::Rc;
 use rubi_core::HOME_ZONES;
 use windows_core::{IInspectable, Interface, Ref, Result};
 
-use crate::ui::card_grid::{Answer, CardGrid, Source};
+use crate::ui::card_grid::{CardGrid, Source};
 use crate::ui::shell::shell;
 use crate::ui::{keep, load, load_object, named, on_click, set_text};
 use crate::xaml::{
@@ -68,7 +68,19 @@ pub struct HomePage {
 impl HomePage {
     pub fn new() -> Result<Rc<Self>> {
         let root = load(LAYOUT)?;
-        let grids = [CardGrid::new(0)?, CardGrid::new(1)?, CardGrid::new(2)?, CardGrid::new(ZONES_TAB)?];
+        let told = |tab: usize| {
+            move || {
+                if let Some(home) = shell().and_then(|s| s.home_page()) {
+                    home.grid_spoke(tab);
+                }
+            }
+        };
+        let grids = [
+            CardGrid::new(told(0))?,
+            CardGrid::new(told(1))?,
+            CardGrid::new(told(2))?,
+            CardGrid::new(told(ZONES_TAB))?,
+        ];
         let holder = named::<IPanel>(&root, "Grids")?.Children()?.cast::<IVector<UIElement>>()?;
         for grid in &grids {
             holder.Append(&grid.element().cast::<UIElement>()?)?;
@@ -169,14 +181,10 @@ impl HomePage {
     }
 
     /// The grid of `tab` has something new to say.
-    pub fn grid_spoke(&self, tab: usize) {
+    fn grid_spoke(&self, tab: usize) {
         if tab == self.current.get() {
             self.say(&self.grids[tab].said());
         }
-    }
-
-    pub fn grid_answered(&self, tab: usize, turn: u64, answer: Answer) {
-        let _ = self.grids[tab].answered(turn, answer);
     }
 
     /// Sets the cells of the grid on show.

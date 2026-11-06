@@ -209,3 +209,11 @@ Windows.Media.Playback.MediaPlaybackState
 Windows.UI.Xaml.Controls.Primitives.ISelector
 Windows.UI.Xaml.Controls.SelectionChangedEventArgs
 Windows.UI.Xaml.Controls.ListViewSelectionMode
+Windows.UI.Xaml.Controls.Control::ForegroundProperty
+Windows.UI.Xaml.Controls.IControlStatics
+Windows.UI.Xaml.IDependencyObject
+Windows.UI.Xaml.DependencyProperty
+Windows.System.Launcher
+Windows.System.ILauncherStatics
+Windows.UI.Xaml.Controls.IBorder
+Windows.UI.Xaml.Controls.Border

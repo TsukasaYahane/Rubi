@@ -14,7 +14,7 @@ use crate::state::settings::Prefs;
 use crate::ui::home::HomePage;
 use crate::ui::keep;
 use crate::ui::splitter::{self, BAR_TEMPLATE};
-use crate::ui::{load, me, named, on_click, player, post};
+use crate::ui::{follow, live, live_room, load, me, named, on_click, player, post};
 use crate::xaml::{
     ApplicationData, ApplicationView, Color, CoreApplication, CoreDispatcher, CoreWindow, CoreWindowActivationState,
     GridLength, GridUnitType, IApplicationData, IApplicationView3, IContentControl, IControl, ICoreApplicationView3,
@@ -101,10 +101,6 @@ const LAYOUT: &str = r##"
   </Grid>
 </Grid>"##;
 
-const PLACEHOLDER: &str = r##"
-<TextBlock xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
-           Text="这一页还没做" FontSize="20" FontWeight="Light" Margin="16" />"##;
-
 pub struct Shell {
     pub dispatcher: CoreDispatcher,
     pub backend: OnceCell<Arc<Backend>>,
@@ -168,7 +164,9 @@ pub fn start() -> Result<()> {
             if let Ok(args) = args.ok()
                 && let Ok(key) = args.VirtualKey()
             {
-                player::key(key);
+                if !player::key(key) {
+                    live_room::key(key);
+                }
             }
         },
     )?;
@@ -263,6 +261,7 @@ fn core_opened(opened: std::result::Result<Arc<Backend>, String>) {
 fn window_resized() -> Result<()> {
     let Some(shell) = shell() else { return Ok(()) };
     player::window_changed();
+    live_room::window_changed();
     let class = WindowClass::of(Window::Current()?.cast::<IWindow>()?.Bounds()?.width as f64);
     if class != shell.class.replace(class) {
         shell.apply_class()?;
@@ -274,12 +273,14 @@ fn window_resized() -> Result<()> {
 pub fn show_tab(tab: Tab) {
     let Some(shell) = shell() else { return };
     player::leave();
+    live_room::leave();
     me::leave();
     shell.tab.set(tab);
     let shown = match tab {
         Tab::Home => shell.show_home(),
         Tab::Me => me::show(),
-        Tab::Follow | Tab::Live => load(PLACEHOLDER).and_then(|p| shell.set_page(&p)),
+        Tab::Live => live::show(),
+        Tab::Follow => follow::show(),
     };
     let _ = shown.and_then(|()| shell.mark_tab());
 }
@@ -298,6 +299,24 @@ impl Shell {
         let mut widths = self.widths.get();
         widths.side = width;
         self.widths.set(widths);
+    }
+
+    /// Takes the window to fullscreen and folds the navigation away, or back.
+    pub fn fill_screen(&self, on: bool) -> Result<()> {
+        let view = ApplicationView::GetForCurrentView()?.cast::<IApplicationView3>()?;
+        if on {
+            view.TryEnterFullScreenMode()?;
+        } else {
+            view.ExitFullScreenMode()?;
+        }
+        self.immersive(on)
+    }
+
+    pub fn is_filling_screen(&self) -> bool {
+        ApplicationView::GetForCurrentView()
+            .and_then(|v| v.cast::<IApplicationView3>())
+            .and_then(|v| v.IsFullScreenMode())
+            .unwrap_or(false)
     }
 
     pub fn prefs(&self) -> Prefs {
@@ -379,6 +398,8 @@ impl Shell {
         }
         player::resized();
         me::resized();
+        live::resized();
+        follow::resized();
         self.mark_tab()
     }
 

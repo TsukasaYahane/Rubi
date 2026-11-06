@@ -89,7 +89,7 @@ pub fn age(unix: i64, now: i64) -> String {
 }
 
 /// `unix` as a date in China Standard Time, as B站 shows it.
-fn date(unix: i64) -> String {
+pub fn date(unix: i64) -> String {
     const CST: i64 = 8 * 3_600;
     // Howard Hinnant's civil-from-days.
     let days = (unix + CST).div_euclid(86_400) + 719_468;

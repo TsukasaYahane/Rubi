@@ -14,9 +14,10 @@ use windows_core::{Error, HRESULT, Interface, Ref, Result};
 use crate::state::layout::WindowClass;
 use crate::state::manifest::dash_manifest;
 use crate::state::panes;
-use crate::ui::danmaku::Overlay;
+use crate::ui::danmaku::{Host, Overlay};
 use crate::ui::feed;
 use crate::ui::keep;
+use crate::ui::media;
 use crate::ui::player_actions::Actions;
 use crate::ui::player_side::Side;
 use crate::ui::shell::shell;
@@ -24,14 +25,13 @@ use crate::ui::splitter;
 use crate::ui::watch;
 use crate::ui::{load, named, on_click, post, set_text, soon};
 use crate::xaml::{
-    AdaptiveMediaSource, AdaptiveMediaSourceCreationStatus, ApplicationView, DataWriter, FocusManager, FocusState,
-    FrameworkElement, Grid, GridLength, GridUnitType, HorizontalAlignment, HttpClient, IApplicationView3, IButtonBase,
-    IClosable, IColumnDefinition, IContentControl, IControl, IDataWriter, IFontIcon, IFrameworkElement,
-    IFrameworkElement4, IInputStream, IMediaPlaybackSession, IMediaPlaybackSource, IMediaPlayer, IMediaPlayer3,
-    IMediaPlayerElement, IMediaPlayerFailedEventArgs, IMediaPlayerSource2, IOutputStream, IPanel, IRandomAccessStream,
-    IRangeBase, IRowDefinition, ITextBox, IUIElement, InMemoryRandomAccessStream, MediaPlaybackSession,
-    MediaPlaybackState, MediaPlayer, MediaPlayerFailedEventArgs, MediaSource, SizeChangedEventArgs, UIElement, Uri,
-    VerticalAlignment, VirtualKey, Visibility,
+    AdaptiveMediaSource, DataWriter, FocusManager, FocusState, FrameworkElement, Grid, GridLength, GridUnitType,
+    HorizontalAlignment, IButtonBase, IColumnDefinition, IContentControl, IControl, IDataWriter, IFontIcon,
+    IFrameworkElement, IFrameworkElement4, IInputStream, IMediaPlaybackSession, IMediaPlayer, IMediaPlayer3,
+    IMediaPlayerElement, IMediaPlayerFailedEventArgs, IOutputStream, IPanel, IRandomAccessStream, IRangeBase,
+    IRowDefinition, ITextBox, IUIElement, InMemoryRandomAccessStream, MediaPlaybackSession, MediaPlaybackState,
+    MediaPlayer, MediaPlayerFailedEventArgs, MediaSource, SizeChangedEventArgs, UIElement, Uri, VerticalAlignment,
+    VirtualKey, Visibility,
 };
 
 /// Quality asked for; the core caps it to what the account may play.
@@ -340,13 +340,7 @@ fn set_full(on: bool) -> Result<()> {
     }
     page.hold_from.set(Instant::now() + FULLSCREEN_SETTLE);
     release_video()?;
-    let view = ApplicationView::GetForCurrentView()?.cast::<IApplicationView3>()?;
-    if on {
-        view.TryEnterFullScreenMode()?;
-    } else {
-        view.ExitFullScreenMode()?;
-    }
-    shell.immersive(on)?;
+    shell.fill_screen(on)?;
     set_glyph(&page.root, if on { "\u{E73F}" } else { "\u{E740}" })?;
     apply_layout(&page.root)
 }
@@ -357,12 +351,7 @@ fn set_glyph(root: &IFrameworkElement, glyph: &str) -> Result<()> {
 
 /// The window left fullscreen by itself (the system's own control): the page follows.
 pub fn window_changed() {
-    let left = page().is_some_and(|p| p.full.get())
-        && ApplicationView::GetForCurrentView()
-            .and_then(|v| v.cast::<IApplicationView3>())
-            .and_then(|v| v.IsFullScreenMode())
-            .is_ok_and(|on| !on);
-    if left {
+    if page().is_some_and(|p| p.full.get()) && !shell().is_some_and(|s| s.is_filling_screen()) {
         let _ = set_full(false);
     }
 }
@@ -521,14 +510,7 @@ pub fn leave() {
         });
     }
     PAGE.with(|p| *p.borrow_mut() = None);
-    if let Some(player) = PLAYING.with(|p| p.borrow_mut().take()) {
-        let _ = player.cast::<IMediaPlayer>().and_then(|p| p.Pause());
-        let _ = player.cast::<IMediaPlayerSource2>().and_then(|p| p.SetSource(None::<&IMediaPlaybackSource>));
-        let _ = player.cast::<IClosable>().and_then(|p| p.Close());
-    }
-    if let Some(source) = SOURCE.with(|s| s.borrow_mut().take()) {
-        let _ = source.cast::<IClosable>().and_then(|s| s.Close());
-    }
+    media::close(PLAYING.with(|p| p.borrow_mut().take()), SOURCE.with(|s| s.borrow_mut().take()));
 }
 
 /// The page on show, for what lives beside it.
@@ -671,7 +653,12 @@ fn shown(source: std::result::Result<(MediaSource, u64, u32), String>, uploader:
             let session = play(&page.root, &source)?;
             page.cid.set(cid);
             watch::start(&page.bvid, cid);
-            let overlay = Overlay::attach(&page.root, session)?;
+            let clock = session.cast::<IMediaPlaybackSession>()?;
+            let overlay = Overlay::attach(
+                &page.root,
+                Box::new(move || clock.Position().map_or(0, |at| (at.duration / 10_000) as u32)),
+                Host { run, find: overlay },
+            )?;
             if let Some(shell) = shell()
                 && let Some(backend) = shell.backend.get().cloned()
             {
@@ -760,9 +747,7 @@ fn report_failures(player: &MediaPlayer) -> Result<()> {
 }
 
 fn play(root: &IFrameworkElement, source: &MediaSource) -> Result<MediaPlaybackSession> {
-    let player = MediaPlayer::new()?;
-    player.cast::<IMediaPlayerSource2>()?.SetSource(&source.cast::<IMediaPlaybackSource>()?)?;
-    named::<IMediaPlayerElement>(root, "Video")?.SetMediaPlayer(&player)?;
+    let player = media::play(&named::<IMediaPlayerElement>(root, "Video")?, source)?;
     report_failures(&player)?;
     if page().is_some_and(|p| p.feed) {
         player.cast::<IMediaPlayer>()?.SetIsLoopingEnabled(true)?;
@@ -781,11 +766,7 @@ fn open_source(playback: &Playback) -> Result<MediaSource> {
         .and_then(|v| dash_manifest(playback.url.duration_ms, v, audio))
         .ok_or_else(|| Error::new(HRESULT(0x8000_4005_u32 as i32), "这个视频没有可用的 DASH 信息"))?;
 
-    let client = HttpClient::new()?;
-    let headers = client.DefaultRequestHeaders()?;
-    for (name, value) in &playback.headers {
-        headers.TryAppendWithoutValidation(name, value)?;
-    }
+    let client = media::client(&playback.headers)?;
 
     let stream = InMemoryRandomAccessStream::new()?;
     let writer = DataWriter::CreateDataWriter(&stream.cast::<IOutputStream>()?)?.cast::<IDataWriter>()?;
@@ -802,9 +783,5 @@ fn open_source(playback: &Playback) -> Result<MediaSource> {
         &client,
     )?
     .join()?;
-    let status = created.Status()?;
-    if status != AdaptiveMediaSourceCreationStatus::Success {
-        return Err(Error::new(HRESULT(0x8000_4005_u32 as i32), format!("系统播放器拒绝了清单：{status:?}")));
-    }
-    MediaSource::CreateFromAdaptiveMediaSource(&created.MediaSource()?)
+    media::source_of(&created)
 }

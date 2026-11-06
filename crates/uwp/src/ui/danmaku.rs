@@ -15,11 +15,10 @@ use windows_core::{EventRevoker, IInspectable, Interface, Ref, Result};
 use crate::backend::Backend;
 use crate::state::danmaku::{FONT_SIZE, Item, SCROLL_MS, items, on_screen, tracks};
 use crate::ui::shell::shell;
-use crate::ui::{load, named, player, post, soon};
+use crate::ui::{load, named, post, soon};
 use crate::xaml::{
-    Color, CompositionTarget, CoreDispatcher, IFrameworkElement, IMediaPlaybackSession, IPanel, IRectangleGeometry,
-    ITextBlock, ITranslateTransform, IUIElement, MediaPlaybackSession, RectangleGeometry, SizeChangedEventArgs,
-    SolidColorBrush, UIElement, Visibility,
+    Color, CompositionTarget, CoreDispatcher, IFrameworkElement, IPanel, IRectangleGeometry, ITextBlock,
+    ITranslateTransform, IUIElement, RectangleGeometry, SizeChangedEventArgs, SolidColorBrush, UIElement, Visibility,
 };
 
 /// Most danmaku on screen at once.
@@ -42,6 +41,8 @@ const LAYERS: u32 = 5;
 
 /// How long the size must hold still before danmaku are placed again.
 const SETTLE: Duration = Duration::from_millis(200);
+/// Live danmaku kept for placing.
+const LIVE_KEPT: usize = 200;
 /// Segments loaded together after the first.
 const BATCH: usize = 3;
 
@@ -53,12 +54,24 @@ struct Slot {
     shows: Cell<Option<usize>>,
 }
 
+/// Who holds an overlay: answers placed in the background find it through here.
+#[derive(Clone, Copy)]
+pub struct Host {
+    pub run: fn() -> u64,
+    pub find: fn(u64) -> Option<Rc<Overlay>>,
+}
+
 pub struct Overlay {
+    host: Host,
+    /// Where in the danmaku's time it is now, in ms.
+    clock: Box<dyn Fn() -> u32>,
     canvas: IFrameworkElement,
     slots: Vec<Slot>,
     items: RefCell<Vec<Item>>,
     danmaku: RefCell<Arc<Vec<Danmaku>>>,
-    session: MediaPlaybackSession,
+    /// A placing is under way, and more came in meanwhile.
+    placing: Cell<bool>,
+    placed_stale: Cell<bool>,
     on: Cell<bool>,
     frames: RefCell<Option<EventRevoker>>,
     sizing: RefCell<Option<EventRevoker>>,
@@ -68,7 +81,7 @@ pub struct Overlay {
 }
 
 impl Overlay {
-    pub fn attach(root: &IFrameworkElement, session: MediaPlaybackSession) -> Result<Rc<Self>> {
+    pub fn attach(root: &IFrameworkElement, clock: Box<dyn Fn() -> u32>, host: Host) -> Result<Rc<Self>> {
         let canvas = named::<IFrameworkElement>(root, "Danmaku")?;
         let children = canvas.cast::<IPanel>()?.Children()?.cast::<IVector<UIElement>>()?;
         let mut slots = Vec::with_capacity(POOL);
@@ -82,11 +95,14 @@ impl Overlay {
             slots.push(Slot { layers, element, shift, shows: Cell::new(None) });
         }
         let overlay = Rc::new(Self {
+            host,
+            clock,
+            placing: Cell::new(false),
+            placed_stale: Cell::new(false),
             canvas,
             slots,
             items: RefCell::default(),
             danmaku: RefCell::default(),
-            session,
             on: Cell::new(true),
             frames: RefCell::new(None),
             sizing: RefCell::new(None),
@@ -125,7 +141,7 @@ impl Overlay {
 
     /// Loads the video's danmaku, the part being watched first.
     pub fn load(&self, backend: Arc<Backend>, dispatcher: CoreDispatcher, cid: u64, duration_ms: u32) {
-        let run = player::run();
+        let (run, find) = ((self.host.run)(), self.host.find);
         let core = backend.clone();
         let size = self.size();
         backend.spawn(async move {
@@ -138,12 +154,25 @@ impl Overlay {
                 let placed = place(services, &output.kept, size);
                 let danmaku = Arc::new(output.kept);
                 post(&dispatcher, move || {
-                    if let Some(overlay) = player::overlay(run) {
+                    if let Some(overlay) = find(run) {
                         overlay.set(danmaku, placed);
                     }
                 });
             }
         });
+    }
+
+    /// Adds what a live room just said, keeping the latest.
+    pub fn add_live(&self, fresh: Vec<Danmaku>) {
+        if fresh.is_empty() {
+            return;
+        }
+        let mut all = self.danmaku.borrow().as_ref().clone();
+        all.extend(fresh);
+        let extra = all.len().saturating_sub(LIVE_KEPT);
+        all.drain(..extra);
+        *self.danmaku.borrow_mut() = Arc::new(all);
+        self.place();
     }
 
     /// Adds one just sent, so its sender sees it.
@@ -158,6 +187,10 @@ impl Overlay {
         *self.danmaku.borrow_mut() = danmaku;
         *self.items.borrow_mut() = placed;
         self.forget_slots();
+        self.placing.set(false);
+        if self.placed_stale.take() {
+            self.place();
+        }
     }
 
     fn forget_slots(&self) {
@@ -172,12 +205,13 @@ impl Overlay {
         let Some(shell) = shell() else { return };
         let Some(backend) = shell.backend.get().cloned() else { return };
         let turn = self.resizes.fetch_add(1, Ordering::Relaxed) + 1;
-        let (resizes, dispatcher, run) = (self.resizes.clone(), shell.dispatcher.clone(), player::run());
+        let (resizes, dispatcher, run) = (self.resizes.clone(), shell.dispatcher.clone(), (self.host.run)());
+        let find = self.host.find;
         backend.spawn(async move {
             tokio::time::sleep(SETTLE).await;
             if resizes.load(Ordering::Relaxed) == turn {
                 post(&dispatcher, move || {
-                    if let Some(overlay) = player::overlay(run) {
+                    if let Some(overlay) = find(run) {
                         overlay.place();
                     }
                 });
@@ -189,16 +223,21 @@ impl Overlay {
     fn place(&self) {
         let Some(shell) = shell() else { return };
         let Some(backend) = shell.backend.get().cloned() else { return };
-        let (danmaku, size, run) = (self.danmaku.borrow().clone(), self.size(), player::run());
+        let (danmaku, size, run) = (self.danmaku.borrow().clone(), self.size(), (self.host.run)());
         if danmaku.is_empty() {
             return;
         }
+        if self.placing.replace(true) {
+            self.placed_stale.set(true);
+            return;
+        }
+        let find = self.host.find;
         let dispatcher = shell.dispatcher.clone();
         let core = backend.clone();
         backend.spawn(async move {
             let placed = place(&core.services, &danmaku, size);
             post(&dispatcher, move || {
-                if let Some(overlay) = player::overlay(run) {
+                if let Some(overlay) = find(run) {
                     overlay.set(danmaku, placed);
                 }
             });
@@ -223,8 +262,7 @@ impl Overlay {
     }
 
     fn draw(&self) -> Result<()> {
-        let session = self.session.cast::<IMediaPlaybackSession>()?;
-        let now_ms = (session.Position()?.duration / 10_000) as u32;
+        let now_ms = (self.clock)();
         let (width, height) = self.size();
         let items = self.items.borrow();
         let mut used = 0;
