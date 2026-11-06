@@ -4,6 +4,7 @@
 pub mod danmaku;
 pub mod feed;
 pub mod home;
+pub mod library;
 pub mod me;
 pub mod player;
 pub mod player_actions;
@@ -12,6 +13,7 @@ pub mod rows;
 pub mod settings;
 pub mod shell;
 pub mod splitter;
+pub mod video_list;
 
 use std::cell::Cell;
 use std::rc::Rc;

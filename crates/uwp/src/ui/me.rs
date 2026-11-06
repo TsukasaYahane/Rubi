@@ -10,10 +10,11 @@ use windows_core::{Interface, Result};
 
 use crate::session;
 use crate::state::layout::WindowClass;
+use crate::state::library::Shelf;
 use crate::state::settings::Category;
 use crate::state::{qr, settings::escape};
 use crate::ui::shell::shell;
-use crate::ui::{load, named, on_click, post, set_text, settings};
+use crate::ui::{library, load, named, on_click, post, set_text, settings};
 use crate::xaml::{
     BitmapImage, Color, IContentControl, IControl, IFrameworkElement, IImage, IUIElement, SolidColorBrush, UIElement,
     Uri, Visibility,
@@ -40,33 +41,48 @@ const HEAD: &str = r##"
   </StackPanel>
 </Grid>"##;
 
-/// Side by side; `<!--head-->` and `<!--cats-->` are filled in.
+/// Side by side; `<!--head-->`, `<!--shelves-->` and `<!--cats-->` are filled in.
 const WIDE: &str = r##"
 <Grid xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
       xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml">
   <Grid.ColumnDefinitions><ColumnDefinition Width="<!--left-->" /><ColumnDefinition Width="*" /></Grid.ColumnDefinitions>
   <Border BorderThickness="0,0,1,0" BorderBrush="{ThemeResource SystemControlForegroundBaseLowBrush}">
-    <StackPanel><!--head--><!--cats--></StackPanel>
+    <ScrollViewer><StackPanel>
+      <!--head-->
+      <TextBlock Text="内容" FontSize="12" Margin="16,8,16,2"
+                 Foreground="{ThemeResource SystemControlForegroundBaseMediumBrush}" />
+      <!--shelves-->
+      <TextBlock Text="设置" FontSize="12" Margin="16,8,16,2"
+                 Foreground="{ThemeResource SystemControlForegroundBaseMediumBrush}" />
+      <!--cats-->
+    </StackPanel></ScrollViewer>
   </Border>
-  <ScrollViewer Grid.Column="1">
+  <ScrollViewer x:Name="SettingsHost" Grid.Column="1">
     <Grid>
       <Grid.ColumnDefinitions><ColumnDefinition MaxWidth="<!--max-->" /><ColumnDefinition Width="Auto" /></Grid.ColumnDefinitions>
       <ContentControl x:Name="Body" IsTabStop="False" HorizontalContentAlignment="Stretch" />
     </Grid>
   </ScrollViewer>
+  <ContentControl x:Name="ShelfHost" Grid.Column="1" IsTabStop="False" Visibility="Collapsed"
+                  HorizontalContentAlignment="Stretch" VerticalContentAlignment="Stretch" />
 </Grid>"##;
 
-/// One above the other, the categories in a row that scrolls.
+/// One above the other, the categories in a row that scrolls; a shelf takes the whole page.
 const NARROW: &str = r##"
-<ScrollViewer xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
-              xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml">
-  <StackPanel>
-    <!--head-->
-    <ScrollViewer HorizontalScrollBarVisibility="Hidden" HorizontalScrollMode="Enabled" VerticalScrollMode="Disabled"
-                  VerticalScrollBarVisibility="Disabled"><StackPanel Orientation="Horizontal"><!--cats--></StackPanel></ScrollViewer>
-    <ContentControl x:Name="Body" IsTabStop="False" HorizontalContentAlignment="Stretch" />
-  </StackPanel>
-</ScrollViewer>"##;
+<Grid xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+      xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml">
+  <ScrollViewer x:Name="SettingsHost">
+    <StackPanel>
+      <!--head-->
+      <!--shelves-->
+      <ScrollViewer HorizontalScrollBarVisibility="Hidden" HorizontalScrollMode="Enabled" VerticalScrollMode="Disabled"
+                    VerticalScrollBarVisibility="Disabled"><StackPanel Orientation="Horizontal"><!--cats--></StackPanel></ScrollViewer>
+      <ContentControl x:Name="Body" IsTabStop="False" HorizontalContentAlignment="Stretch" />
+    </StackPanel>
+  </ScrollViewer>
+  <ContentControl x:Name="ShelfHost" IsTabStop="False" Visibility="Collapsed"
+                  HorizontalContentAlignment="Stretch" VerticalContentAlignment="Stretch" />
+</Grid>"##;
 
 const ACCOUNT: &str = r##"
 <StackPanel xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
@@ -93,6 +109,30 @@ fn cat_buttons() -> String {
         .collect()
 }
 
+fn shelf_buttons(narrow: bool) -> String {
+    let (arrow, line) = if narrow {
+        (
+            r##"<FontIcon Grid.Column="1" Glyph="&#xE76C;" FontSize="12" />"##,
+            r##"BorderThickness="0,0,0,1" BorderBrush="{ThemeResource SystemControlForegroundBaseLowBrush}""##,
+        )
+    } else {
+        ("", r##"BorderThickness="0""##)
+    };
+    Shelf::ALL
+        .iter()
+        .enumerate()
+        .map(|(at, shelf)| {
+            format!(
+                r##"<Button x:Name="Shelf{at}" Background="Transparent" {line} Height="44" Padding="16,0"
+                     HorizontalAlignment="Stretch" HorizontalContentAlignment="Stretch"><Grid>
+                     <Grid.ColumnDefinitions><ColumnDefinition Width="*" /><ColumnDefinition Width="Auto" /></Grid.ColumnDefinitions>
+                     <TextBlock Text="{}" />{arrow}</Grid></Button>"##,
+                shelf.label()
+            )
+        })
+        .collect()
+}
+
 fn layout(class: WindowClass) -> String {
     let (left, max) = if class == WindowClass::Wide { ("260", "680") } else { ("220", "9999") };
     let frame = if class == WindowClass::Narrow { NARROW } else { WIDE };
@@ -100,6 +140,7 @@ fn layout(class: WindowClass) -> String {
         .replace("<!--left-->", left)
         .replace("<!--max-->", max)
         .replace("<!--head-->", HEAD)
+        .replace("<!--shelves-->", &shelf_buttons(class == WindowClass::Narrow))
         .replace("<!--cats-->", &cat_buttons())
 }
 
@@ -134,6 +175,8 @@ struct Shown {
 thread_local! {
     static SHOWN: RefCell<Option<Shown>> = const { RefCell::new(None) };
     static CATEGORY: Cell<Option<Category>> = const { Cell::new(None) };
+    /// The shelf open instead of the category.
+    static SHELF: Cell<Option<Shelf>> = const { Cell::new(None) };
     /// Who was last read, so the page opens on them and not on a blank that fills in.
     static WHO: RefCell<Option<Who>> = const { RefCell::new(None) };
 }
@@ -145,12 +188,17 @@ fn shown() -> Option<Shown> {
 /// Stops a login under way.
 pub fn leave() {
     RUN.fetch_add(1, Ordering::Relaxed);
-    SHOWN.with(|s| *s.borrow_mut() = None);
+    if let Some(page) = SHOWN.with(|s| s.borrow_mut().take()) {
+        // The pages of the shelves live on, and an element has one parent at a time.
+        let _ = named::<IContentControl>(&page.root, "ShelfHost")
+            .and_then(|h| h.SetContent(None::<&windows_core::IInspectable>));
+    }
 }
 
 pub fn show() -> Result<()> {
     let Some(shell) = shell() else { return Ok(()) };
     let class = shell.class();
+    leave();
     let root = load(&layout(class))?;
     shell.set_page(&root)?;
     SHOWN.with(|s| *s.borrow_mut() = Some(Shown { root: root.clone(), body: None, class }));
@@ -160,9 +208,65 @@ pub fn show() -> Result<()> {
         })?;
     }
     show_head();
+    for (at, shelf) in Shelf::ALL.into_iter().enumerate() {
+        on_click(&root, &format!("Shelf{at}"), move || {
+            let _ = open_shelf(shelf, true);
+        })?;
+    }
+    if let Some(shelf) = SHELF.get() {
+        return open_shelf(shelf, false);
+    }
     let signed_in = shell.backend.get().is_some_and(|b| b.services.account.is_logged_in());
     let category = CATEGORY.get().unwrap_or(if signed_in { Category::Look } else { Category::Account });
     open(category)
+}
+
+fn shelf_on(root: &IFrameworkElement, on: bool) -> Result<()> {
+    let shown = |on| if on { Visibility::Visible } else { Visibility::Collapsed };
+    named::<IUIElement>(root, "ShelfHost")?.SetVisibility(shown(on))?;
+    named::<IUIElement>(root, "SettingsHost")?.SetVisibility(shown(!on))
+}
+
+/// Paints which of the left column's entries is open.
+fn mark() -> Result<()> {
+    let Some(page) = shown() else { return Ok(()) };
+    let shelf = SHELF.get();
+    let tint = |on: bool| SolidColorBrush::CreateInstanceWithColor(if on { COBALT } else { DIM });
+    for (at, each) in Category::ALL.into_iter().enumerate() {
+        let on = shelf.is_none() && CATEGORY.get() == Some(each);
+        named::<IControl>(&page.root, &format!("Cat{at}"))?.SetForeground(&tint(on)?)?;
+    }
+    if page.class != WindowClass::Narrow {
+        for (at, each) in Shelf::ALL.into_iter().enumerate() {
+            named::<IControl>(&page.root, &format!("Shelf{at}"))?.SetForeground(&tint(shelf == Some(each))?)?;
+        }
+    }
+    Ok(())
+}
+
+/// Opens `shelf`, read again when `fresh`: coming back from a video it stays as it was.
+fn open_shelf(shelf: Shelf, fresh: bool) -> Result<()> {
+    let Some(page) = shown() else { return Ok(()) };
+    RUN.fetch_add(1, Ordering::Relaxed);
+    SHELF.set(Some(shelf));
+    let host = named::<IContentControl>(&page.root, "ShelfHost")?;
+    host.SetContent(None::<&windows_core::IInspectable>)?;
+    let content = library::page(shelf, fresh, page.class)?;
+    host.SetContent(&content.cast::<UIElement>()?)?;
+    shelf_on(&page.root, true)?;
+    mark()
+}
+
+/// From a shelf back to the page it was opened from, on a narrow window.
+pub fn back_from_shelf() {
+    SHELF.set(None);
+    if let Some(page) = shown() {
+        let _ = named::<IContentControl>(&page.root, "ShelfHost")
+            .and_then(|h| h.SetContent(None::<&windows_core::IInspectable>));
+        let _ = shelf_on(&page.root, false);
+        let _ = mark();
+        refresh();
+    }
 }
 
 /// Follows a new window class, if the page is on show.
@@ -192,11 +296,9 @@ fn open(category: Category) -> Result<()> {
     let (Some(page), Some(shell)) = (shown(), shell()) else { return Ok(()) };
     RUN.fetch_add(1, Ordering::Relaxed);
     CATEGORY.set(Some(category));
-    for (at, each) in Category::ALL.into_iter().enumerate() {
-        let color = if each == category { COBALT } else { DIM };
-        named::<IControl>(&page.root, &format!("Cat{at}"))?
-            .SetForeground(&SolidColorBrush::CreateInstanceWithColor(color)?)?;
-    }
+    SHELF.set(None);
+    shelf_on(&page.root, false)?;
+    mark()?;
     let body = match (category, shell.backend.get()) {
         (Category::Account, _) | (_, None) => load(ACCOUNT)?,
         (_, Some(backend)) => settings::build(category, backend)?,
@@ -313,6 +415,7 @@ impl Update {
             Self::SignedIn(name, mid) => signed_in(&body, &name, mid),
             Self::Saved(session, name, mid) => {
                 let stored = session::save(&session);
+                library::forget();
                 reload_home();
                 signed_in(&body, &name, mid)?;
                 show_head();
@@ -344,6 +447,8 @@ fn sign_out() {
     }
     let _ = session::clear();
     WHO.with(|w| *w.borrow_mut() = None);
+    library::forget();
+    SHELF.set(None);
     reload_home();
     let _ = show();
 }

@@ -535,6 +535,7 @@ pub fn show(bvid: &str, title: &str, uploader: &str) -> Result<()> {
 pub fn open(feed: bool, bvid: &str, title: &str, uploader: &str) -> Result<()> {
     let Some(shell) = shell() else { return Ok(()) };
     leave();
+    crate::ui::me::leave();
     let layout = if feed { feed::LAYOUT } else { LAYOUT };
     let root = load(&layout.replace("<!--bar-->", splitter::BAR_TEMPLATE).replace("<!--lists-->", LISTS))?;
     set_text(&root, "Title", title)?;

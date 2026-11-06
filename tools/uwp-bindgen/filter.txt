@@ -206,3 +206,6 @@ Windows.UI.Xaml.IFrameworkElement4
 Windows.UI.Xaml.Input.FocusManager
 Windows.UI.Xaml.Input.IFocusManagerStatics
 Windows.Media.Playback.MediaPlaybackState
+Windows.UI.Xaml.Controls.Primitives.ISelector
+Windows.UI.Xaml.Controls.SelectionChangedEventArgs
+Windows.UI.Xaml.Controls.ListViewSelectionMode
