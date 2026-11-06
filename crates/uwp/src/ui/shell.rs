@@ -16,7 +16,7 @@ use crate::state::settings::Prefs;
 use crate::ui::home::HomePage;
 use crate::ui::keep;
 use crate::ui::splitter::{self, BAR_TEMPLATE};
-use crate::ui::{follow, live, live_room, load, me, named, on_click, player, post, set_text};
+use crate::ui::{follow, live, live_room, load, me, named, on_click, player, post, search, set_text, up};
 use crate::xaml::{
     ApplicationData, ApplicationView, Color, CoreApplication, CoreDispatcher, CoreWindow, CoreWindowActivationState,
     GridLength, GridUnitType, IApplicationData, IApplicationView3, IContentControl, IControl, ICoreApplicationView3,
@@ -32,6 +32,7 @@ const DIM: Color = Color { a: 255, r: 0x76, g: 0x76, b: 0x76 };
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Tab {
+    Search,
     Home,
     Follow,
     Live,
@@ -42,6 +43,7 @@ pub enum Tab {
 const TOAST_FOR: Duration = Duration::from_secs(2);
 /// Bumped by each toast: only the last one takes it away.
 static TOASTS: AtomicU64 = AtomicU64::new(0);
+static PAGE_TURN: AtomicU64 = AtomicU64::new(0);
 
 const TABS: [(Tab, &str); 4] = [(Tab::Home, "Home"), (Tab::Follow, "Follow"), (Tab::Live, "Live"), (Tab::Me, "Me")];
 
@@ -81,6 +83,8 @@ const LAYOUT: &str = r##"
   </Grid>
   <StackPanel x:Name="Rail" Grid.RowSpan="3" Padding="0,6,0,0"
               Background="{ThemeResource SystemControlBackgroundChromeMediumLowBrush}">
+    <Button x:Name="RailSearch" Style="{StaticResource Nav}"><StackPanel Orientation="Horizontal">
+      <FontIcon x:Name="RailIconSearch" Glyph="&#xE721;" FontSize="20" /><TextBlock x:Name="LabelSearch" Margin="12,0,0,0" Text="搜索" /></StackPanel></Button>
     <Button x:Name="RailHome" Style="{StaticResource Nav}"><StackPanel Orientation="Horizontal">
       <FontIcon x:Name="RailIconHome" Glyph="&#xE80F;" FontSize="20" /><TextBlock x:Name="LabelHome" Margin="12,0,0,0" Text="首页" /></StackPanel></Button>
     <Button x:Name="RailFollow" Style="{StaticResource Nav}"><StackPanel Orientation="Horizontal">
@@ -125,6 +129,8 @@ pub struct Shell {
     tab: Cell<Tab>,
     immersive: Cell<bool>,
     home: RefCell<Option<Rc<HomePage>>>,
+    /// How to go back from pages that were opened from others, latest last.
+    returns: RefCell<Vec<Box<dyn Fn()>>>,
 }
 
 thread_local! {
@@ -158,9 +164,11 @@ pub fn start() -> Result<()> {
         tab: Cell::new(Tab::Home),
         immersive: Cell::new(false),
         home: RefCell::new(None),
+        returns: RefCell::default(),
     });
     SHELL.with(|s| *s.borrow_mut() = Some(shell.clone()));
 
+    on_click(&root, "RailSearch", || show_tab(Tab::Search))?;
     for (tab, name) in TABS {
         for prefix in ["Rail", "Bar"] {
             on_click(&root, &format!("{prefix}{name}"), move || show_tab(tab))?;
@@ -304,20 +312,35 @@ pub fn toast(text: &str) {
     });
 }
 
-/// Switches to `tab`; leaving a video page or the login stops what it was doing.
-pub fn show_tab(tab: Tab) {
-    let Some(shell) = shell() else { return };
+/// Stops what the pages on show were doing.
+pub fn leave_pages() {
     player::leave();
     live_room::leave();
     me::leave();
+    PAGE_TURN.fetch_add(1, Ordering::Relaxed);
+}
+
+/// Bumped when pages change: answers for a page no longer on show are dropped.
+pub fn page_turn() -> u64 {
+    PAGE_TURN.load(Ordering::Relaxed)
+}
+
+/// Switches to `tab`; leaving a video page or the login stops what it was doing.
+pub fn show_tab(tab: Tab) {
+    let Some(shell) = shell() else { return };
+    shell.returns.borrow_mut().clear();
+    leave_pages();
     shell.tab.set(tab);
     let shown = match tab {
+        Tab::Search => search::show(),
         Tab::Home => shell.show_home(),
         Tab::Me => me::show(),
         Tab::Live => live::show(),
         Tab::Follow => follow::show(),
     };
-    let _ = shown.and_then(|()| shell.mark_tab());
+    if let Err(problem) = shown.and_then(|()| shell.mark_tab()) {
+        toast(&format!("打不开：{}", problem.message()));
+    }
 }
 
 impl Shell {
@@ -375,6 +398,8 @@ impl Shell {
         named::<IFrameworkElement>(&self.root, "Rail")?.SetWidth(width)?;
         let wide_enough = panes::rail_has_labels(width);
         let words = self.prefs.get().words;
+        visible(&self.root, "LabelSearch", wide_enough)?;
+        visible(&self.root, "RailIconSearch", !(words && wide_enough))?;
         for (_, name) in TABS {
             visible(&self.root, &format!("Label{name}"), wide_enough)?;
             // A narrow rail has no labels to stand in for its icons.
@@ -405,7 +430,19 @@ impl Shell {
 
     /// Back from a page opened over the current tab.
     pub fn back(&self) {
-        show_tab(self.tab.get());
+        let job = self.returns.borrow_mut().pop();
+        match job {
+            Some(job) => {
+                leave_pages();
+                job();
+            }
+            None => show_tab(self.tab.get()),
+        }
+    }
+
+    /// Says how to come back to the page on show from the next one opened.
+    pub fn remember(&self, back: impl Fn() + 'static) {
+        self.returns.borrow_mut().push(Box::new(back));
     }
 
     fn show_home(&self) -> Result<()> {
@@ -436,10 +473,17 @@ impl Shell {
         me::resized();
         live::resized();
         follow::resized();
+        up::resized();
+        if let Some(home) = self.home.borrow().as_ref() {
+            home.style()?;
+        }
         self.mark_tab()
     }
 
     fn mark_tab(&self) -> Result<()> {
+        let color = if self.tab.get() == Tab::Search { COBALT } else { DIM };
+        named::<IControl>(&self.root, "RailSearch")?
+            .SetForeground(&SolidColorBrush::CreateInstanceWithColor(color)?)?;
         for (tab, name) in TABS {
             let color = if tab == self.tab.get() { COBALT } else { DIM };
             let brush = SolidColorBrush::CreateInstanceWithColor(color)?;

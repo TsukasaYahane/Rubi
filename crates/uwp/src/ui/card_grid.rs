@@ -4,8 +4,10 @@
 use std::cell::{Cell, RefCell};
 use std::collections::{HashMap, HashSet};
 use std::rc::{Rc, Weak};
+use std::sync::Arc;
 use std::sync::atomic::{AtomicU64, Ordering};
 
+use rubi_core::UpOrder;
 use rubi_model::{LiveRoom, VideoCard};
 use windows_collections::IVector;
 use windows_core::{IInspectable, Interface, Ref, Result};
@@ -73,7 +75,7 @@ const GRID: &str = r##"<GridView xmlns="http://schemas.microsoft.com/winfx/2006/
 #[derive(Debug, Clone, PartialEq, Eq)]
 enum Target {
     Video { bvid: String, owner: String },
-    Room { id: u64, owner: String },
+    Room { id: u64, owner: String, uid: u64 },
 }
 
 /// One card.
@@ -107,13 +109,13 @@ impl Tile {
             title: room.title,
             cover: room.cover,
             live: Some(room.live),
-            target: Target::Room { id: room.room_id, owner: room.uname },
+            target: Target::Room { id: room.room_id, owner: room.uname, uid: room.uid },
         }
     }
 }
 
 /// What a grid shows.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Source {
     Recommended,
     Popular,
@@ -124,12 +126,16 @@ pub enum Source {
     Rooms(Option<u32>),
     /// Rooms of followed UPs, those on air first.
     FollowedRooms,
+    /// Videos a search found.
+    Search(Arc<str>),
+    /// An UP's uploads.
+    Uploads(u64, UpOrder),
 }
 
 impl Source {
     /// Page `page` of the list, from 1, and whether another may follow. `now` asked for by hand:
     /// the feed fills even while its sources cool down.
-    async fn fetch(self, core: &Backend, page: u32, now: bool) -> rubi_core::Result<(Vec<Tile>, bool)> {
+    async fn fetch(&self, core: &Backend, page: u32, now: bool) -> rubi_core::Result<(Vec<Tile>, bool)> {
         let services = &core.services;
         let videos = |cards: Vec<VideoCard>| cards.into_iter().map(Tile::video).collect::<Vec<_>>();
         match self {
@@ -157,9 +163,18 @@ impl Source {
             }
             Self::Ranking => Ok((videos(services.discover.ranking().await?), false)),
             Self::Zone(region) => {
-                let cards = services.discover.zone_feed(region, page).await?;
+                let cards = services.discover.zone_feed(*region, page).await?;
                 let more = !cards.is_empty();
                 Ok((videos(cards), more))
+            }
+            Self::Search(term) => {
+                let (cards, _) = services.discover.search(term, page).await?;
+                let more = !cards.is_empty();
+                Ok((videos(cards), more))
+            }
+            Self::Uploads(mid, order) => {
+                let found = services.space.uploads(*mid, page, *order).await?;
+                Ok((videos(found.items), found.has_more))
             }
             Self::Rooms(None) => {
                 let rooms = services.live.recommended().await?;
@@ -171,14 +186,14 @@ impl Source {
                 Ok((rooms.into_iter().map(Tile::room).collect(), more))
             }
             Self::Rooms(Some(area)) => {
-                let (rooms, more) = services.live.area_rooms(area, page).await?;
+                let (rooms, more) = services.live.area_rooms(*area, page).await?;
                 Ok((rooms.into_iter().map(Tile::room).collect(), more))
             }
         }
     }
 
-    fn working(self) -> &'static str {
-        if self == Self::Recommended { "正在获取推荐…" } else { "正在读取…" }
+    fn working(&self) -> &'static str {
+        if *self == Self::Recommended { "正在获取推荐…" } else { "正在读取…" }
     }
 }
 
@@ -196,7 +211,9 @@ pub struct CardGrid {
     /// Told when the grid has something new to say.
     spoke: Box<dyn Fn()>,
     grid: IFrameworkElement,
-    source: Cell<Option<Source>>,
+    source: RefCell<Option<Source>>,
+    /// Told before a card opens: the way back is the owner's to set up.
+    leaving: RefCell<Option<Box<dyn Fn()>>>,
     cards: RefCell<Vec<Tile>>,
     seen: RefCell<HashSet<String>>,
     page: Cell<u32>,
@@ -222,7 +239,8 @@ impl CardGrid {
             id: NEXT_ID.fetch_add(1, Ordering::Relaxed),
             spoke: Box::new(spoke),
             grid: grid.clone(),
-            source: Cell::new(None),
+            source: RefCell::default(),
+            leaving: RefCell::default(),
             cards: RefCell::default(),
             seen: RefCell::default(),
             page: Cell::new(1),
@@ -267,7 +285,12 @@ impl CardGrid {
     }
 
     pub fn source(&self) -> Option<Source> {
-        self.source.get()
+        self.source.borrow().clone()
+    }
+
+    /// Says what to do before a card opens.
+    pub fn before_opening(&self, leaving: impl Fn() + 'static) {
+        *self.leaving.borrow_mut() = Some(Box::new(leaving));
     }
 
     pub fn said(&self) -> String {
@@ -276,7 +299,8 @@ impl CardGrid {
 
     /// Starts over with `source`.
     pub fn open(self: &Rc<Self>, source: Source) -> Result<()> {
-        self.source.set(Some(source));
+        let working = source.working();
+        *self.source.borrow_mut() = Some(source);
         self.turn.set(self.turn.get() + 1);
         self.cards.borrow_mut().clear();
         self.seen.borrow_mut().clear();
@@ -284,21 +308,21 @@ impl CardGrid {
         self.ended.set(false);
         self.loading.set(false);
         self.grid.cast::<IItemsControl>()?.Items()?.cast::<IVector<IInspectable>>()?.Clear()?;
-        self.say(source.working());
+        self.say(working);
         self.load_page();
         Ok(())
     }
 
     /// Reads what it shows again, at the user's asking.
     pub fn refresh(self: &Rc<Self>) -> Result<()> {
-        let Some(source) = self.source.get() else { return Ok(()) };
+        let Some(source) = self.source() else { return Ok(()) };
         self.by_hand.set(true);
         self.open(source)
     }
 
     /// Forgets what it showed, until it is opened again.
     pub fn forget(&self) -> Result<()> {
-        self.source.set(None);
+        *self.source.borrow_mut() = None;
         self.turn.set(self.turn.get() + 1);
         self.cards.borrow_mut().clear();
         self.seen.borrow_mut().clear();
@@ -314,7 +338,7 @@ impl CardGrid {
     fn load_page(&self) {
         let Some(shell) = shell() else { return };
         let Some(backend) = shell.backend.get().cloned() else { return };
-        let Some(source) = self.source.get() else { return };
+        let Some(source) = self.source() else { return };
         if self.ended.get() || self.loading.replace(true) {
             return;
         }
@@ -422,9 +446,12 @@ impl CardGrid {
 
     fn open_row(&self, at: usize) -> Result<()> {
         let Some(card) = self.cards.borrow().get(at).cloned() else { return Ok(()) };
+        if let Some(leaving) = self.leaving.borrow().as_ref() {
+            leaving();
+        }
         match card.target {
             Target::Video { bvid, owner } => feed::route(&bvid, &card.title, &owner),
-            Target::Room { id, owner } => live_room::open(id, &card.title, &owner),
+            Target::Room { id, owner, uid } => live_room::open(id, &card.title, &owner, uid),
         }
     }
 }

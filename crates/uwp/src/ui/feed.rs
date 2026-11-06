@@ -84,6 +84,8 @@ pub const LAYOUT: &str = r##"
       <Button x:Name="Next"><FontIcon Glyph="&#xE70D;" FontSize="20" /></Button>
     </StackPanel>
     <StackPanel x:Name="Info" Grid.Row="2" Margin="12,0,72,8" VerticalAlignment="Bottom">
+      <Button x:Name="UpLink" Visibility="Collapsed" Background="Transparent" BorderThickness="0" Padding="0,2"
+              FontSize="13" Foreground="#6E9BFF" />
       <TextBlock x:Name="Title" FontSize="15" Foreground="White" TextWrapping="Wrap" MaxLines="2" />
       <TextBlock x:Name="Meta" FontSize="12" Margin="0,3,0,0" Foreground="#CCFFFFFF" TextWrapping="Wrap" MaxLines="2" />
     </StackPanel>

@@ -29,6 +29,7 @@ use crate::ui::quality;
 use crate::ui::shell::{shell, toast};
 use crate::ui::splitter;
 use crate::ui::twin_video::{SECOND_ELEMENT, TwinVideo};
+use crate::ui::up;
 use crate::ui::watch;
 use crate::ui::{load, named, on_click, on_enter, post, set_text, soon};
 use crate::xaml::{
@@ -36,8 +37,8 @@ use crate::xaml::{
     HorizontalAlignment, IButtonBase, IColumnDefinition, IContentControl, IControl, IDataWriter, IFontIcon,
     IFrameworkElement, IFrameworkElement4, IInputStream, IMediaPlaybackSession, IMediaPlayer, IMediaPlayer3,
     IMediaPlayerElement, IMediaPlayerFailedEventArgs, IOutputStream, IPanel, IRandomAccessStream, IRangeBase,
-    IRangeBaseValueChangedEventArgs, IRowDefinition, ITextBox, IUIElement, InMemoryRandomAccessStream,
-    MediaPlaybackSession, MediaPlaybackState, MediaPlayer, MediaPlayerFailedEventArgs, MediaSource,
+    IRangeBaseValueChangedEventArgs, IRowDefinition, ITextBlock, ITextBox, IUIElement, InMemoryRandomAccessStream,
+    MediaPlaybackSession, MediaPlaybackState, MediaPlayer, MediaPlayerFailedEventArgs, MediaSource, PropertyValue,
     RangeBaseValueChangedEventArgs, SizeChangedEventArgs, TappedRoutedEventArgs, UIElement, Uri, VerticalAlignment,
     VirtualKey, Visibility,
 };
@@ -109,6 +110,8 @@ const LAYOUT: &str = r##"
     </ContentControl>
     <StackPanel x:Name="Info" Grid.Row="3" Margin="16,10,16,6">
       <TextBlock x:Name="Title" FontSize="20" FontWeight="Light" TextWrapping="Wrap" MaxLines="2" />
+      <Button x:Name="UpLink" Visibility="Collapsed" Background="Transparent" BorderThickness="0" Padding="0,2"
+              FontSize="13" Foreground="#0050EF" />
       <TextBlock x:Name="Meta" FontSize="12" Margin="0,4,0,0" TextWrapping="Wrap" MaxLines="3"
                  Foreground="{ThemeResource SystemControlForegroundBaseMediumBrush}" />
     </StackPanel>
@@ -216,6 +219,8 @@ struct Page {
     cid: Rc<Cell<u64>>,
     /// The 竖屏推流 layout, not the ordinary one.
     feed: bool,
+    /// The UP, once known.
+    up: Rc<RefCell<(u64, String)>>,
     /// The qualities on offer.
     offer: Rc<RefCell<Offer>>,
     bar: Rc<ControlBar>,
@@ -601,6 +606,7 @@ pub fn open(feed: bool, bvid: &str, title: &str, uploader: &str) -> Result<()> {
         bvid: bvid.to_owned(),
         cid,
         feed,
+        up: Rc::default(),
         offer: Rc::default(),
         bar: ControlBar::attach(
             &root,
@@ -625,6 +631,7 @@ pub fn open(feed: bool, bvid: &str, title: &str, uploader: &str) -> Result<()> {
     on_click(&root, "ActDanmaku", toggle_danmaku)?;
     on_click(&root, "Full", toggle_full)?;
     on_click(&root, "Quality", choose_quality)?;
+    on_click(&root, "UpLink", open_up)?;
     on_click(&root, "PlayPause", toggle_play)?;
     on_click(&root, "DanmakuSwitch", toggle_danmaku)?;
     keep(
@@ -673,6 +680,7 @@ pub fn open(feed: bool, bvid: &str, title: &str, uploader: &str) -> Result<()> {
                 page.side.set_aid(card.aid);
                 page.actions.set_counts(card.stats.like, card.stats.coin, card.stats.favorite);
                 let _ = set_text(&page.root, "Title", &card.title);
+                let _ = show_up_link(&page, card.owner.mid, &card.owner.name);
                 let _ = set_text(&page.root, "Meta", &format!("{} 播放 · {}", card.stats.view, card.desc));
             }
             if let Some(relation) = relation {
@@ -723,6 +731,25 @@ fn settle_buttons(root: &IFrameworkElement) -> Result<()> {
         }
     }
     Ok(())
+}
+
+fn show_up_link(page: &Page, mid: u64, name: &str) -> Result<()> {
+    *page.up.borrow_mut() = (mid, name.to_owned());
+    named::<IContentControl>(&page.root, "UpLink")?.SetContent(&PropertyValue::CreateString(name)?)?;
+    named::<IUIElement>(&page.root, "UpLink")?.SetVisibility(Visibility::Visible)
+}
+
+/// Opens the UP's page, coming back to this video from the start.
+fn open_up() {
+    let (Some(page), Some(shell)) = (page(), shell()) else { return };
+    let (mid, name) = page.up.borrow().clone();
+    let (bvid, title) = (page.bvid.clone(), named::<ITextBlock>(&page.root, "Title").and_then(|t| t.Text()));
+    let (title, uploader, feed) = (title.map(|t| t.to_string()).unwrap_or_default(), name.clone(), page.feed);
+    shell.remember(move || {
+        let _ = open(feed, &bvid, &title, &uploader);
+    });
+    crate::ui::shell::leave_pages();
+    let _ = up::open(mid, &name);
 }
 
 fn go_back() {

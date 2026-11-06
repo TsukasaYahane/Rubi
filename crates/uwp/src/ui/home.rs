@@ -7,8 +7,9 @@ use std::rc::Rc;
 use rubi_core::HOME_ZONES;
 use windows_core::{IInspectable, Interface, Ref, Result};
 
+use crate::state::layout::WindowClass;
 use crate::ui::card_grid::{CardGrid, Source};
-use crate::ui::shell::shell;
+use crate::ui::shell::{Tab, shell, show_tab};
 use crate::ui::{REFRESH_BUTTON, keep, load, load_object, named, on_click, set_text, style_refresh};
 use crate::xaml::{
     Color, FrameworkElement, IContentControl, IControl, IFlyoutBase, IFrameworkElement, IMenuFlyout, IMenuFlyoutItem,
@@ -29,7 +30,7 @@ const LAYOUT: &str = r##"
     <RowDefinition Height="*" />
   </Grid.RowDefinitions>
   <Grid Margin="16,8,16,8">
-    <Grid.ColumnDefinitions><ColumnDefinition Width="Auto" /><ColumnDefinition Width="*" /><ColumnDefinition Width="Auto" /></Grid.ColumnDefinitions>
+    <Grid.ColumnDefinitions><ColumnDefinition Width="Auto" /><ColumnDefinition Width="*" /><ColumnDefinition Width="Auto" /><ColumnDefinition Width="Auto" /></Grid.ColumnDefinitions>
     <StackPanel Orientation="Horizontal">
       <StackPanel.Resources>
         <Style TargetType="Button">
@@ -47,6 +48,8 @@ const LAYOUT: &str = r##"
     <TextBlock x:Name="Status" Grid.Column="1" FontSize="13" VerticalAlignment="Center" TextTrimming="CharacterEllipsis"
                Foreground="{ThemeResource SystemControlForegroundBaseMediumBrush}" />
     <!--refresh-->
+    <Button x:Name="Search" Grid.Column="3" Visibility="Collapsed" Background="Transparent" BorderThickness="0"
+            Padding="8,2" VerticalAlignment="Center"><FontIcon Glyph="&#xE721;" FontSize="14" /></Button>
   </Grid>
   <Grid x:Name="Grids" Grid.Row="1" />
 </Grid>"##;
@@ -101,6 +104,7 @@ impl HomePage {
                 let _ = page.refresh();
             }
         })?;
+        on_click(&page.root, "Search", || show_tab(Tab::Search))?;
         page.show_tab()?;
         Ok(page)
     }
@@ -137,7 +141,10 @@ impl HomePage {
 
     /// Follows the interface style.
     pub fn style(&self) -> Result<()> {
-        style_refresh(&self.root)
+        style_refresh(&self.root)?;
+        let narrow = shell().is_some_and(|s| s.class() == WindowClass::Narrow);
+        let shown = if narrow { Visibility::Visible } else { Visibility::Collapsed };
+        named::<IUIElement>(&self.root, "Search")?.SetVisibility(shown)
     }
 
     fn reopen(&self) -> Result<()> {

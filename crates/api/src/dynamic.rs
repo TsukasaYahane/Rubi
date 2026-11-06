@@ -13,6 +13,8 @@ use crate::parse::{card_of_dynamic, https_image, image_of, str_of, u64_of};
 
 const PORTAL: &str = "https://api.bilibili.com/x/polymer/web-dynamic/v1/portal";
 const FEED: &str = "https://api.bilibili.com/x/polymer/web-dynamic/v1/feed/all";
+/// `feed/all` with `host_mid` only knows followed UPs; this one knows everyone.
+const SPACE: &str = "https://api.bilibili.com/x/polymer/web-dynamic/v1/feed/space";
 const SPACE_SEARCH: &str = "https://api.bilibili.com/x/polymer/web-dynamic/v1/feed/space/search";
 
 #[async_trait]
@@ -136,11 +138,11 @@ impl DynamicApi for WebDynamic {
     }
 
     async fn up_dynamics(&self, mid: u64, offset: Option<&str>) -> Result<(Vec<Dynamic>, Option<String>)> {
-        self.feed(params!["host_mid" => mid, "timezone_offset" => -480], offset).await
+        self.feed(SPACE, params!["host_mid" => mid, "timezone_offset" => -480], offset, true).await
     }
 
     async fn followed_posts(&self, offset: Option<&str>) -> Result<(Vec<Dynamic>, Option<String>)> {
-        self.feed(params!["type" => "all", "timezone_offset" => -480], offset).await
+        self.feed(FEED, params!["type" => "all", "timezone_offset" => -480], offset, false).await
     }
 
     async fn search_up(&self, mid: u64, keyword: &str, page: u32) -> Result<(Vec<Dynamic>, bool)> {
@@ -154,12 +156,18 @@ impl DynamicApi for WebDynamic {
 }
 
 impl WebDynamic {
-    /// A page of `feed/all` with `p`, after `offset`.
-    async fn feed(&self, mut p: crate::http::Params, offset: Option<&str>) -> Result<(Vec<Dynamic>, Option<String>)> {
+    /// A page of the feed at `url` with `p`, after `offset`.
+    async fn feed(
+        &self,
+        url: &str,
+        mut p: crate::http::Params,
+        offset: Option<&str>,
+        sign: bool,
+    ) -> Result<(Vec<Dynamic>, Option<String>)> {
         if let Some(o) = offset {
             p.push(("offset".into(), o.into()));
         }
-        let d = self.http.get_json(FEED, p, false).await?;
+        let d = self.http.get_json(url, p, sign).await?;
         let items = d["items"].as_array().map(|a| a.iter().map(dynamic_of).collect()).unwrap_or_default();
         let next = Some(str_of(&d["offset"])).filter(|o| !o.is_empty() && d["has_more"].as_bool().unwrap_or(false));
         Ok((items, next))

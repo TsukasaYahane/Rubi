@@ -24,12 +24,13 @@ use crate::ui::quality;
 use crate::ui::rows::{add_rows, on_row};
 use crate::ui::shell::{shell, toast};
 use crate::ui::twin_video::{SECOND_ELEMENT, TwinVideo};
+use crate::ui::up;
 use crate::ui::{keep, load, media, named, on_click, on_enter, post, set_text, soon};
 use crate::xaml::{
-    Color, ElementTheme, FocusState, FrameworkElement, Grid, GridLength, GridUnitType, IColumnDefinition, IControl,
-    IFontIcon, IFrameworkElement, IFrameworkElement2, IItemsControl, IMediaPlayer, IMediaPlayerElement, IPanel,
-    IRowDefinition, ITextBlock, ITextBox, IUIElement, MediaPlaybackState, MediaPlayer, MediaSource,
-    SizeChangedEventArgs, SolidColorBrush, Thickness, VirtualKey, Visibility,
+    Color, ElementTheme, FocusState, FrameworkElement, Grid, GridLength, GridUnitType, IColumnDefinition,
+    IContentControl, IControl, IFontIcon, IFrameworkElement, IFrameworkElement2, IItemsControl, IMediaPlayer,
+    IMediaPlayerElement, IPanel, IRowDefinition, ITextBlock, ITextBox, IUIElement, MediaPlaybackState, MediaPlayer,
+    MediaSource, PropertyValue, SizeChangedEventArgs, SolidColorBrush, Thickness, VirtualKey, Visibility,
 };
 
 /// Width of the danmaku list beside the picture.
@@ -89,6 +90,8 @@ const LAYOUT: &str = r##"
     </ContentControl>
     <StackPanel x:Name="Info" Grid.Row="2" Padding="16,10">
       <TextBlock x:Name="Title" FontSize="18" FontWeight="Light" TextTrimming="CharacterEllipsis" />
+      <Button x:Name="UpLink" Background="Transparent" BorderThickness="0" Padding="0,2"
+              FontSize="13" Foreground="#0050EF" />
       <TextBlock x:Name="Meta" FontSize="12" TextWrapping="Wrap"
                  Foreground="{ThemeResource SystemControlForegroundBaseMediumBrush}" />
     </StackPanel>
@@ -185,7 +188,18 @@ pub fn leave() {
 }
 
 /// Opens room `room_id`.
-pub fn open(room_id: u64, title: &str, uploader: &str) -> Result<()> {
+/// Opens the UP's page, coming back to this room.
+fn open_up(room_id: u64, title: &str, name: &str, uid: u64) {
+    let Some(shell) = shell() else { return };
+    let (back_title, back_name) = (title.to_owned(), name.to_owned());
+    shell.remember(move || {
+        let _ = open(room_id, &back_title, &back_name, uid);
+    });
+    crate::ui::shell::leave_pages();
+    let _ = up::open(uid, name);
+}
+
+pub fn open(room_id: u64, title: &str, uploader: &str, uid: u64) -> Result<()> {
     let Some(shell) = shell() else { return Ok(()) };
     let Some(backend) = shell.backend.get().cloned() else { return Ok(()) };
     crate::ui::player::leave();
@@ -236,7 +250,12 @@ pub fn open(room_id: u64, title: &str, uploader: &str) -> Result<()> {
 
     let opening = run();
     let (dispatcher, core) = (shell.dispatcher.clone(), backend.clone());
-    set_text(&root, "Meta", uploader)?;
+    named::<IContentControl>(&root, "UpLink")?.SetContent(&PropertyValue::CreateString(uploader)?)?;
+    let (back_title, back_name) = (title.to_owned(), uploader.to_owned());
+    on_click(&root, "UpLink", move || open_up(room_id, &back_title, &back_name, uid))?;
+    if uid == 0 {
+        named::<IUIElement>(&root, "UpLink")?.SetVisibility(Visibility::Collapsed)?;
+    }
     backend.spawn(async move {
         let started = source_at(&core, room_id, None).await;
         post(&dispatcher, move || {

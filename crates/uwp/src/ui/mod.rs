@@ -1,6 +1,7 @@
 //! The pages. XAML objects stay on the UI thread: work goes to the backend, and comes back
 //! through [`post`] as plain data.
 
+pub mod article;
 pub mod card_grid;
 pub mod card_menu;
 pub mod control_bar;
@@ -16,13 +17,16 @@ pub mod media;
 pub mod player;
 pub mod player_actions;
 pub mod player_side;
+pub mod post_list;
 pub mod quality;
 pub mod rows;
 pub mod schedule;
+pub mod search;
 pub mod settings;
 pub mod shell;
 pub mod splitter;
 pub mod twin_video;
+pub mod up;
 pub mod video_list;
 pub mod watch;
 

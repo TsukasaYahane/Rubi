@@ -45,6 +45,8 @@ pub struct Post {
     pub quote: String,
     /// Where the card opens when it has no video.
     pub link: String,
+    /// The link is an article the app can show.
+    pub readable: bool,
 }
 
 fn kind_label(kind: DynamicKind) -> &'static str {
@@ -80,6 +82,7 @@ impl Post {
         }
         let more_pictures = pictures.len().saturating_sub(PICTURES);
         pictures.truncate(PICTURES);
+        let readable = matches!(post.kind, DynamicKind::Article | DynamicKind::Opus);
         let link = if post.link.is_empty() { orig.map_or_else(String::new, |o| o.link.clone()) } else { post.link };
         Self {
             id: post.id,
@@ -92,6 +95,7 @@ impl Post {
             more_pictures,
             quote,
             link,
+            readable,
         }
     }
 }
