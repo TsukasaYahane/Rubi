@@ -410,6 +410,7 @@ impl Shell {
         }
         let home = self.home.borrow();
         let Some(home) = home.as_ref() else { return Ok(()) };
+        home.style()?;
         self.set_page(home.root())?;
         self.mark_tab()
     }

@@ -127,18 +127,28 @@ pub enum Source {
 }
 
 impl Source {
-    /// Page `page` of the list, from 1, and whether another may follow.
-    async fn fetch(self, core: &Backend, page: u32) -> rubi_core::Result<(Vec<Tile>, bool)> {
+    /// Page `page` of the list, from 1, and whether another may follow. `now` asked for by hand:
+    /// the feed fills even while its sources cool down.
+    async fn fetch(self, core: &Backend, page: u32, now: bool) -> rubi_core::Result<(Vec<Tile>, bool)> {
         let services = &core.services;
         let videos = |cards: Vec<VideoCard>| cards.into_iter().map(Tile::video).collect::<Vec<_>>();
         match self {
             Self::Recommended => {
                 if page == 1 {
                     let _ = services.account.ensure_device_ids().await;
-                    services.home.refresh(PER_SOURCE).await?;
+                    if now {
+                        services.home.refresh_now(PER_SOURCE).await?;
+                    } else {
+                        services.home.refresh(PER_SOURCE).await?;
+                    }
                 }
-                let cards = services.home.next_page(PAGE)?.into_iter().map(|r| r.card).collect();
-                Ok((videos(cards), true))
+                let mut cards = services.home.next_page(PAGE)?;
+                if now && cards.is_empty() {
+                    // Everything in the pool was seen: start over rather than show nothing.
+                    services.home.new_session();
+                    cards = services.home.next_page(PAGE)?;
+                }
+                Ok((videos(cards.into_iter().map(|r| r.card).collect()), true))
             }
             Self::Popular => {
                 let cards = services.discover.popular(page).await?;
@@ -190,6 +200,8 @@ pub struct CardGrid {
     cards: RefCell<Vec<Tile>>,
     seen: RefCell<HashSet<String>>,
     page: Cell<u32>,
+    /// The next load was asked for by hand.
+    by_hand: Cell<bool>,
     ended: Cell<bool>,
     loading: Cell<bool>,
     /// Bumped when the grid starts over: answers for an earlier one are dropped.
@@ -214,6 +226,7 @@ impl CardGrid {
             cards: RefCell::default(),
             seen: RefCell::default(),
             page: Cell::new(1),
+            by_hand: Cell::new(false),
             ended: Cell::new(false),
             loading: Cell::new(false),
             turn: Cell::new(0),
@@ -276,6 +289,13 @@ impl CardGrid {
         Ok(())
     }
 
+    /// Reads what it shows again, at the user's asking.
+    pub fn refresh(self: &Rc<Self>) -> Result<()> {
+        let Some(source) = self.source.get() else { return Ok(()) };
+        self.by_hand.set(true);
+        self.open(source)
+    }
+
     /// Forgets what it showed, until it is opened again.
     pub fn forget(&self) -> Result<()> {
         self.source.set(None);
@@ -299,9 +319,10 @@ impl CardGrid {
             return;
         }
         let (id, turn, page) = (self.id, self.turn.get(), self.page.get());
+        let now = self.by_hand.take();
         let (dispatcher, core) = (shell.dispatcher.clone(), backend.clone());
         backend.spawn(async move {
-            let answer = source.fetch(&core, page).await.map_err(|e| e.to_string());
+            let answer = source.fetch(&core, page, now).await.map_err(|e| e.to_string());
             post(&dispatcher, move || {
                 if let Some(grid) = GRIDS.with_borrow(|g| g.get(&id).and_then(Weak::upgrade)) {
                     let _ = grid.answered(turn, answer);

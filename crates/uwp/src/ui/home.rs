@@ -9,7 +9,7 @@ use windows_core::{IInspectable, Interface, Ref, Result};
 
 use crate::ui::card_grid::{CardGrid, Source};
 use crate::ui::shell::shell;
-use crate::ui::{keep, load, load_object, named, on_click, set_text};
+use crate::ui::{REFRESH_BUTTON, keep, load, load_object, named, on_click, set_text, style_refresh};
 use crate::xaml::{
     Color, FrameworkElement, IContentControl, IControl, IFlyoutBase, IFrameworkElement, IMenuFlyout, IMenuFlyoutItem,
     IPanel, IUIElement, PropertyValue, RoutedEventArgs, SolidColorBrush, UIElement, Visibility,
@@ -29,7 +29,7 @@ const LAYOUT: &str = r##"
     <RowDefinition Height="*" />
   </Grid.RowDefinitions>
   <Grid Margin="16,8,16,8">
-    <Grid.ColumnDefinitions><ColumnDefinition Width="Auto" /><ColumnDefinition Width="*" /></Grid.ColumnDefinitions>
+    <Grid.ColumnDefinitions><ColumnDefinition Width="Auto" /><ColumnDefinition Width="*" /><ColumnDefinition Width="Auto" /></Grid.ColumnDefinitions>
     <StackPanel Orientation="Horizontal">
       <StackPanel.Resources>
         <Style TargetType="Button">
@@ -46,6 +46,7 @@ const LAYOUT: &str = r##"
     </StackPanel>
     <TextBlock x:Name="Status" Grid.Column="1" FontSize="13" VerticalAlignment="Center" TextTrimming="CharacterEllipsis"
                Foreground="{ThemeResource SystemControlForegroundBaseMediumBrush}" />
+    <!--refresh-->
   </Grid>
   <Grid x:Name="Grids" Grid.Row="1" />
 </Grid>"##;
@@ -67,7 +68,7 @@ pub struct HomePage {
 
 impl HomePage {
     pub fn new() -> Result<Rc<Self>> {
-        let root = load(LAYOUT)?;
+        let root = load(&LAYOUT.replace("<!--refresh-->", REFRESH_BUTTON))?;
         let told = |tab: usize| {
             move || {
                 if let Some(home) = shell().and_then(|s| s.home_page()) {
@@ -94,6 +95,12 @@ impl HomePage {
                 }
             })?;
         }
+        let weak = Rc::downgrade(&page);
+        on_click(&page.root, "Refresh", move || {
+            if let Some(page) = weak.upgrade() {
+                let _ = page.refresh();
+            }
+        })?;
         page.show_tab()?;
         Ok(page)
     }
@@ -121,6 +128,16 @@ impl HomePage {
             let _ = grid.forget();
         }
         let _ = self.reopen();
+    }
+
+    /// Reads the list on show again.
+    fn refresh(&self) -> Result<()> {
+        self.grids[self.current.get()].refresh()
+    }
+
+    /// Follows the interface style.
+    pub fn style(&self) -> Result<()> {
+        style_refresh(&self.root)
     }
 
     fn reopen(&self) -> Result<()> {

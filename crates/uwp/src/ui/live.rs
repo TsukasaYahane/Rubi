@@ -12,7 +12,7 @@ use crate::state::settings::escape;
 use crate::ui::card_grid::{CardGrid, Source};
 use crate::ui::schedule::Schedule;
 use crate::ui::shell::shell;
-use crate::ui::{load, named, on_click, post, set_text};
+use crate::ui::{REFRESH_BUTTON, load, named, on_click, post, set_text, style_refresh};
 use crate::xaml::{
     Color, IContentControl, IControl, IFrameworkElement, IPanel, IUIElement, SolidColorBrush, UIElement, Visibility,
 };
@@ -34,7 +34,7 @@ const LAYOUT: &str = r##"
     <RowDefinition Height="Auto" /><RowDefinition Height="Auto" /><RowDefinition Height="*" />
   </Grid.RowDefinitions>
   <Grid Margin="16,8,16,4">
-    <Grid.ColumnDefinitions><ColumnDefinition Width="Auto" /><ColumnDefinition Width="*" /></Grid.ColumnDefinitions>
+    <Grid.ColumnDefinitions><ColumnDefinition Width="Auto" /><ColumnDefinition Width="*" /><ColumnDefinition Width="Auto" /></Grid.ColumnDefinitions>
     <StackPanel Orientation="Horizontal">
       <StackPanel.Resources>
         <Style TargetType="Button">
@@ -51,6 +51,7 @@ const LAYOUT: &str = r##"
     </StackPanel>
     <TextBlock x:Name="Status" Grid.Column="1" FontSize="13" VerticalAlignment="Center" TextTrimming="CharacterEllipsis"
                Foreground="{ThemeResource SystemControlForegroundBaseMediumBrush}" />
+    <!--refresh-->
   </Grid>
   <ScrollViewer Grid.Row="1" HorizontalScrollBarVisibility="Hidden" HorizontalScrollMode="Enabled"
                 VerticalScrollMode="Disabled" VerticalScrollBarVisibility="Disabled">
@@ -105,7 +106,7 @@ pub struct LivePage {
 
 impl LivePage {
     fn new() -> Result<Rc<Self>> {
-        let root = load(LAYOUT)?;
+        let root = load(&LAYOUT.replace("<!--refresh-->", REFRESH_BUTTON))?;
         let rooms = CardGrid::new(|| {
             if let Some(page) = held() {
                 page.show_status();
@@ -130,6 +131,12 @@ impl LivePage {
             areas: RefCell::default(),
             area_chips: RefCell::default(),
         });
+        let weak = Rc::downgrade(&page);
+        on_click(&page.root, "Refresh", move || {
+            if let Some(page) = weak.upgrade() {
+                let _ = page.refresh_list();
+            }
+        })?;
         for tab in 0..TABS {
             let weak = Rc::downgrade(&page);
             on_click(&page.root, &format!("Tab{tab}"), move || {
@@ -139,6 +146,15 @@ impl LivePage {
             })?;
         }
         Ok(page)
+    }
+
+    /// Reads the list on show again.
+    fn refresh_list(&self) -> Result<()> {
+        match self.tab.get() {
+            0 => self.rooms.refresh(),
+            FOLLOWED_TAB => self.followed.refresh(),
+            _ => self.schedule.refresh(),
+        }
     }
 
     fn select(&self, tab: usize) -> Result<()> {
@@ -276,6 +292,7 @@ pub fn show() -> Result<()> {
             page
         }
     };
+    style_refresh(&page.root)?;
     shell.set_page(&page.root)?;
     page.apply()?;
     page.load_areas();

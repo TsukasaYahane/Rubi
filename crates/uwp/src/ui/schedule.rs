@@ -124,6 +124,13 @@ impl Schedule {
         self.open(0)
     }
 
+    /// Reads the game on show again.
+    pub fn refresh(&self) -> Result<()> {
+        self.open(self.game.get())?;
+        self.say("正在读取…");
+        Ok(())
+    }
+
     fn open(&self, game: u32) -> Result<()> {
         self.game.set(game);
         self.page.set(1);

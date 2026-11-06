@@ -31,7 +31,8 @@ use windows_core::{EventRevoker, IInspectable, Interface, Ref, Result};
 
 use crate::xaml::{
     CoreDispatcher, CoreDispatcherPriority, DispatchedHandler, IButtonBase, ICoreDispatcher, IFrameworkElement,
-    IKeyRoutedEventArgs, ITextBlock, IUIElement, KeyRoutedEventArgs, RoutedEventArgs, VirtualKey, XamlReader,
+    IKeyRoutedEventArgs, ITextBlock, IUIElement, KeyRoutedEventArgs, RoutedEventArgs, VirtualKey, Visibility,
+    XamlReader,
 };
 
 /// Runs `job` on the UI thread.
@@ -77,6 +78,19 @@ pub fn named<T: Interface>(root: &IFrameworkElement, name: &str) -> Result<T> {
 
 pub fn set_text(root: &IFrameworkElement, name: &str, text: &str) -> Result<()> {
     named::<ITextBlock>(root, name)?.SetText(text)
+}
+
+/// A button to read a page's list again; goes in a layout's namespace.
+pub const REFRESH_BUTTON: &str = r##"<Button x:Name="Refresh" Grid.Column="2" Background="Transparent" BorderThickness="0"
+  Padding="8,2" VerticalAlignment="Center"><StackPanel Orientation="Horizontal">
+  <FontIcon x:Name="RefreshIcon" Glyph="&#xE72C;" FontSize="14" Margin="0,0,6,0" /><TextBlock Text="刷新" FontSize="13" />
+  </StackPanel></Button>"##;
+
+/// Hides the refresh button's icon in the words style.
+pub fn style_refresh(root: &IFrameworkElement) -> Result<()> {
+    let words = shell::shell().is_some_and(|s| s.prefs().words);
+    let shown = if words { Visibility::Collapsed } else { Visibility::Visible };
+    named::<IUIElement>(root, "RefreshIcon")?.SetVisibility(shown)
 }
 
 /// Calls `action` when Enter goes down in the box named `name`.

@@ -61,24 +61,23 @@ const LAYOUT: &str = r##"
         <TextBlock x:Name="NoticeText" FontSize="15" Foreground="White" Margin="24,12,24,0" TextWrapping="Wrap"
                    TextAlignment="Center" />
       </StackPanel>
-      <Grid VerticalAlignment="Top">
+      <Button x:Name="Back" VerticalAlignment="Top" Background="Transparent" BorderThickness="0" Padding="12,8"
+              Foreground="White"><FontIcon Glyph="&#xE72B;" FontSize="16" /></Button>
+      <Grid VerticalAlignment="Bottom" Background="#99000000" Padding="4,2,8,2">
         <Grid.ColumnDefinitions>
-          <ColumnDefinition Width="Auto" /><ColumnDefinition Width="*" /><ColumnDefinition Width="Auto" />
+          <ColumnDefinition Width="Auto" /><ColumnDefinition Width="Auto" /><ColumnDefinition Width="*" />
           <ColumnDefinition Width="Auto" /><ColumnDefinition Width="Auto" />
         </Grid.ColumnDefinitions>
-        <Button x:Name="Back" Background="Transparent" BorderThickness="0" Padding="12,8" Foreground="White">
-          <FontIcon Glyph="&#xE72B;" FontSize="16" />
-        </Button>
-        <TextBlock x:Name="Online" Grid.Column="1" HorizontalAlignment="Right" VerticalAlignment="Center"
-                   FontSize="12" Foreground="White" />
-        <Button x:Name="Mute" Grid.Column="2" Margin="8,0,0,0" Background="Transparent" Foreground="White"
-                BorderThickness="0" Padding="8,6" VerticalAlignment="Center">
-          <FontIcon x:Name="MuteIcon" Glyph="&#xE767;" FontSize="16" />
-        </Button>
-        <Slider x:Name="Volume" Grid.Column="3" Width="96" Minimum="0" Maximum="100" StepFrequency="1"
+        <Button x:Name="Mute" Background="Transparent" Foreground="White" BorderThickness="0" Padding="8,6"
+                VerticalAlignment="Center"><FontIcon x:Name="MuteIcon" Glyph="&#xE767;" FontSize="16" /></Button>
+        <Slider x:Name="Volume" Grid.Column="1" Width="96" Minimum="0" Maximum="100" StepFrequency="1"
                 VerticalAlignment="Center" IsThumbToolTipEnabled="False" />
-        <Button x:Name="Full" Grid.Column="4" Margin="8" Background="#59000000" Foreground="White"
-                BorderThickness="0" Padding="10,6">
+        <ContentControl x:Name="SendInFull" Grid.Column="2" IsTabStop="False" HorizontalContentAlignment="Stretch"
+                        MaxWidth="560" Margin="12,0" />
+        <TextBlock x:Name="Online" Grid.Column="3" VerticalAlignment="Center" FontSize="12" Foreground="White"
+                   Margin="12,0" />
+        <Button x:Name="Full" Grid.Column="4" Background="Transparent" Foreground="White" BorderThickness="0"
+                Padding="8,6" VerticalAlignment="Center">
           <FontIcon x:Name="FullIcon" Glyph="&#xE740;" FontSize="16" />
         </Button>
       </Grid>
@@ -145,8 +144,7 @@ struct Room {
     next_danmaku: Cell<u64>,
     full: Cell<bool>,
     muted: Cell<bool>,
-    /// The send bar sits under the list, not the picture.
-    send_below_chat: Cell<bool>,
+    send_bar: Cell<SendPlace>,
 }
 
 thread_local! {
@@ -222,7 +220,7 @@ pub fn open(room_id: u64, title: &str, uploader: &str) -> Result<()> {
         next_danmaku: Cell::new(1),
         full: Cell::new(false),
         muted: Cell::new(false),
-        send_below_chat: Cell::new(false),
+        send_bar: Cell::new(SendPlace::BelowVideo),
     });
     ROOM.with_borrow_mut(|r| *r = Some(shown.clone()));
     on_click(&root, "Back", go_back)?;
@@ -417,31 +415,53 @@ fn apply_layout(root: &IFrameworkElement) -> Result<()> {
     Grid::SetColumn(&pane, if wide { 1 } else { 0 })?;
     Grid::SetRow(&pane, if wide { 0 } else { 1 })?;
     named::<IUIElement>(root, "ChatPane")?.SetVisibility(shown(!full))?;
-    named::<IUIElement>(root, "SendBar")?.SetVisibility(shown(!full))?;
     named::<IUIElement>(root, "Info")?.SetVisibility(shown(!full))?;
-    move_send_bar(root, wide)
+    move_send_bar(
+        root,
+        match (full, wide) {
+            (true, _) => SendPlace::InFull,
+            (false, true) => SendPlace::BelowChat,
+            (false, false) => SendPlace::BelowVideo,
+        },
+    )
 }
 
-/// Under the list it wears the page's colours; under the picture, the picture's.
-fn move_send_bar(root: &IFrameworkElement, below_chat: bool) -> Result<()> {
+/// Where the send bar sits.
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum SendPlace {
+    BelowVideo,
+    BelowChat,
+    InFull,
+}
+
+impl SendPlace {
+    fn host(self) -> &'static str {
+        match self {
+            Self::BelowVideo => "SendBelowVideo",
+            Self::BelowChat => "SendBelowChat",
+            Self::InFull => "SendInFull",
+        }
+    }
+}
+
+/// Under the list it wears the page's colours and a box of its own; on the picture, the picture's.
+fn move_send_bar(root: &IFrameworkElement, place: SendPlace) -> Result<()> {
     let Some(room) = room() else { return Ok(()) };
     let bar = named::<UIElement>(root, "SendBar")?;
-    let (from, to) = if below_chat { ("SendBelowVideo", "SendBelowChat") } else { ("SendBelowChat", "SendBelowVideo") };
-    if room.send_below_chat.replace(below_chat) != below_chat {
-        named::<IContentControl>(root, from)?.SetContent(None::<&windows_core::IInspectable>)?;
-        named::<IContentControl>(root, to)?.SetContent(&bar)?;
+    let from = room.send_bar.replace(place);
+    if from != place {
+        named::<IContentControl>(root, from.host())?.SetContent(None::<&windows_core::IInspectable>)?;
+        named::<IContentControl>(root, place.host())?.SetContent(&bar)?;
     }
-    let color = if below_chat { Color { a: 0, r: 0, g: 0, b: 0 } } else { Color { a: 255, r: 0x11, g: 0x11, b: 0x11 } };
+    let color = match place {
+        SendPlace::BelowVideo => Color { a: 255, r: 0x11, g: 0x11, b: 0x11 },
+        _ => Color { a: 0, r: 0, g: 0, b: 0 },
+    };
     bar.cast::<IPanel>()?.SetBackground(&SolidColorBrush::CreateInstanceWithColor(color)?)?;
-    // A box of its own under the list; under the picture a line is enough.
-    let edge = if below_chat { 1.0 } else { 0.0 };
-    named::<IControl>(root, "SendText")?.SetBorderThickness(Thickness {
-        left: edge,
-        top: edge,
-        right: edge,
-        bottom: 1.0,
-    })?;
-    let theme = if below_chat { ElementTheme::Default } else { ElementTheme::Dark };
+    let edge = if place == SendPlace::BelowChat { 1.0 } else { 0.0 };
+    let line = Thickness { left: edge, top: edge, right: edge, bottom: 1.0 };
+    named::<IControl>(root, "SendText")?.SetBorderThickness(line)?;
+    let theme = if place == SendPlace::BelowChat { ElementTheme::Default } else { ElementTheme::Dark };
     bar.cast::<IFrameworkElement2>()?.SetRequestedTheme(theme)
 }
 
