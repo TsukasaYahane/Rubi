@@ -21,11 +21,11 @@ use crate::ui::rows::{add_rows, on_row};
 use crate::ui::shell::shell;
 use crate::ui::{keep, load, media, named, on_click, on_enter, post, set_text, soon};
 use crate::xaml::{
-    Color, ElementTheme, FocusState, FrameworkElement, Grid, GridLength, GridUnitType, IColumnDefinition,
-    IContentControl, IControl, IFontIcon, IFrameworkElement, IFrameworkElement2, IItemsControl, IMediaPlayer,
-    IMediaPlayerElement, IPanel, IRangeBase, IRowDefinition, ITextBlock, ITextBox, IUIElement, MediaPlayer,
-    MediaSource, PointerRoutedEventArgs, RangeBaseValueChangedEventArgs, SizeChangedEventArgs, SolidColorBrush,
-    Thickness, UIElement, VirtualKey, Visibility,
+    Color, CoreCursor, CoreCursorType, CoreWindow, ElementTheme, FocusState, FrameworkElement, Grid, GridLength,
+    GridUnitType, IColumnDefinition, IContentControl, IControl, ICoreWindow, IFontIcon, IFrameworkElement,
+    IFrameworkElement2, IItemsControl, IMediaPlayer, IMediaPlayerElement, IPanel, IRangeBase, IRowDefinition,
+    ITextBlock, ITextBox, IUIElement, MediaPlayer, MediaSource, PointerRoutedEventArgs, RangeBaseValueChangedEventArgs,
+    SizeChangedEventArgs, SolidColorBrush, Thickness, UIElement, VirtualKey, Visibility,
 };
 
 /// Width of the danmaku list beside the picture.
@@ -152,6 +152,10 @@ struct Room {
     next_danmaku: Cell<u64>,
     full: Cell<bool>,
     muted: Cell<bool>,
+    /// Where the pointer last was.
+    pointer: Cell<(f32, f32)>,
+    /// The bars and the cursor are hidden.
+    idle: Cell<bool>,
     /// The pointer rests on the control bar.
     over_bar: Cell<bool>,
     /// Bumped by each sign of life: only the last one may hide the bar.
@@ -232,6 +236,8 @@ pub fn open(room_id: u64, title: &str, uploader: &str) -> Result<()> {
         next_danmaku: Cell::new(1),
         full: Cell::new(false),
         muted: Cell::new(false),
+        pointer: Cell::default(),
+        idle: Cell::new(false),
         over_bar: Cell::new(false),
         bar_turn: Arc::default(),
         send_bar: Cell::new(SendPlace::BelowVideo),
@@ -242,9 +248,13 @@ pub fn open(room_id: u64, title: &str, uploader: &str) -> Result<()> {
     on_click(&root, "Mute", toggle_mute)?;
     on_click(&root, "DanmakuSwitch", toggle_danmaku)?;
     keep(named::<IUIElement>(&root, "Stage")?.PointerMoved(
-        |_: Ref<windows_core::IInspectable>, _: Ref<PointerRoutedEventArgs>| {
-            if let Some(room) = room() {
-                let _ = show_bar(&room);
+        |_: Ref<windows_core::IInspectable>, args: Ref<PointerRoutedEventArgs>| {
+            let at = args.ok().and_then(|a| a.GetCurrentPoint(None::<&UIElement>)?.Position());
+            if let (Some(room), Ok(at)) = (room(), at) {
+                // Hiding what lay under the pointer makes this fire too, with the pointer still.
+                if room.pointer.replace((at.x, at.y)) != (at.x, at.y) {
+                    let _ = show_bar(&room);
+                }
             }
         },
     )?);
@@ -540,9 +550,9 @@ fn set_full(room: &Room, on: bool) -> Result<()> {
     show_bar(room)
 }
 
-/// Shows the control bar. In fullscreen it goes again after a while without a sign of life.
+/// Shows the bars. In fullscreen they go again after a while without a sign of life.
 fn show_bar(room: &Room) -> Result<()> {
-    named::<IUIElement>(&room.root, "ControlBar")?.SetVisibility(Visibility::Visible)?;
+    set_idle(room, false)?;
     let turn = room.bar_turn.fetch_add(1, Ordering::Relaxed) + 1;
     if room.full.get() {
         hide_bar_after(room, turn);
@@ -568,7 +578,7 @@ fn hide_bar_after(room: &Room, turn: u64) {
     });
 }
 
-/// Hides the bar, unless someone is at it: then it looks again later.
+/// Hides the bars, unless someone is at them: then it looks again later.
 fn hide_bar(room: &Room, turn: u64) -> Result<()> {
     if !room.full.get() {
         return Ok(());
@@ -578,7 +588,23 @@ fn hide_bar(room: &Room, turn: u64) -> Result<()> {
         hide_bar_after(room, turn);
         return Ok(());
     }
-    named::<IUIElement>(&room.root, "ControlBar")?.SetVisibility(Visibility::Collapsed)
+    set_idle(room, true)
+}
+
+/// Takes the bars and the cursor off the picture, or brings them back.
+fn set_idle(room: &Room, idle: bool) -> Result<()> {
+    if room.idle.replace(idle) == idle {
+        return Ok(());
+    }
+    let shown = if idle { Visibility::Collapsed } else { Visibility::Visible };
+    named::<IUIElement>(&room.root, "ControlBar")?.SetVisibility(shown)?;
+    named::<IUIElement>(&room.root, "Back")?.SetVisibility(shown)?;
+    let window = CoreWindow::GetForCurrentThread()?.cast::<ICoreWindow>()?;
+    if idle {
+        window.SetPointerCursor(None::<&CoreCursor>)
+    } else {
+        window.SetPointerCursor(&CoreCursor::CreateCursor(CoreCursorType::Arrow, 0)?)
+    }
 }
 
 fn toggle_danmaku() {
