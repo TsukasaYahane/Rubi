@@ -34,8 +34,8 @@ const HEAD: &str = r##"
     <Image x:Name="Face" Stretch="UniformToFill" />
   </Grid>
   <StackPanel Grid.Column="1" VerticalAlignment="Center">
-    <TextBlock x:Name="Name" Text="游客" FontSize="18" FontWeight="Light" TextTrimming="CharacterEllipsis" />
-    <TextBlock x:Name="Meta" Text="未登录" FontSize="12" TextWrapping="Wrap"
+    <TextBlock x:Name="Name" FontSize="18" FontWeight="Light" TextTrimming="CharacterEllipsis" />
+    <TextBlock x:Name="Meta" FontSize="12" TextWrapping="Wrap"
                Foreground="{ThemeResource SystemControlForegroundBaseMediumBrush}" />
   </StackPanel>
 </Grid>"##;
@@ -103,6 +103,26 @@ fn layout(class: WindowClass) -> String {
         .replace("<!--cats-->", &cat_buttons())
 }
 
+/// What the head of the page shows of the account.
+#[derive(Clone, Default)]
+struct Who {
+    name: String,
+    line: String,
+    face_url: String,
+    face: Option<BitmapImage>,
+}
+
+impl Who {
+    fn paint(&self, root: &IFrameworkElement) -> Result<()> {
+        set_text(root, "Name", &self.name)?;
+        set_text(root, "Meta", &self.line)?;
+        match &self.face {
+            Some(face) => named::<IImage>(root, "Face")?.SetSource(face),
+            None => Ok(()),
+        }
+    }
+}
+
 /// The page on show.
 #[derive(Clone)]
 struct Shown {
@@ -114,6 +134,8 @@ struct Shown {
 thread_local! {
     static SHOWN: RefCell<Option<Shown>> = const { RefCell::new(None) };
     static CATEGORY: Cell<Option<Category>> = const { Cell::new(None) };
+    /// Who was last read, so the page opens on them and not on a blank that fills in.
+    static WHO: RefCell<Option<Who>> = const { RefCell::new(None) };
 }
 
 fn shown() -> Option<Shown> {
@@ -192,29 +214,36 @@ fn open(category: Category) -> Result<()> {
     Ok(())
 }
 
-/// Who is signed in, for the head of the page.
+/// Who is signed in, for the head of the page: what is known at once, then what is current.
 fn show_head() {
-    let Some(shell) = shell() else { return };
+    let (Some(shell), Some(page)) = (shell(), shown()) else { return };
     let Some(backend) = shell.backend.get().cloned() else { return };
     if !backend.services.account.is_logged_in() {
+        WHO.with(|w| *w.borrow_mut() = None);
+        let guest = Who { name: "游客".into(), line: "未登录".into(), ..Who::default() };
+        let _ = guest.paint(&page.root);
         return;
     }
+    if let Some(known) = WHO.with(|w| w.borrow().clone()) {
+        let _ = known.paint(&page.root);
+    }
     let (dispatcher, core) = (shell.dispatcher.clone(), backend.clone());
-    let run = RUN.load(Ordering::Relaxed);
     backend.spawn(async move {
-        let Ok(who) = core.services.account.whoami().await else { return };
-        let profile = core.services.space.profile(who.mid).await.ok();
+        let Ok(account) = core.services.account.whoami().await else { return };
+        let profile = core.services.space.profile(account.mid).await.ok();
         post(&dispatcher, move || {
-            if RUN.load(Ordering::Relaxed) < run {
-                return;
+            let mut who = WHO.with(|w| w.borrow().clone()).unwrap_or_default();
+            who.name = account.uname;
+            if let Some(p) = profile {
+                who.line = format!("Lv{} · 关注 {} · 粉丝 {}", p.level, p.followings, p.fans);
+                if p.face != who.face_url {
+                    who.face = Uri::CreateUri(&p.face).and_then(|u| BitmapImage::CreateInstanceWithUriSource(&u)).ok();
+                    who.face_url = p.face;
+                }
             }
-            let Some(page) = shown() else { return };
-            let _ = set_text(&page.root, "Name", &who.uname);
-            let Some(p) = profile else { return };
-            let line = format!("Lv{} · 关注 {} · 粉丝 {}", p.level, p.followings, p.fans);
-            let _ = set_text(&page.root, "Meta", &line);
-            if let Ok(bitmap) = Uri::CreateUri(&p.face).and_then(|u| BitmapImage::CreateInstanceWithUriSource(&u)) {
-                let _ = named::<IImage>(&page.root, "Face").and_then(|f| f.SetSource(&bitmap));
+            WHO.with(|w| *w.borrow_mut() = Some(who.clone()));
+            if let Some(page) = shown() {
+                let _ = who.paint(&page.root);
             }
         });
     });
@@ -314,6 +343,7 @@ fn sign_out() {
         backend.services.account.logout();
     }
     let _ = session::clear();
+    WHO.with(|w| *w.borrow_mut() = None);
     reload_home();
     let _ = show();
 }
