@@ -29,7 +29,7 @@ import androidx.compose.foundation.lazy.grid.GridCells
 import androidx.compose.foundation.lazy.grid.GridItemSpan
 import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
 import androidx.compose.foundation.lazy.grid.items
-import androidx.compose.foundation.lazy.grid.rememberLazyGridState
+import androidx.compose.foundation.lazy.grid.LazyGridState
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
@@ -68,59 +68,57 @@ private val FOUND = listOf("全部", "视频", "专栏", "动态")
 private const val UP_PAGE_GAP_MS = 1_000L
 
 /**
- * An UP's page: profile, follow, then 投稿 (two columns, 充电专属 videos left out), 动态 and 专栏.
- * Each tab loads when first opened.
+ * What an UP's page shows, kept with its entry on the page stack: going into a video and back finds
+ * the lists and the position as they were.
  */
-@Composable
-fun UpScreen(following: FollowingService, spaceService: SpaceService, actions: ActionsService, nav: Nav, mid: ULong, name: String) {
-    val c = LocalMetro.current
-    val scope = rememberCoroutineScope()
-    var profile by remember { mutableStateOf<FfiUpProfile?>(null) }
-    var order by remember { mutableStateOf(FfiUpOrder.NEWEST) }
-    var tab by remember { mutableStateOf(0) }
+internal class UpState(following: FollowingService, private val spaceService: SpaceService, private val mid: ULong) {
+    var profile by mutableStateOf<FfiUpProfile?>(null)
+    var order by mutableStateOf(FfiUpOrder.NEWEST)
+        private set
+    var tab by mutableStateOf(0)
+
     // 空间内搜索: the box, the term searched, and which kind of result shows.
-    var query by remember { mutableStateOf("") }
-    var searched by remember { mutableStateOf("") }
-    var found by remember { mutableStateOf(0) }
-    val ctx = LocalContext.current
-    var note by remember { mutableStateOf("") }
-    var confirmUnfollow by remember { mutableStateOf(false) }
-    val grid = rememberLazyGridState()
+    var query by mutableStateOf("")
+    var searched by mutableStateOf("")
+        private set
+    var found by mutableStateOf(0)
+    val grid = LazyGridState()
 
     // Uploads by page number; the space API is touchy about bursts, so pages are spaced.
-    val uploads = remember(mid) {
-        Paged<FfiVideoCard, UInt>(scope, key = { it.bvid }, minGapMs = UP_PAGE_GAP_MS) { pn ->
-            val at = pn ?: 1u
-            val got = spaceService.upVideos(mid, at, order)
-            Page(got.items, if (got.hasMore) at + 1u else null, got.hiddenCharging)
-        }
+    val uploads = Paged<FfiVideoCard, UInt>(key = { it.bvid }, minGapMs = UP_PAGE_GAP_MS) { pn ->
+        val at = pn ?: 1u
+        val got = spaceService.upVideos(mid, at, order)
+        Page(got.items, if (got.hasMore) at + 1u else null, got.hiddenCharging)
+    }
+    val posts = Paged<FfiDynamic, String>(key = { it.id }, minGapMs = UP_PAGE_GAP_MS) { at ->
+        following.upDynamics(mid, at).let { Page(it.items, it.next) }
+    }
+    val articles = Paged<FfiUpArticle, UInt>(key = { it.cvid }, minGapMs = UP_PAGE_GAP_MS) { pn ->
+        val at = pn ?: 1u
+        val got = spaceService.upArticles(mid, at)
+        Page(got.items, if (got.hasMore) at + 1u else null)
+    }
+    val foundPosts = Paged<FfiDynamic, String>(key = { it.id }, minGapMs = UP_PAGE_GAP_MS) { at ->
+        val page = at?.toUIntOrNull() ?: 1u
+        following.upSearchPosts(mid, searched, page).let { Page(it.items, it.next) }
+    }
+    val foundVideos = Paged<FfiVideoCard, UInt>(key = { it.bvid }, minGapMs = UP_PAGE_GAP_MS) { pn ->
+        val at = pn ?: 1u
+        val got = spaceService.upSearchVideos(mid, searched, at)
+        Page(got.items, if (got.hasMore) at + 1u else null, got.hiddenCharging)
     }
 
-    val posts = remember(mid) {
-        Paged<FfiDynamic, String>(scope, key = { it.id }, minGapMs = UP_PAGE_GAP_MS) { at ->
-            following.upDynamics(mid, at).let { Page(it.items, it.next) }
-        }
+    /** Loads the uploads the first time the page shows. */
+    fun start() {
+        if (uploads.items.isEmpty() && !uploads.loading && !uploads.ended && uploads.error == null) uploads.more()
     }
-    val articles = remember(mid) {
-        Paged<FfiUpArticle, UInt>(scope, key = { it.cvid }, minGapMs = UP_PAGE_GAP_MS) { pn ->
-            val at = pn ?: 1u
-            val got = spaceService.upArticles(mid, at)
-            Page(got.items, if (got.hasMore) at + 1u else null)
-        }
+
+    fun sortBy(o: FfiUpOrder) {
+        if (o == order) return
+        order = o
+        uploads.reset()
     }
-    val foundPosts = remember(mid) {
-        Paged<FfiDynamic, String>(scope, key = { it.id }, minGapMs = UP_PAGE_GAP_MS) { at ->
-            val page = at?.toUIntOrNull() ?: 1u
-            following.upSearchPosts(mid, searched, page).let { Page(it.items, it.next) }
-        }
-    }
-    val foundVideos = remember(mid) {
-        Paged<FfiVideoCard, UInt>(scope, key = { it.bvid }, minGapMs = UP_PAGE_GAP_MS) { pn ->
-            val at = pn ?: 1u
-            val got = spaceService.upSearchVideos(mid, searched, at)
-            Page(got.items, if (got.hasMore) at + 1u else null, got.hiddenCharging)
-        }
-    }
+
     fun search(term: String) {
         searched = term.trim()
         found = 0
@@ -129,6 +127,36 @@ fun UpScreen(following: FollowingService, spaceService: SpaceService, actions: A
         foundVideos.reset()
     }
 
+    /** The profile as it is now: the follow may have changed on another page. */
+    suspend fun refreshProfile() {
+        profile = runCatching { spaceService.upProfile(mid) }.getOrNull() ?: profile
+    }
+}
+
+/**
+ * An UP's page: profile, follow, then 投稿 (two columns, 充电专属 videos left out), 动态 and 专栏.
+ * Each tab loads when first opened.
+ */
+@Composable
+internal fun UpScreen(state: UpState, actions: ActionsService, nav: Nav, mid: ULong, name: String) {
+    val c = LocalMetro.current
+    val scope = rememberCoroutineScope()
+    val ctx = LocalContext.current
+    var note by remember { mutableStateOf("") }
+    var confirmUnfollow by remember { mutableStateOf(false) }
+    val grid = state.grid
+    val uploads = state.uploads
+    val posts = state.posts
+    val articles = state.articles
+    val foundPosts = state.foundPosts
+    val foundVideos = state.foundVideos
+    val profile = state.profile
+    val order = state.order
+    val tab = state.tab
+    val query = state.query
+    val searched = state.searched
+    val found = state.found
+
     LaunchedEffect(tab) {
         when (tab) {
             1 -> if (posts.items.isEmpty() && !posts.loading) posts.more()
@@ -136,8 +164,8 @@ fun UpScreen(following: FollowingService, spaceService: SpaceService, actions: A
         }
     }
 
-    LaunchedEffect(mid, nav.stack.size) { profile = runCatching { spaceService.upProfile(mid) }.getOrNull() ?: profile }
-    LaunchedEffect(uploads, order) { uploads.reset() }
+    LaunchedEffect(mid, nav.stack.size) { state.refreshProfile() }
+    LaunchedEffect(state) { state.start() }
     when {
         searched.isNotEmpty() -> if (found == 1) LoadMoreNearEnd(grid, foundVideos) else LoadMoreNearEnd(grid, foundPosts)
         tab == 0 -> LoadMoreNearEnd(grid, uploads)
@@ -153,12 +181,12 @@ fun UpScreen(following: FollowingService, spaceService: SpaceService, actions: A
         }
         confirmUnfollow = false
         val on = !p.followed
-        profile = p.copy(followed = on, fans = if (on) p.fans + 1u else p.fans - minOf(p.fans, 1uL))
+        state.profile = p.copy(followed = on, fans = if (on) p.fans + 1u else p.fans - minOf(p.fans, 1uL))
         scope.launch {
             runCatching { actions.followMid(mid, p.name, on) }
                 .onSuccess { note = if (on) "已关注" else "已取消关注" }
                 .onFailure {
-                    profile = p
+                    state.profile = p
                     note = if (it is RubiException.NotLoggedIn) "登录后才能关注" else "操作失败：${it.message}"
                 }
         }
@@ -167,9 +195,9 @@ fun UpScreen(following: FollowingService, spaceService: SpaceService, actions: A
     Column(Modifier.fillMaxSize()) {
         Row(Modifier.fillMaxWidth().padding(start = 4.dp, end = 16.dp), verticalAlignment = Alignment.CenterVertically) {
             Box(Modifier.size(44.dp).clickable { nav.pop() }, contentAlignment = Alignment.Center) { GlyphIcon(Glyph.Back) }
-            MetroField(query, { query = it }, "搜索该 UP 的投稿、专栏、动态", Modifier.weight(1f)) { search(query) }
+            MetroField(query, { state.query = it }, "搜索该 UP 的投稿、专栏、动态", Modifier.weight(1f)) { state.search(query) }
             if (searched.isNotEmpty()) {
-                Text("清除", fontSize = 13.sp, color = c.fg2, modifier = Modifier.clickable { query = ""; search("") }.padding(8.dp))
+                Text("清除", fontSize = 13.sp, color = c.fg2, modifier = Modifier.clickable { state.query = ""; state.search("") }.padding(8.dp))
             }
         }
         LazyVerticalGrid(
@@ -218,7 +246,7 @@ fun UpScreen(following: FollowingService, spaceService: SpaceService, actions: A
                                     fontSize = 13.sp,
                                     color = if (on) Color.White else c.fg,
                                     modifier = Modifier.then(if (on) Modifier.background(c.accent) else Modifier.border(1.dp, c.line))
-                                        .clickable { found = i }
+                                        .clickable { state.found = i }
                                         .padding(horizontal = 10.dp, vertical = 5.dp),
                                 )
                             }
@@ -230,7 +258,7 @@ fun UpScreen(following: FollowingService, spaceService: SpaceService, actions: A
                                 style = MetroType.pivot.copy(fontSize = 26.sp, lineHeight = 34.sp),
                                 fontWeight = if (i == tab) FontWeight.Normal else FontWeight.Light,
                                 color = if (i == tab) c.fg else c.fg2,
-                                modifier = Modifier.clickable { tab = i },
+                                modifier = Modifier.clickable { state.tab = i },
                             )
                         }
                     }
@@ -242,7 +270,7 @@ fun UpScreen(following: FollowingService, spaceService: SpaceService, actions: A
                                 fontSize = 16.sp,
                                 fontWeight = if (on) FontWeight.SemiBold else FontWeight.Normal,
                                 color = if (on) c.fg else c.fg2,
-                                modifier = Modifier.heightIn(min = 44.dp).clickable { order = o }.padding(top = 10.dp),
+                                modifier = Modifier.heightIn(min = 44.dp).clickable { state.sortBy(o) }.padding(top = 10.dp),
                             )
                         }
                     }

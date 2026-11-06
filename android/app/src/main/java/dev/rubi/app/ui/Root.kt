@@ -99,7 +99,10 @@ sealed interface Screen {
     class Search(val state: SearchState) : Screen
     data object Inbox : Screen
     data class Chat(val mid: ULong, val name: String) : Screen
-    data class Up(val mid: ULong, val name: String) : Screen
+    data class Up(val mid: ULong, val name: String) : Screen {
+        /** Made when first shown, and gone with this entry: survives a video opened from the page. */
+        internal var state: UpState? = null
+    }
     data object Login : Screen
     data object Filtered : Screen
     data object Settings : Screen
@@ -400,7 +403,10 @@ fun RubiRoot(app: RubiApp) {
             is Screen.Search -> SearchScreen(app.core.discover(), app.core.esports(), app.core.pgc(), nav, top.state)
             Screen.Inbox -> InboxScreen(app.core.videos(), app.core.messages(), nav)
             is Screen.Chat -> ChatScreen(app.core.videos(), app.core.messages(), nav, top.mid, top.name)
-            is Screen.Up -> key(top) { UpScreen(app.core.following(), app.core.space(), app.core.actions(), nav, top.mid, top.name) }
+            is Screen.Up -> key(top) {
+                val state = top.state ?: UpState(app.core.following(), app.core.space(), top.mid).also { top.state = it }
+                UpScreen(state, app.core.actions(), nav, top.mid, top.name)
+            }
             Screen.Login -> LoginScreen(app.core.account(), app.signin, nav)
             Screen.Filtered -> FilteredScreen(app.core.home(), nav)
             Screen.Settings -> SettingsScreen(app.ui, app.settings, app.appearance, nav)
