@@ -19,6 +19,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.ImageBitmap
+import androidx.compose.ui.graphics.drawscope.Fill
 import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.graphics.drawscope.DrawScope
@@ -144,7 +145,9 @@ fun DanmakuLayer(
         Canvas(Modifier.fillMaxSize()) {
             val lineH = lineDp * density
             val now = pos
-            // Centred on the glyph edge, under the fill: 1pt shows outside the letters.
+            // Centred on the glyph edge, under the fill: 1pt shows outside the letters. The layout
+            // keeps its paint's draw style between draws, so the fill has to name Fill: left out, it
+            // repeats the stroke in the text colour, over the black one.
             val outline = Stroke(width = 2 * density)
             var i = firstStartingAfter(placements, now - scrollMs)
             while (i < placements.size) {
@@ -161,7 +164,7 @@ fun DanmakuLayer(
                     val layout = measurer.measure(d.content, style)
                     val at = origin(p, age, scrollMs, layout.size.width.toFloat(), lineH)
                     drawText(layout, color = Color.Black, topLeft = at, alpha = display.opacity, drawStyle = outline)
-                    drawText(layout, topLeft = at, alpha = display.opacity)
+                    drawText(layout, topLeft = at, alpha = display.opacity, drawStyle = Fill)
                     continue
                 }
                 // Mixed text and emotes: text runs measured here, emotes as fixed squares.
@@ -172,7 +175,7 @@ fun DanmakuLayer(
                 for ((s, l) in runs) {
                     if (l != null) {
                         drawText(l, color = Color.Black, topLeft = Offset(x, o.y), alpha = display.opacity, drawStyle = outline)
-                        drawText(l, topLeft = Offset(x, o.y), alpha = display.opacity)
+                        drawText(l, topLeft = Offset(x, o.y), alpha = display.opacity, drawStyle = Fill)
                         x += l.size.width
                         continue
                     }
