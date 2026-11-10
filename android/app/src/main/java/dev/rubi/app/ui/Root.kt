@@ -357,7 +357,8 @@ fun RubiRoot(app: RubiApp) {
     // 宽屏 held sideways: the tabs, search and messages move to a rail on the left, beside every page.
     val rail = LocalScreenLayout.current.twoPane && !edgeToEdge
     Row(Modifier.fillMaxSize()) {
-    if (rail) NavRail(nav, unread) { nav.push(Screen.Search(SearchState(app.core.discover(), app.core.esports()))) }
+    val openPortrait = { nav.push(Screen.VerticalFeed(VerticalFeedState(app.core.videos(), app.core.discover(), "", 0L, DanmakuDisplay.load(app.settings).enabled, pool = app.core.portrait()))) }
+    if (rail) NavRail(nav, unread, openPortrait) { nav.push(Screen.Search(SearchState(app.core.discover(), app.core.esports()))) }
     Box(
         Modifier.weight(1f).fillMaxHeight()
             // A card flying out: the page shows as the cover grows (卡牌 fades it in, 书页 shows it
@@ -374,14 +375,14 @@ fun RubiRoot(app: RubiApp) {
     ) {
         when (val top = nav.stack.lastOrNull()) {
             null -> Column(Modifier.fillMaxSize()) {
-                if (!rail) TopBar(nav, unread) { nav.push(Screen.Search(SearchState(app.core.discover(), app.core.esports()))) }
+                if (!rail) TopBar(nav, unread, openPortrait) { nav.push(Screen.Search(SearchState(app.core.discover(), app.core.esports()))) }
                 // The tabs side by side: swipe between them, or tap the bottom bar.
                 val pager = rememberPagerState(initialPage = nav.tab.ordinal) { Tab.entries.size }
                 LaunchedEffect(nav.tab) { if (pager.targetPage != nav.tab.ordinal) pager.animateScrollToPage(nav.tab.ordinal) }
                 LaunchedEffect(pager) { snapshotFlow { pager.settledPage }.collect { nav.tab = Tab.entries[it] } }
                 HorizontalPager(pager, Modifier.weight(1f), key = { Tab.entries[it].name }) { page ->
                     when (Tab.entries[page]) {
-                        Tab.Home -> HomeScreen(app.core.home(), app.core.videos(), app.core.danmaku(), app.core.discover(), app.core.pgc(), app.settings, nav, home)
+                        Tab.Home -> HomeScreen(app.core.home(), app.core.videos(), app.core.danmaku(), app.core.discover(), app.core.pgc(), app.core.portrait(), app.settings, nav, home)
                         Tab.Follow -> FollowScreen(app.core.following(), nav, follow, home.dual)
                         Tab.Live -> LiveScreen(live, nav, app.core.esports())
                         Tab.Me -> MeScreen(app.core.history(), app.core.watchLater(), app.core.preferences(), app.signin, app, nav)
@@ -433,7 +434,7 @@ fun RubiRoot(app: RubiApp) {
 }
 
 @Composable
-private fun TopBar(nav: Nav, unread: UInt, onSearch: () -> Unit) {
+private fun TopBar(nav: Nav, unread: UInt, onPortrait: () -> Unit, onSearch: () -> Unit) {
     val c = LocalMetro.current
     Row(
         Modifier.fillMaxWidth().height(56.dp).padding(horizontal = 16.dp),
@@ -441,6 +442,10 @@ private fun TopBar(nav: Nav, unread: UInt, onSearch: () -> Unit) {
         horizontalArrangement = Arrangement.spacedBy(14.dp),
     ) {
         Text("RUBI", style = MetroType.brand, color = c.fg)
+        // 竖屏推流 straight from the recommendations.
+        Box(Modifier.size(44.dp).clickable(onClick = onPortrait), contentAlignment = Alignment.Center) {
+            GlyphIcon(Glyph.Portrait, color = c.accent)
+        }
         Row(
             Modifier.weight(1f).height(44.dp).clickable(onClick = onSearch)
                 .border(width = 0.dp, color = Color.Transparent),
@@ -469,7 +474,7 @@ private fun TopBar(nav: Nav, unread: UInt, onSearch: () -> Unit) {
  * only while it is showing (no page open over it).
  */
 @Composable
-private fun NavRail(nav: Nav, unread: UInt, onSearch: () -> Unit) {
+private fun NavRail(nav: Nav, unread: UInt, onPortrait: () -> Unit, onSearch: () -> Unit) {
     val c = LocalMetro.current
     Row(Modifier.fillMaxHeight()) {
         Column(
@@ -489,6 +494,7 @@ private fun NavRail(nav: Nav, unread: UInt, onSearch: () -> Unit) {
                 }
             }
             Spacer(Modifier.weight(1f))
+            Box(Modifier.size(52.dp).clickable(onClick = onPortrait), contentAlignment = Alignment.Center) { GlyphIcon(Glyph.Portrait, color = c.accent) }
             Box(Modifier.size(52.dp).clickable(onClick = onSearch), contentAlignment = Alignment.Center) { GlyphIcon(Glyph.Search) }
             Box(Modifier.size(52.dp).clickable { nav.push(Screen.Inbox) }, contentAlignment = Alignment.Center) {
                 GlyphIcon(Glyph.Mail)

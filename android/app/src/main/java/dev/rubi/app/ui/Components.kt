@@ -123,7 +123,7 @@ fun MetroToggle(on: Boolean) {
 }
 
 /** Geometric stroke icons drawn in code (no icon font, no emoji). */
-enum class Glyph { Search, Mail, Back, More, Home, Exit }
+enum class Glyph { Search, Mail, Back, More, Home, Exit, Portrait }
 
 @Composable
 fun GlyphIcon(glyph: Glyph, color: Color = LocalMetro.current.fg, size: Dp = 20.dp) {
@@ -147,6 +147,11 @@ fun GlyphIcon(glyph: Glyph, color: Color = LocalMetro.current.fg, size: Dp = 20.
             }
             // Two chevrons: back past every video in the chain.
             Glyph.Exit -> { line(11f, 5f, 4f, 12f); line(4f, 12f, 11f, 19f); line(19f, 5f, 12f, 12f); line(12f, 12f, 19f, 19f) }
+            // A phone held upright: 竖屏推流.
+            Glyph.Portrait -> {
+                drawRect(color, Offset(7 * s, 3 * s), androidx.compose.ui.geometry.Size(10 * s, 18 * s), style = androidx.compose.ui.graphics.drawscope.Stroke(w))
+                line(10.5f, 18f, 13.5f, 18f)
+            }
             Glyph.Home -> {
                 line(3f, 11f, 12f, 3.5f); line(12f, 3.5f, 21f, 11f)
                 line(5.5f, 9.5f, 5.5f, 20f); line(18.5f, 9.5f, 18.5f, 20f); line(5.5f, 20f, 18.5f, 20f)

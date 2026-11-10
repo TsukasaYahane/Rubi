@@ -3,6 +3,7 @@ package dev.rubi.app.ui
 import dev.rubi.core.VideosService
 import dev.rubi.core.PgcService
 import dev.rubi.core.HomeService
+import dev.rubi.core.PortraitService
 import dev.rubi.core.DiscoverService
 import dev.rubi.core.DanmakuService
 import dev.rubi.app.data.CoreSettings
@@ -77,6 +78,9 @@ import kotlinx.coroutines.withContext
 private const val PAGE = 20u
 
 /** One list (推荐 / 热门 / 排行) that keeps its cards and scroll position. */
+/** Pooled videos sorted into portrait and landscape after each refresh. */
+private const val SORT_AFTER_REFRESH = 24u
+
 class FeedList {
     val cards = mutableStateListOf<FfiVideoCard>()
     val grid = LazyGridState()
@@ -123,7 +127,7 @@ class HomeState(private val ui: UiPrefs) {
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-fun HomeScreen(homeService: HomeService, videos: VideosService, danmaku: DanmakuService, discover: DiscoverService, pgcService: PgcService, settings: CoreSettings, nav: Nav, home: HomeState) {
+fun HomeScreen(homeService: HomeService, videos: VideosService, danmaku: DanmakuService, discover: DiscoverService, pgcService: PgcService, portrait: PortraitService, settings: CoreSettings, nav: Nav, home: HomeState) {
     val c = LocalMetro.current
     val scope = rememberCoroutineScope()
     val feed = home.recommend
@@ -141,6 +145,9 @@ fun HomeScreen(homeService: HomeService, videos: VideosService, danmaku: Danmaku
         // runs, and on the main thread taps would be dropped meanwhile.
         suspend fun refresh() = withContext(Dispatchers.IO) {
             runCatching { if (pulled) homeService.refreshFeedNow(20u) else homeService.refreshFeed(20u) }
+        }.also {
+            // A fresh batch is sorted into portrait and landscape in the background, for 竖屏推流.
+            scope.launch(Dispatchers.IO) { runCatching { portrait.sortPool(SORT_AFTER_REFRESH) } }
         }
         var report = if (reset || cards.isEmpty()) refresh() else null
         suspend fun next() = withContext(Dispatchers.IO) { runCatching { homeService.nextPage(PAGE) }.getOrDefault(emptyList()) }

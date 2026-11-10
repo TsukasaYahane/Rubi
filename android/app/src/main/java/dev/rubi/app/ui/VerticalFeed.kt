@@ -1,6 +1,8 @@
 package dev.rubi.app.ui
 
 import dev.rubi.app.data.UiPrefs
+import androidx.compose.foundation.border
+import dev.rubi.core.PortraitService
 import androidx.compose.foundation.layout.widthIn
 import android.view.LayoutInflater
 import androidx.compose.foundation.layout.width
@@ -121,10 +123,20 @@ fun ProbeLine(bvid: String, modifier: Modifier = Modifier) {
 
 /**
  * 竖屏推流: the portrait video opened, then portrait videos from its 相关推荐 one after another
- * (through the rule table, none twice), topped up as the end comes near. Kept with the page in
- * the back stack.
+ * (through the rule table, none twice), topped up as the end comes near. Entered from the 竖屏
+ * entry instead (`pool` given, no video opened), it takes the recommendation pool's portrait
+ * videos and plays the first as soon as there is one. Kept with the page in the back stack.
  */
-class VerticalFeedState(private val videos: VideosService, private val discover: DiscoverService, private val startBvid: String, val startMs: Long, danmaku: Boolean = true) {
+class VerticalFeedState(private val videos: VideosService, private val discover: DiscoverService, private val startBvid: String, val startMs: Long, danmaku: Boolean = true, private val pool: PortraitService? = null) {
+    /** Entered from the 竖屏 entry: the videos come from the recommendation pool. */
+    val fromPool get() = pool != null
+    /** The first portrait videos are being picked. */
+    var picking by mutableStateOf(false)
+        private set
+    /** Risk control holds the sorting back. */
+    var limited by mutableStateOf(false)
+        private set
+    private var poolStarted = false
     val items = mutableStateListOf<FfiVideoCard>()
     /** 弹幕 shown over the feed; the same setting as the video page's 弹 开 / 关. */
     var danmakuOn by mutableStateOf(danmaku)
@@ -139,18 +151,54 @@ class VerticalFeedState(private val videos: VideosService, private val discover:
     /** Loads the first video once. */
     suspend fun start() {
         if (items.isNotEmpty()) return
+        pool?.let { pickFirst(it); return }
         runCatching { withContext(Dispatchers.IO) { videos.video(startBvid) } }
             .onSuccess { seen += it.bvid; items += it; more() }
             .onFailure { problem = errorText(it) }
     }
 
+    /** Picks the first portrait videos from the pool; asks again on 继续等. */
+    private suspend fun pickFirst(pool: PortraitService) {
+        problem = null
+        picking = true
+        if (!poolStarted) {
+            pool.startPortrait()
+            poolStarted = true
+        }
+        runCatching { withContext(Dispatchers.IO) { pool.nextPortrait(1u) } }
+            .onSuccess { picked ->
+                limited = picked.limited
+                picked.cards.filter { seen.add(it.bvid) }.forEach { items += it }
+                if (items.isNotEmpty()) more()
+            }
+            .onFailure { problem = errorText(it) }
+        picking = false
+    }
+
+    /** 继续等: picks again. */
+    fun pickAgain() {
+        val pool = pool ?: return
+        scope.launch { pickFirst(pool) }
+    }
+
     /**
-     * Adds portrait videos related to the last ones shown. Looks back through a few videos when
-     * the last one's related list has none to give.
+     * Adds portrait videos: from the pool when the feed began there, else related to the last
+     * ones shown, looking back through a few when the last one's related list has none to give.
      */
     fun more() {
         if (loading || items.isEmpty()) return
         loading = true
+        pool?.let { pool ->
+            scope.launch {
+                val picked = runCatching { withContext(Dispatchers.IO) { pool.nextPortrait(BATCH.toUInt()) } }.getOrNull()
+                if (picked != null) {
+                    limited = picked.limited
+                    items.addAll(picked.cards.filter { seen.add(it.bvid) })
+                }
+                loading = false
+            }
+            return
+        }
         scope.launch {
             val added = mutableListOf<FfiVideoCard>()
             for (from in items.takeLast(LOOK_BACK).asReversed()) {
@@ -185,13 +233,56 @@ fun VerticalFeedScreen(deps: VideoPageDeps, nav: Nav, state: VerticalFeedState) 
     }
     Box(Modifier.fillMaxSize().background(Color.Black)) {
         if (state.items.isEmpty()) {
-            Text(state.problem ?: "加载中…", color = Color.White, fontSize = 13.sp, modifier = Modifier.align(Alignment.Center))
+            if (state.fromPool) {
+                PoolWaiting(state, nav, Modifier.align(Alignment.Center))
+            } else {
+                Text(state.problem ?: "加载中…", color = Color.White, fontSize = 13.sp, modifier = Modifier.align(Alignment.Center))
+            }
         }
         VerticalPager(pager, Modifier.fillMaxSize(), beyondViewportPageCount = 1, key = { state.items[it].bvid }) { page ->
             val card = state.items[page]
             FeedPage(deps, nav, state, card, index = page, active = page == pager.settledPage, startMs = if (page == 0) state.startMs else 0L)
         }
     }
+}
+
+/** The 竖屏 entry before its first video: picking, nothing found yet, or held back by risk control. */
+@Composable
+private fun PoolWaiting(state: VerticalFeedState, nav: Nav, modifier: Modifier) {
+    val (title, line) = when {
+        state.picking -> "正在挑选竖屏视频…" to "从推荐池里挑，找到第一个就开始播放"
+        state.limited -> "B 站暂时限制了查询" to "过一会儿再挑选；可以先返回首页"
+        state.problem != null -> "挑选失败" to (state.problem ?: "")
+        else -> "推荐池里暂时没有竖屏视频" to "正在拉取新一批推荐并挑选，也会沿相关推荐找"
+    }
+    Column(modifier.padding(horizontal = 32.dp), horizontalAlignment = Alignment.CenterHorizontally) {
+        GlyphIcon(Glyph.Portrait, color = Color.White, size = 44.dp)
+        Text(title, color = Color.White, fontSize = 16.sp, modifier = Modifier.padding(top = 14.dp))
+        Text(line, color = Color(0xB3FFFFFF), fontSize = 12.sp, modifier = Modifier.padding(top = 6.dp))
+        if (state.picking) {
+            val run = rememberInfiniteTransition(label = "picking")
+            val at by run.animateFloat(0f, 1f, infiniteRepeatable(tween(900), RepeatMode.Restart), label = "picking-at")
+            BoxWithConstraints(Modifier.padding(top = 16.dp).width(180.dp).height(3.dp).background(Color(0x33FFFFFF)).clipToBounds()) {
+                val w = maxWidth
+                Box(Modifier.width(w / 3).height(3.dp).offset(x = w * at - w / 3).background(LocalMetro.current.accent))
+            }
+        } else {
+            Row(Modifier.padding(top = 16.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                if (!state.limited) PoolChoice("继续等") { state.pickAgain() }
+                PoolChoice("返回首页") { nav.pop() }
+            }
+        }
+    }
+}
+
+@Composable
+private fun PoolChoice(label: String, onClick: () -> Unit) {
+    Text(
+        label,
+        color = Color.White,
+        fontSize = 13.sp,
+        modifier = Modifier.border(1.dp, Color.White).clickable(onClick = onClick).padding(horizontal = 14.dp, vertical = 6.dp),
+    )
 }
 
 /** One video of the feed: the picture (playing only while it is the one shown) and what lies over it. */
