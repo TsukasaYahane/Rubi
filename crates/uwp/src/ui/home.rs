@@ -155,13 +155,13 @@ impl HomePage {
         self.show_tab()
     }
 
+    /// 分区 only offers its menu: the page on show stays until a 分区 is picked.
     fn select(self: &Rc<Self>, tab: usize) -> Result<()> {
-        self.current.set(tab);
-        self.reopen()?;
         if tab == ZONES_TAB {
-            self.pick_zone()?;
+            return self.pick_zone();
         }
-        Ok(())
+        self.current.set(tab);
+        self.reopen()
     }
 
     fn show_tab(&self) -> Result<()> {
@@ -174,8 +174,7 @@ impl HomePage {
             named::<IControl>(&self.root, &format!("Tab{tab}"))?
                 .SetForeground(&SolidColorBrush::CreateInstanceWithColor(color)?)?;
         }
-        let waiting = current == ZONES_TAB && self.grids[current].source().is_none();
-        self.say(&if waiting { "选一个分区".to_owned() } else { self.grids[current].said() });
+        self.say(&self.grids[current].said());
         Ok(())
     }
 
@@ -201,7 +200,11 @@ impl HomePage {
 
     fn open_zone(&self, name: &str, region: u32) -> Result<()> {
         named::<IContentControl>(&self.root, "Tab3")?.SetContent(&PropertyValue::CreateString(name)?)?;
-        self.grids[ZONES_TAB].open(Source::Zone(region))
+        self.current.set(ZONES_TAB);
+        if self.grids[ZONES_TAB].source() != Some(Source::Zone(region)) {
+            self.grids[ZONES_TAB].open(Source::Zone(region))?;
+        }
+        self.show_tab()
     }
 
     /// The grid of `tab` has something new to say.
