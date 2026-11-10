@@ -85,14 +85,14 @@ pub const LAYOUT: &str = r##"
       <Button x:Name="ActFollow"><StackPanel><FontIcon Glyph="&#xE8FA;" FontSize="24" /><TextBlock x:Name="FollowText" Text="关注" /></StackPanel></Button>
       <Button x:Name="Next"><FontIcon Glyph="&#xE70D;" FontSize="20" /></Button>
     </StackPanel>
-    <StackPanel x:Name="Info" Grid.Row="2" Margin="12,0,72,8" VerticalAlignment="Bottom">
+    <StackPanel x:Name="Info" Grid.Row="2" Margin="12,0,72,88" VerticalAlignment="Bottom">
       <Button x:Name="UpLink" Visibility="Collapsed" Background="Transparent" BorderThickness="0" Padding="0,2"
               FontSize="13" Foreground="#6E9BFF" />
       <TextBlock x:Name="Title" FontSize="15" Foreground="White" TextWrapping="Wrap" MaxLines="2" />
       <TextBlock x:Name="Meta" FontSize="12" Margin="0,3,0,0" Foreground="#CCFFFFFF" TextWrapping="Wrap" MaxLines="2" />
     </StackPanel>
     <ContentControl x:Name="SendBelowVideo" Grid.Row="3" IsTabStop="False" HorizontalContentAlignment="Stretch"
-                    Margin="0,0,0,88">
+                    VerticalAlignment="Bottom">
     <Grid x:Name="SendBar" Background="#66000000" Padding="12,6">
       <Grid.ColumnDefinitions>
         <ColumnDefinition Width="*" />

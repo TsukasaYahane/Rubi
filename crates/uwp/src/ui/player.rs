@@ -41,7 +41,7 @@ use crate::xaml::{
     IOutputStream, IPanel, IRandomAccessStream, IRangeBase, IRangeBaseValueChangedEventArgs, IRowDefinition,
     ITextBlock, ITextBox, IUIElement, InMemoryRandomAccessStream, MediaPlaybackSession, MediaPlaybackState,
     MediaPlayer, MediaPlayerFailedEventArgs, MediaSource, PropertyValue, RangeBaseValueChangedEventArgs,
-    SizeChangedEventArgs, TappedRoutedEventArgs, UIElement, Uri, VirtualKey, Visibility,
+    SizeChangedEventArgs, TappedRoutedEventArgs, Thickness, UIElement, Uri, VirtualKey, Visibility,
 };
 
 /// Quality asked for; the core caps it to what the account may play.
@@ -60,6 +60,8 @@ const HANDOVER_EVERY: Duration = Duration::from_millis(50);
 const SEEK_STEP: i64 = 5 * TICKS_PER_SECOND;
 /// Width of the side pane beside the 竖屏 picture.
 const FEED_PANE: f64 = 340.0;
+/// The send bar's height in the 竖屏推流, until it has been measured.
+const FEED_SEND_HEIGHT: f64 = 44.0;
 
 const LAYOUT: &str = r##"
 <Grid xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
@@ -279,7 +281,17 @@ fn apply_feed_layout(root: &IFrameworkElement, wide: bool, full: bool) -> Result
     for part in ["Info", "ActionRow"] {
         named::<IUIElement>(root, part)?.SetVisibility(shown(!full))?;
     }
-    place_send_bar(root, full, Color { a: 0x66, r: 0, g: 0, b: 0 })
+    place_send_bar(root, full, Color { a: 0x66, r: 0, g: 0, b: 0 })?;
+    // The send bar keeps the very bottom; the control bar sits on it, or at the bottom in
+    // fullscreen, where the send bar moves into it.
+    let lift =
+        if full { 0.0 } else { named::<IFrameworkElement>(root, "SendBar")?.ActualHeight()?.max(FEED_SEND_HEIGHT) };
+    named::<IFrameworkElement>(root, "ControlBar")?.SetMargin(Thickness {
+        left: 0.0,
+        top: 0.0,
+        right: 0.0,
+        bottom: lift,
+    })
 }
 
 /// In the control bar in fullscreen, under the picture otherwise.
