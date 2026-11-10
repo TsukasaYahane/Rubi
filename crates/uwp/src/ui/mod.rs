@@ -16,6 +16,8 @@ pub mod live;
 pub mod live_room;
 pub mod me;
 pub mod media;
+pub mod pgc_season;
+pub mod pgc_zone;
 pub mod pip;
 pub mod player;
 pub mod player_actions;

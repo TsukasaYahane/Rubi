@@ -9,6 +9,7 @@ pub mod library;
 pub mod live;
 pub mod manifest;
 pub mod panes;
+pub mod pgc;
 pub mod qr;
 pub mod quality;
 pub mod queue;

@@ -1,14 +1,16 @@
-//! 首页: 推荐, 热门, 排行 and a 分区 to pick. Each tab keeps its own grid, so it comes back where it
-//! was left.
+//! 首页: 推荐, 热门, 排行, a 分区 to pick and a 影视 专区 to pick. Each keeps its own page, so it comes
+//! back where it was left.
 
-use std::cell::Cell;
+use std::cell::{Cell, RefCell};
+use std::collections::HashMap;
 use std::rc::Rc;
 
-use rubi_core::HOME_ZONES;
+use rubi_core::{HOME_ZONES, PGC_ZONES};
 use windows_core::{IInspectable, Interface, Ref, Result};
 
 use crate::state::layout::WindowClass;
 use crate::ui::card_grid::{CardGrid, Source};
+use crate::ui::pgc_zone::PgcZone;
 use crate::ui::shell::{Tab, shell, show_tab};
 use crate::ui::{REFRESH_BUTTON, keep, load, load_object, named, on_click, set_text, style_refresh};
 use crate::xaml::{
@@ -19,8 +21,8 @@ use windows_collections::IVector;
 
 const COBALT: Color = Color { a: 255, r: 0, g: 0x50, b: 0xEF };
 const DIM: Color = Color { a: 255, r: 0x76, g: 0x76, b: 0x76 };
-const TAB_LABELS: [&str; 4] = ["推荐", "热门", "排行", "分区"];
 const ZONES_TAB: usize = 3;
+const PGC_TAB: usize = 4;
 
 const LAYOUT: &str = r##"
 <Grid xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
@@ -43,7 +45,7 @@ const LAYOUT: &str = r##"
         </Style>
       </StackPanel.Resources>
       <Button x:Name="Tab0" Content="推荐" /><Button x:Name="Tab1" Content="热门" />
-      <Button x:Name="Tab2" Content="排行" /><Button x:Name="Tab3" Content="分区" />
+      <Button x:Name="Tab2" Content="排行" /><Button x:Name="Tab3" Content="分区" /><Button x:Name="Tab4" Content="影视" />
     </StackPanel>
     <TextBlock x:Name="Status" Grid.Column="1" FontSize="13" VerticalAlignment="Center" TextTrimming="CharacterEllipsis"
                Foreground="{ThemeResource SystemControlForegroundBaseMediumBrush}" />
@@ -67,6 +69,9 @@ pub struct HomePage {
     root: IFrameworkElement,
     grids: [Rc<CardGrid>; 4],
     current: Cell<usize>,
+    /// The 影视 专区 opened so far, by season type, and the one 影视 shows.
+    pgc: RefCell<HashMap<u32, Rc<PgcZone>>>,
+    pgc_on: Cell<u32>,
 }
 
 impl HomePage {
@@ -89,8 +94,8 @@ impl HomePage {
         for grid in &grids {
             holder.Append(&grid.element().cast::<UIElement>()?)?;
         }
-        let page = Rc::new(Self { root, grids, current: Cell::new(0) });
-        for (tab, _) in TAB_LABELS.iter().enumerate() {
+        let page = Rc::new(Self { root, grids, current: Cell::new(0), pgc: RefCell::default(), pgc_on: Cell::new(0) });
+        for tab in 0..=PGC_TAB {
             let weak = Rc::downgrade(&page);
             on_click(&page.root, &format!("Tab{tab}"), move || {
                 if let Some(page) = weak.upgrade() {
@@ -136,7 +141,19 @@ impl HomePage {
 
     /// Reads the list on show again.
     fn refresh(&self) -> Result<()> {
+        if let Some(zone) = self.pgc_shown() {
+            zone.refresh();
+            return Ok(());
+        }
         self.grids[self.current.get()].refresh()
+    }
+
+    /// The 影视 专区 on show, if 影视 is.
+    fn pgc_shown(&self) -> Option<Rc<PgcZone>> {
+        if self.current.get() != PGC_TAB {
+            return None;
+        }
+        self.pgc.borrow().get(&self.pgc_on.get()).cloned()
     }
 
     /// Follows the interface style.
@@ -144,11 +161,18 @@ impl HomePage {
         style_refresh(&self.root)?;
         let narrow = shell().is_some_and(|s| s.class() == WindowClass::Narrow);
         let shown = if narrow { Visibility::Visible } else { Visibility::Collapsed };
-        named::<IUIElement>(&self.root, "Search")?.SetVisibility(shown)
+        named::<IUIElement>(&self.root, "Search")?.SetVisibility(shown)?;
+        // A narrow window keeps 推荐, 热门 and 影视 in the row.
+        let wide_only = if narrow { Visibility::Collapsed } else { Visibility::Visible };
+        named::<IUIElement>(&self.root, "Tab2")?.SetVisibility(wide_only)?;
+        named::<IUIElement>(&self.root, "Tab3")?.SetVisibility(wide_only)
     }
 
     fn reopen(&self) -> Result<()> {
         let tab = self.current.get();
+        if tab == PGC_TAB {
+            return self.show_tab();
+        }
         if let Some(source) = tab_source(tab).filter(|_| self.grids[tab].source().is_none()) {
             self.grids[tab].open(source)?;
         }
@@ -159,6 +183,9 @@ impl HomePage {
     fn select(self: &Rc<Self>, tab: usize) -> Result<()> {
         if tab == ZONES_TAB {
             return self.pick_zone();
+        }
+        if tab == PGC_TAB {
+            return self.pick_pgc();
         }
         self.current.set(tab);
         self.reopen()
@@ -174,7 +201,23 @@ impl HomePage {
             named::<IControl>(&self.root, &format!("Tab{tab}"))?
                 .SetForeground(&SolidColorBrush::CreateInstanceWithColor(color)?)?;
         }
-        self.say(&self.grids[current].said());
+        let pgc = current == PGC_TAB;
+        for (season_type, zone) in self.pgc.borrow().iter() {
+            let on = pgc && *season_type == self.pgc_on.get();
+            let shown = if on { Visibility::Visible } else { Visibility::Collapsed };
+            zone.element().cast::<IUIElement>()?.SetVisibility(shown)?;
+        }
+        named::<IControl>(&self.root, "Tab4")?.SetForeground(&SolidColorBrush::CreateInstanceWithColor(if pgc {
+            COBALT
+        } else {
+            DIM
+        })?)?;
+        let said = match self.pgc_shown() {
+            Some(zone) => zone.said(),
+            None if pgc => String::new(),
+            None => self.grids[current].said(),
+        };
+        self.say(&said);
         Ok(())
     }
 
@@ -198,6 +241,53 @@ impl HomePage {
         menu.cast::<IFlyoutBase>()?.ShowAt(&named::<FrameworkElement>(&self.root, "Tab3")?)
     }
 
+    fn pick_pgc(self: &Rc<Self>) -> Result<()> {
+        let items: String =
+            PGC_ZONES.iter().map(|(name, _)| format!(r##"<MenuFlyoutItem Text="{name}" />"##)).collect();
+        let menu = load_object(&format!(
+            r##"<MenuFlyout xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation">{items}</MenuFlyout>"##
+        ))?;
+        let listed = menu.cast::<IMenuFlyout>()?.Items()?;
+        for (at, (name, season_type)) in PGC_ZONES.iter().enumerate() {
+            let weak = Rc::downgrade(self);
+            let (name, season_type) = (*name, *season_type);
+            let item = listed.GetAt(at as u32)?.cast::<IMenuFlyoutItem>()?;
+            keep(item.Click(move |_: Ref<IInspectable>, _: Ref<RoutedEventArgs>| {
+                if let Some(page) = weak.upgrade() {
+                    let _ = page.open_pgc(name, season_type);
+                }
+            })?);
+        }
+        menu.cast::<IFlyoutBase>()?.ShowAt(&named::<FrameworkElement>(&self.root, "Tab4")?)
+    }
+
+    /// Shows 影视 专区 `season_type`, made the first time.
+    fn open_pgc(&self, name: &str, season_type: u32) -> Result<()> {
+        named::<IContentControl>(&self.root, "Tab4")?.SetContent(&PropertyValue::CreateString(name)?)?;
+        let made = self.pgc.borrow().get(&season_type).cloned();
+        let zone = match made {
+            Some(zone) => zone,
+            None => {
+                let zone = PgcZone::new(season_type, name, || {
+                    if let Some(home) = shell().and_then(|s| s.home_page()) {
+                        home.grid_spoke(PGC_TAB);
+                    }
+                })?;
+                named::<IPanel>(&self.root, "Grids")?
+                    .Children()?
+                    .cast::<IVector<UIElement>>()?
+                    .Append(&zone.element().cast::<UIElement>()?)?;
+                self.pgc.borrow_mut().insert(season_type, zone.clone());
+                zone
+            }
+        };
+        self.current.set(PGC_TAB);
+        self.pgc_on.set(season_type);
+        self.show_tab()?;
+        zone.start();
+        Ok(())
+    }
+
     fn open_zone(&self, name: &str, region: u32) -> Result<()> {
         named::<IContentControl>(&self.root, "Tab3")?.SetContent(&PropertyValue::CreateString(name)?)?;
         self.current.set(ZONES_TAB);
@@ -209,13 +299,24 @@ impl HomePage {
 
     /// The grid of `tab` has something new to say.
     fn grid_spoke(&self, tab: usize) {
-        if tab == self.current.get() {
-            self.say(&self.grids[tab].said());
+        if tab != self.current.get() {
+            return;
+        }
+        match self.pgc_shown() {
+            Some(zone) => self.say(&zone.said()),
+            None if tab == PGC_TAB => {}
+            None => self.say(&self.grids[tab].said()),
         }
     }
 
     /// Sets the cells of the grid on show.
     pub fn resized(&self) {
-        self.grids[self.current.get()].resized();
+        match self.pgc_shown() {
+            Some(zone) => {
+                let _ = zone.fit();
+            }
+            None if self.current.get() == PGC_TAB => {}
+            None => self.grids[self.current.get()].resized(),
+        }
     }
 }

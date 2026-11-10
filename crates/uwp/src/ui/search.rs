@@ -5,17 +5,20 @@ use std::cell::{Cell, RefCell};
 use std::rc::Rc;
 use std::sync::Arc;
 
+use rubi_core::PgcHit;
 use windows_collections::IVector;
 use windows_core::{IInspectable, Interface, Ref, Result};
 
+use crate::state::pgc::{paid, poster_url};
 use crate::state::search::hit_line;
 use crate::ui::card_grid::{CardGrid, Source};
 use crate::ui::rows::{Covers, add_rows, on_row, on_row_click};
 use crate::ui::shell::shell;
-use crate::ui::{keep, load, named, on_click, on_enter, post, set_text, up};
+use crate::ui::{keep, load, named, on_click, on_enter, pgc_season, post, set_text, up};
 use crate::xaml::{
-    Color, IControl, IFrameworkElement, IImage, IItemsControl, IItemsControl2, IItemsWrapGrid, IPanel, ITextBlock,
-    ITextBox, IUIElement, SizeChangedEventArgs, SolidColorBrush, UIElement, Visibility,
+    Color, IBorder, IContentControl, IControl, IFrameworkElement, IImage, IItemsControl, IItemsControl2,
+    IItemsWrapGrid, IPanel, ITextBlock, ITextBox, IUIElement, PropertyValue, SizeChangedEventArgs, SolidColorBrush,
+    UIElement, Visibility,
 };
 
 const COBALT: Color = Color { a: 255, r: 0, g: 0x50, b: 0xEF };
@@ -29,6 +32,11 @@ const TOP_HITS: usize = 2;
 const HOT_TWO_COLUMNS_FROM: f64 = 600.0;
 const HOT_ROW: f64 = 40.0;
 const TAB_LABELS: [&str; 3] = ["综合", "视频", "UP 主"];
+/// 影视 asked for, and how many show before 展开.
+const PGC_MOST: usize = 20;
+const PGC_FOLDED: usize = 3;
+const PGC_DECODE_WIDTH: i32 = 120;
+const RED: Color = Color { a: 255, r: 0xE8, g: 0x11, b: 0x23 };
 
 const USER_ROW: &str = r##"
 <ListView.ItemTemplate><DataTemplate>
@@ -94,11 +102,48 @@ const LAYOUT: &str = r##"
     </GridView>
   </Grid>
   <Grid x:Name="Results" Grid.Row="3" Visibility="Collapsed">
-    <Grid.RowDefinitions><RowDefinition Height="Auto" /><RowDefinition Height="*" /></Grid.RowDefinitions>
-    <ListView x:Name="TopUsers" SelectionMode="None" IsItemClickEnabled="True"
+    <Grid.RowDefinitions>
+      <RowDefinition Height="Auto" /><RowDefinition Height="Auto" /><RowDefinition Height="*" />
+    </Grid.RowDefinitions>
+    <StackPanel x:Name="PgcPart" Visibility="Collapsed">
+      <TextBlock Text="影视" FontSize="15" Margin="16,2,16,2" />
+      <ListView x:Name="Pgc" SelectionMode="None" IsItemClickEnabled="True" ScrollViewer.VerticalScrollMode="Disabled">
+        <ListView.ItemContainerTransitions><TransitionCollection /></ListView.ItemContainerTransitions>
+        <ListView.ItemContainerStyle>
+          <Style TargetType="ListViewItem">
+            <Setter Property="Padding" Value="16,6" />
+            <Setter Property="HorizontalContentAlignment" Value="Stretch" />
+          </Style>
+        </ListView.ItemContainerStyle>
+        <ListView.ItemTemplate><DataTemplate>
+          <Grid>
+            <Grid.ColumnDefinitions><ColumnDefinition Width="70" /><ColumnDefinition Width="*" /></Grid.ColumnDefinitions>
+            <Grid.RowDefinitions>
+              <RowDefinition Height="Auto" /><RowDefinition Height="Auto" /><RowDefinition Height="Auto" />
+              <RowDefinition Height="Auto" />
+            </Grid.RowDefinitions>
+            <Grid Grid.RowSpan="4" Width="60" Height="80" HorizontalAlignment="Left" VerticalAlignment="Top"
+                  Background="{ThemeResource SystemControlBackgroundBaseLowBrush}">
+              <Image Stretch="UniformToFill" />
+              <Border HorizontalAlignment="Right" VerticalAlignment="Top" Padding="4,0">
+                <TextBlock FontSize="9" Foreground="White" />
+              </Border>
+            </Grid>
+            <TextBlock Grid.Column="1" FontSize="14" TextTrimming="CharacterEllipsis" />
+            <TextBlock Grid.Column="1" Grid.Row="1" FontSize="11" TextTrimming="CharacterEllipsis"
+                       Foreground="{ThemeResource SystemControlForegroundBaseMediumBrush}" />
+            <TextBlock Grid.Column="1" Grid.Row="2" FontSize="12" Foreground="#E0A000" />
+            <TextBlock Grid.Column="1" Grid.Row="3" FontSize="11" Foreground="#0050EF" Text="查看剧集 ›" />
+          </Grid>
+        </DataTemplate></ListView.ItemTemplate>
+      </ListView>
+      <Button x:Name="PgcMore" Background="Transparent" BorderThickness="0" Padding="16,2" Foreground="#0050EF"
+              FontSize="12" Visibility="Collapsed" />
+    </StackPanel>
+    <ListView x:Name="TopUsers" Grid.Row="1" SelectionMode="None" IsItemClickEnabled="True"
               ScrollViewer.VerticalScrollMode="Disabled"><!--users--></ListView>
-    <Grid x:Name="Videos" Grid.Row="1" />
-    <ListView x:Name="Users" Grid.Row="1" SelectionMode="None" IsItemClickEnabled="True" Visibility="Collapsed"><!--users--></ListView>
+    <Grid x:Name="Videos" Grid.Row="2" />
+    <ListView x:Name="Users" Grid.Row="2" SelectionMode="None" IsItemClickEnabled="True" Visibility="Collapsed"><!--users--></ListView>
   </Grid>
 </Grid>"##;
 
@@ -124,6 +169,9 @@ pub struct SearchPage {
     tab: Cell<usize>,
     hot_loaded: Cell<bool>,
     covers: Covers,
+    /// 影视 the search found, and whether all of them show.
+    pgc: RefCell<Vec<PgcHit>>,
+    pgc_all: Cell<bool>,
 }
 
 impl SearchPage {
@@ -151,6 +199,8 @@ impl SearchPage {
             tab: Cell::new(0),
             hot_loaded: Cell::new(false),
             covers: Covers::default(),
+            pgc: RefCell::default(),
+            pgc_all: Cell::new(false),
         });
         let weak = Rc::downgrade(&page);
         let submit = move || {
@@ -170,6 +220,7 @@ impl SearchPage {
             })?;
         }
         page.wire_hot()?;
+        page.wire_pgc()?;
         for (name, top) in [("TopUsers", true), ("Users", false)] {
             let list = named::<IFrameworkElement>(&page.root, name)?;
             let filling = Rc::downgrade(&page);
@@ -185,6 +236,86 @@ impl SearchPage {
             })?;
         }
         Ok(page)
+    }
+
+    fn wire_pgc(self: &Rc<Self>) -> Result<()> {
+        let list = named::<IFrameworkElement>(&self.root, "Pgc")?;
+        let filling = Rc::downgrade(self);
+        on_row(&list, move |at, parts| filling.upgrade().map_or(Ok(()), |p| p.fill_pgc(at, parts)))?;
+        let opening = Rc::downgrade(self);
+        on_row_click(&list, move |at| {
+            if let Some(page) = opening.upgrade() {
+                let hit = page.pgc.borrow().get(at).map(|h| (h.season_id, h.title.clone()));
+                if let Some((id, title)) = hit {
+                    let _ = pgc_season::open(id, &title);
+                }
+            }
+        })?;
+        let folding = Rc::downgrade(self);
+        on_click(&self.root, "PgcMore", move || {
+            if let Some(page) = folding.upgrade() {
+                page.pgc_all.set(!page.pgc_all.get());
+                let _ = page.show_pgc();
+            }
+        })
+    }
+
+    fn load_pgc(&self) {
+        let Some(shell) = shell() else { return };
+        let Some(backend) = shell.backend.get().cloned() else { return };
+        let (term, turn, dispatcher, core) =
+            (self.term.borrow().clone(), self.turn.get(), shell.dispatcher.clone(), backend.clone());
+        backend.spawn(async move {
+            let found = core.services.discover.search_pgc(&term, PGC_MOST).await.unwrap_or_default();
+            post(&dispatcher, move || {
+                if let Some(page) = held().filter(|p| p.turn.get() == turn) {
+                    *page.pgc.borrow_mut() = found;
+                    let _ = page.show_pgc();
+                }
+            });
+        });
+    }
+
+    /// The first few 影视, or all of them once asked.
+    fn show_pgc(&self) -> Result<()> {
+        let total = self.pgc.borrow().len();
+        let shown = if self.pgc_all.get() { total } else { total.min(PGC_FOLDED) };
+        let list = named::<IFrameworkElement>(&self.root, "Pgc")?;
+        list.cast::<IItemsControl>()?.Items()?.cast::<IVector<IInspectable>>()?.Clear()?;
+        add_rows(&list, 0, shown)?;
+        let more = named::<IContentControl>(&self.root, "PgcMore")?;
+        let label = if self.pgc_all.get() { "收起".to_owned() } else { format!("展开全部 {total} 部") };
+        more.SetContent(&PropertyValue::CreateString(&label)?)?;
+        let folds = if total > PGC_FOLDED { Visibility::Visible } else { Visibility::Collapsed };
+        more.cast::<IUIElement>()?.SetVisibility(folds)?;
+        self.show_tab()
+    }
+
+    fn fill_pgc(&self, at: usize, parts: &IVector<UIElement>) -> Result<()> {
+        let hits = self.pgc.borrow();
+        let Some(hit) = hits.get(at) else { return Ok(()) };
+        let poster = parts.GetAt(0)?.cast::<IPanel>()?.Children()?.cast::<IVector<UIElement>>()?;
+        if let Ok(cover) = self.covers.get(&poster_url(&hit.cover, PGC_DECODE_WIDTH as u32), PGC_DECODE_WIDTH) {
+            poster.GetAt(0)?.cast::<IImage>()?.SetSource(&cover)?;
+        }
+        let badge = poster.GetAt(1)?.cast::<IBorder>()?;
+        let tint = if paid(&hit.badge) { RED } else { COBALT };
+        badge.SetBackground(&SolidColorBrush::CreateInstanceWithColor(tint)?)?;
+        badge.cast::<IUIElement>()?.SetVisibility(if hit.badge.is_empty() {
+            Visibility::Collapsed
+        } else {
+            Visibility::Visible
+        })?;
+        badge.Child()?.cast::<ITextBlock>()?.SetText(&hit.badge)?;
+        parts.GetAt(1)?.cast::<ITextBlock>()?.SetText(&hit.title)?;
+        let meta = [hit.kind.as_str(), hit.styles.as_str(), hit.index_show.as_str()]
+            .into_iter()
+            .filter(|s| !s.is_empty())
+            .collect::<Vec<_>>()
+            .join(" · ");
+        parts.GetAt(2)?.cast::<ITextBlock>()?.SetText(&meta)?;
+        let score = if hit.score.is_empty() { String::new() } else { format!("★ {}", hit.score) };
+        parts.GetAt(3)?.cast::<ITextBlock>()?.SetText(&score)
     }
 
     fn wire_hot(self: &Rc<Self>) -> Result<()> {
@@ -272,9 +403,12 @@ impl SearchPage {
         self.hits_page.set(1);
         self.hits_ended.set(false);
         self.hits_loading.set(false);
-        for name in ["TopUsers", "Users"] {
+        for name in ["TopUsers", "Users", "Pgc"] {
             named::<IItemsControl>(&self.root, name)?.Items()?.cast::<IVector<IInspectable>>()?.Clear()?;
         }
+        self.pgc.borrow_mut().clear();
+        self.pgc_all.set(false);
+        self.load_pgc();
         self.tab.set(0);
         self.videos.open(Source::Search(Arc::from(term.as_str())))?;
         self.load_hits();
@@ -348,6 +482,7 @@ impl SearchPage {
         let tab = self.tab.get();
         let shown = |on| if on { Visibility::Visible } else { Visibility::Collapsed };
         named::<IUIElement>(&self.root, "TopUsers")?.SetVisibility(shown(tab == 0))?;
+        named::<IUIElement>(&self.root, "PgcPart")?.SetVisibility(shown(tab == 0 && !self.pgc.borrow().is_empty()))?;
         named::<IUIElement>(&self.root, "Videos")?.SetVisibility(shown(tab != 2))?;
         named::<IUIElement>(&self.root, "Users")?.SetVisibility(shown(tab == 2))?;
         for at in 0..TAB_LABELS.len() {

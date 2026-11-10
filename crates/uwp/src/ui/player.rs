@@ -200,6 +200,8 @@ thread_local! {
     /// The player of the page on show; on the UI thread.
     static PLAYING: RefCell<Option<MediaPlayer>> = const { RefCell::new(None) };
     static PAUSED_FOR_BLUR: Cell<bool> = const { Cell::new(false) };
+    /// The episode the next opening plays, if it is one.
+    static NEXT_EPISODE: Cell<Option<(u64, u64)>> = const { Cell::new(None) };
     /// What `PLAYING` plays: closing it lets go of its connections.
     static SOURCE: RefCell<Option<MediaSource>> = const { RefCell::new(None) };
     /// The page on show, while there is one.
@@ -218,6 +220,8 @@ struct Page {
     cid: Rc<Cell<u64>>,
     /// The 竖屏推流 layout, not the ordinary one.
     feed: bool,
+    /// The 影视 episode it plays, as (ep id, cid); its streams come by the episode, not the video.
+    episode: Option<(u64, u64)>,
     /// The UP, once known.
     up: Rc<RefCell<(u64, String)>>,
     /// The qualities on offer.
@@ -494,6 +498,12 @@ pub fn root() -> Option<IFrameworkElement> {
     page().map(|p| p.root)
 }
 
+/// Opens the 影视 episode `ep_id` / `cid`, whose video is `bvid`.
+pub fn show_episode(bvid: &str, title: &str, uploader: &str, ep_id: u64, cid: u64) -> Result<()> {
+    NEXT_EPISODE.set(Some((ep_id, cid)));
+    open(false, bvid, title, uploader)
+}
+
 /// Opens the ordinary video page.
 pub fn show(bvid: &str, title: &str, uploader: &str) -> Result<()> {
     open(false, bvid, title, uploader)
@@ -502,6 +512,7 @@ pub fn show(bvid: &str, title: &str, uploader: &str) -> Result<()> {
 /// Opens a video, in the 竖屏推流 layout when `feed`.
 pub fn open(feed: bool, bvid: &str, title: &str, uploader: &str) -> Result<()> {
     let Some(shell) = shell() else { return Ok(()) };
+    let episode = NEXT_EPISODE.take();
     queue::opening(bvid);
     leave();
     crate::ui::me::leave();
@@ -538,6 +549,7 @@ pub fn open(feed: bool, bvid: &str, title: &str, uploader: &str) -> Result<()> {
         bvid: bvid.to_owned(),
         cid,
         feed,
+        episode,
         up: Rc::default(),
         offer: Rc::default(),
         bar: ControlBar::attach(
@@ -626,7 +638,11 @@ pub fn open(feed: bool, bvid: &str, title: &str, uploader: &str) -> Result<()> {
     });
     backend.spawn(async move {
         let quality = core.services.preferences.settings().playback.preferred_quality.min(MAX_FREE_QN);
-        let source = match core.services.videos.playback(&bvid, quality).await {
+        let playback = match episode {
+            Some((ep_id, cid)) => core.services.pgc.play(ep_id, cid, quality).await,
+            None => core.services.videos.playback(&bvid, quality).await,
+        };
+        let source = match playback {
             Ok(playback) => open_source(&playback)
                 .map(|source| Opened {
                     source,
@@ -680,8 +696,12 @@ fn open_up() {
     let (mid, name) = page.up.borrow().clone();
     let (bvid, title) = (page.bvid.clone(), named::<ITextBlock>(&page.root, "Title").and_then(|t| t.Text()));
     let (title, uploader, feed) = (title.map(|t| t.to_string()).unwrap_or_default(), name.clone(), page.feed);
+    let episode = page.episode;
     shell.remember(move || {
-        let _ = open(feed, &bvid, &title, &uploader);
+        let _ = match episode {
+            Some((ep_id, cid)) => show_episode(&bvid, &title, &uploader, ep_id, cid),
+            None => open(feed, &bvid, &title, &uploader),
+        };
     });
     crate::ui::shell::leave_pages();
     let _ = up::open(mid, &name);
@@ -716,9 +736,14 @@ fn switch_quality(qn: u32) {
     let (Some(page), Some(shell)) = (page(), shell()) else { return };
     let Some(backend) = shell.backend.get().cloned() else { return };
     let (bvid, dispatcher, core, run) = (page.bvid.clone(), shell.dispatcher.clone(), backend.clone(), self::run());
+    let episode = page.episode;
     backend.spawn(async move {
         let _ = core.services.preferences.patch_settings(&quality_patch(qn).to_string());
-        let source = match core.services.videos.playback(&bvid, qn).await {
+        let playback = match episode {
+            Some((ep_id, cid)) => core.services.pgc.play(ep_id, cid, qn).await,
+            None => core.services.videos.playback(&bvid, qn).await,
+        };
+        let source = match playback {
             Ok(playback) => open_source(&playback).map(|source| (source, offer_of(&playback))).map_err(|e| e.message()),
             Err(e) => Err(e.to_string()),
         };

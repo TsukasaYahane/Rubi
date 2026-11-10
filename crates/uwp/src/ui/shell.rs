@@ -474,6 +474,7 @@ impl Shell {
         live::resized();
         follow::resized();
         up::resized();
+        crate::ui::pgc_season::resized();
         if let Some(home) = self.home.borrow().as_ref() {
             home.style()?;
         }
