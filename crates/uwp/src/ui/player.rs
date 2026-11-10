@@ -35,13 +35,13 @@ use crate::ui::watch;
 use crate::ui::{load, named, on_click, on_enter, post, set_text, soon};
 use crate::xaml::{
     AdaptiveMediaSource, Color, DataWriter, FocusManager, FocusState, FrameworkElement, Grid, GridLength, GridUnitType,
-    HorizontalAlignment, IButtonBase, IColumnDefinition, IContentControl, IControl, IDataWriter, IFontIcon,
-    IFrameworkElement, IFrameworkElement4, IInputStream, IMediaPlaybackSession, IMediaPlayer, IMediaPlayer3,
-    IMediaPlayerElement, IMediaPlayerFailedEventArgs, IOutputStream, IPanel, IRandomAccessStream, IRangeBase,
+    IButtonBase, IColumnDefinition, IContentControl, IControl, IDataWriter, IFontIcon, IFrameworkElement,
+    IFrameworkElement4, IInputStream, IMediaPlaybackSession, IMediaPlayer, IMediaPlayer3, IMediaPlayerElement,
+    IMediaPlayerFailedEventArgs, IOutputStream, IPanel, IRandomAccessStream, IRangeBase,
     IRangeBaseValueChangedEventArgs, IRowDefinition, ITextBlock, ITextBox, IUIElement, InMemoryRandomAccessStream,
     MediaPlaybackSession, MediaPlaybackState, MediaPlayer, MediaPlayerFailedEventArgs, MediaSource, PropertyValue,
-    RangeBaseValueChangedEventArgs, SizeChangedEventArgs, TappedRoutedEventArgs, UIElement, Uri, VerticalAlignment,
-    VirtualKey, Visibility,
+    RangeBaseValueChangedEventArgs, SizeChangedEventArgs, TappedRoutedEventArgs, UIElement, Uri, VirtualKey,
+    Visibility,
 };
 
 /// Quality asked for; the core caps it to what the account may play.
@@ -240,11 +240,11 @@ struct Page {
     seeks: Arc<AtomicU64>,
     /// Filling the screen.
     full: Rc<Cell<bool>>,
-    /// The video element is held at its size while the page resizes around it.
-    held: Rc<Cell<bool>>,
+    /// The page is being resized: the player gets a fresh surface once that stops.
+    resizing: Rc<Cell<bool>>,
     /// Bumped by each size change: only the last one lets the video go.
     resizes: Arc<AtomicU64>,
-    /// Until when size changes are not held: entering or leaving fullscreen is one change.
+    /// Until when size changes are let be: entering or leaving fullscreen is one change.
     hold_from: Rc<Cell<Instant>>,
 }
 
@@ -298,22 +298,15 @@ fn place_send_bar(root: &IFrameworkElement, full: bool, normally: Color) -> Resu
     control_bar::move_send_bar(root, from, to, color)
 }
 
-/// Keeps the video element at its size until the page stops resizing. The system player draws on
-/// a surface of its own, and resizing that many times in a row can leave it blank on screen; the
-/// side pane is opaque, so the page can move freely over a video that waits.
-fn hold_video() -> Result<()> {
+/// Notes that the page is being resized. The video follows at once; once the size holds still the
+/// player is handed to the element again, so it draws on a fresh surface: the system player's own
+/// surface could be left blank by many resizes in a row.
+fn note_resize() -> Result<()> {
     let (Some(page), Some(shell)) = (page(), shell()) else { return Ok(()) };
     if PLAYING.with(|p| p.borrow().is_none()) || Instant::now() < page.hold_from.get() {
         return Ok(());
     }
-    if !page.held.replace(true) {
-        let video = named::<IFrameworkElement>(&page.root, page.video.active())?;
-        let (width, height) = (video.ActualWidth()?, video.ActualHeight()?);
-        video.SetHorizontalAlignment(HorizontalAlignment::Left)?;
-        video.SetVerticalAlignment(VerticalAlignment::Top)?;
-        video.SetWidth(width)?;
-        video.SetHeight(height)?;
-    }
+    page.resizing.set(true);
     let turn = page.resizes.fetch_add(1, Ordering::Relaxed) + 1;
     let (resizes, dispatcher, run) = (page.resizes.clone(), shell.dispatcher.clone(), self::run());
     let Some(backend) = shell.backend.get().cloned() else { return Ok(()) };
@@ -322,7 +315,7 @@ fn hold_video() -> Result<()> {
         if resizes.load(Ordering::Relaxed) == turn {
             post(&dispatcher, move || {
                 if run == self::run() {
-                    let _ = release_video();
+                    let _ = refresh_surface();
                 }
             });
         }
@@ -330,18 +323,13 @@ fn hold_video() -> Result<()> {
     Ok(())
 }
 
-/// Lets the video take its place again, on a fresh surface.
-fn release_video() -> Result<()> {
+/// Gives the player to its element again, after a resize.
+fn refresh_surface() -> Result<()> {
     let Some(page) = page() else { return Ok(()) };
-    if !page.held.replace(false) {
+    if !page.resizing.replace(false) {
         return Ok(());
     }
-    let video = named::<IFrameworkElement>(&page.root, page.video.active())?;
-    video.SetWidth(f64::NAN)?;
-    video.SetHeight(f64::NAN)?;
-    video.SetHorizontalAlignment(HorizontalAlignment::Stretch)?;
-    video.SetVerticalAlignment(VerticalAlignment::Stretch)?;
-    let element = video.cast::<IMediaPlayerElement>()?;
+    let element = named::<IMediaPlayerElement>(&page.root, page.video.active())?;
     if let Some(player) = PLAYING.with(|p| p.borrow().clone()) {
         element.SetMediaPlayer(None::<&MediaPlayer>)?;
         element.SetMediaPlayer(&player)?;
@@ -351,7 +339,7 @@ fn release_video() -> Result<()> {
 
 fn drag_side(change: f64) {
     let (Some(page), Some(shell)) = (page(), shell()) else { return };
-    let _ = hold_video();
+    let _ = note_resize();
     let Ok(side) = named::<IFrameworkElement>(&page.root, "Side") else { return };
     let (now, whole) = (side.ActualWidth().unwrap_or(0.0), page.root.ActualWidth().unwrap_or(0.0));
     shell.set_side_width(Some(panes::side_width(now - change, whole)));
@@ -377,7 +365,7 @@ fn set_full(on: bool) -> Result<()> {
         return Ok(());
     }
     page.hold_from.set(Instant::now() + FULLSCREEN_SETTLE);
-    release_video()?;
+    refresh_surface()?;
     shell.fill_screen(on)?;
     apply_layout(&page.root)?;
     page.bar.set_full(on)
@@ -620,7 +608,7 @@ pub fn open(feed: bool, bvid: &str, title: &str, uploader: &str) -> Result<()> {
         showing_position: Rc::default(),
         seeks: Arc::default(),
         full: Rc::new(Cell::new(false)),
-        held: Rc::default(),
+        resizing: Rc::default(),
         resizes: Arc::default(),
         hold_from: Rc::new(Cell::new(Instant::now())),
     };
@@ -656,7 +644,7 @@ pub fn open(feed: bool, bvid: &str, title: &str, uploader: &str) -> Result<()> {
     let revoker = root.SizeChanged(move |sender: Ref<windows_core::IInspectable>, _: Ref<SizeChangedEventArgs>| {
         // From the sender: a handler holding its own source would keep the page for good.
         let Ok(root) = sender.ok().and_then(|s| s.cast::<IFrameworkElement>()) else { return };
-        let _ = hold_video();
+        let _ = note_resize();
         soon(&pending, move || {
             let _ = apply_layout(&root);
         });
