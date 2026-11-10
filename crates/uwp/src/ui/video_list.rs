@@ -13,9 +13,10 @@ use windows_core::{IInspectable, Interface, Ref, Result};
 use crate::backend::Backend;
 use crate::state::library::{Row, Shelf, row_size, video_link};
 use crate::state::queue::Entry;
+use crate::ui::card_menu::{self, Choice};
 use crate::ui::rows::{Covers, add_rows, on_row, on_row_click};
 use crate::ui::shell::shell;
-use crate::ui::{card_menu, feed, keep, load, named, on_click, post, queue, set_text};
+use crate::ui::{feed, keep, load, named, on_click, post, queue, set_text};
 use crate::xaml::{
     IContentControl, IFrameworkElement, IImage, IItemsControl, IItemsControl2, IItemsWrapGrid, IListViewBase,
     IPropertyValue, ISelector, ITextBlock, IUIElement, ListViewSelectionMode, PropertyValue, SelectionChangedEventArgs,
@@ -83,6 +84,10 @@ const LAYOUT: &str = r##"
               BorderThickness="0,1,0,0" BorderBrush="{ThemeResource SystemControlForegroundBaseLowBrush}">
     <Button x:Name="Remove" Background="Transparent" BorderThickness="0" Padding="8,4" Foreground="#0050EF" />
     <Button x:Name="Clear" Content="清除已看完" Visibility="Collapsed" Background="Transparent" BorderThickness="0"
+            Padding="8,4" Foreground="#0050EF" />
+    <Button x:Name="MoveTo" Content="移动到…" Visibility="Collapsed" Background="Transparent" BorderThickness="0"
+            Padding="8,4" Foreground="#0050EF" />
+    <Button x:Name="CopyTo" Content="复制到…" Visibility="Collapsed" Background="Transparent" BorderThickness="0"
             Padding="8,4" Foreground="#0050EF" />
   </StackPanel>
 </Grid>"##;
@@ -152,6 +157,10 @@ pub struct VideoList {
     covers: Covers,
     fitted: Cell<bool>,
     back: RefCell<Option<Box<dyn Fn()>>>,
+    /// The folders videos can go to, by id and title.
+    targets: RefCell<Vec<(u64, String)>>,
+    /// Told when videos went from one folder to another: from, to, how many, and whether copied.
+    transfer_heard: RefCell<Option<Box<dyn Fn(u64, u64, usize, bool)>>>,
 }
 
 thread_local! {
@@ -182,6 +191,8 @@ impl VideoList {
             covers: Covers::default(),
             fitted: Cell::new(false),
             back: RefCell::default(),
+            targets: RefCell::default(),
+            transfer_heard: RefCell::default(),
         });
         LISTS.with_borrow_mut(|l| l.insert(shown.id, Rc::downgrade(&shown)));
         set_text(&shown.root, "Title", title)?;
@@ -237,6 +248,12 @@ impl VideoList {
             let _ = queue::start(Shelf::Later.label(), entries, 0);
         })?;
         shown.wire("Clear", Self::clear_finished)?;
+        shown.wire("MoveTo", |s| {
+            let _ = s.pick_target(false);
+        })?;
+        shown.wire("CopyTo", |s| {
+            let _ = s.pick_target(true);
+        })?;
         Ok(shown)
     }
 
@@ -260,6 +277,16 @@ impl VideoList {
             self.label("Back", &format!("← {label}"))?;
         }
         self.show(&self.root, "Back", label.is_some())
+    }
+
+    /// The folders a folder's videos can be moved or copied to.
+    pub fn set_targets(&self, targets: Vec<(u64, String)>) {
+        *self.targets.borrow_mut() = targets;
+    }
+
+    /// Says whom to tell when videos go to another folder.
+    pub fn on_transfer(&self, heard: impl Fn(u64, u64, usize, bool) + 'static) {
+        *self.transfer_heard.borrow_mut() = Some(Box::new(heard));
     }
 
     fn label(&self, name: &str, text: &str) -> Result<()> {
@@ -415,6 +442,9 @@ impl VideoList {
         self.show(&self.root, "Bar", on)?;
         self.show_play_all()?;
         self.show(&self.root, "Clear", on && source == Source::Later)?;
+        let folder = matches!(source, Source::Folder(_));
+        self.show(&self.root, "MoveTo", on && folder)?;
+        self.show(&self.root, "CopyTo", on && folder)?;
         self.show_count()
     }
 
@@ -427,6 +457,70 @@ impl VideoList {
         if !aids.is_empty() {
             self.take_out(aids, "已移除");
         }
+    }
+
+    /// Offers the other folders under the button for the ticked videos.
+    fn pick_target(self: &Rc<Self>, keep: bool) -> Result<()> {
+        let Source::Folder(from) = self.source.get() else { return Ok(()) };
+        let rows = self.rows.borrow();
+        let aids: Vec<u64> = self.picked()?.iter().filter_map(|at| rows.get(*at)).map(|r| r.aid).collect();
+        drop(rows);
+        if aids.is_empty() {
+            return set_text(&self.root, "Meta", "先选中要移动或复制的视频");
+        }
+        let choices: Vec<Choice> = self
+            .targets
+            .borrow()
+            .iter()
+            .filter(|(id, _)| *id != from)
+            .map(|(to, title)| {
+                let (weak, aids, to, title) = (Rc::downgrade(self), aids.clone(), *to, title.clone());
+                let label = title.clone();
+                let act: Rc<dyn Fn()> = Rc::new(move || {
+                    if let Some(shown) = weak.upgrade() {
+                        shown.transfer(from, to, &title, aids.clone(), keep);
+                    }
+                });
+                (label, act)
+            })
+            .collect();
+        if choices.is_empty() {
+            return set_text(&self.root, "Meta", "没有别的收藏夹");
+        }
+        card_menu::show_under(&named(&self.root, if keep { "CopyTo" } else { "MoveTo" })?, choices)
+    }
+
+    fn transfer(self: &Rc<Self>, from: u64, to: u64, title: &str, aids: Vec<u64>, keep: bool) {
+        let Some(shell) = shell() else { return };
+        let Some(backend) = shell.backend.get().cloned() else { return };
+        if self.busy.replace(true) {
+            return;
+        }
+        let said = format!("{}{title}", if keep { "已复制到 " } else { "已移动到 " });
+        let (id, dispatcher, core) = (self.id, shell.dispatcher.clone(), backend.clone());
+        backend.spawn(async move {
+            let done = core.services.favorites.transfer(from, to, &aids, keep).await.map_err(|e| e.to_string());
+            post(&dispatcher, move || {
+                let Some(shown) = list_of(id) else { return };
+                let worked = done.is_ok();
+                let count = aids.len();
+                let _ = if keep {
+                    shown.busy.set(false);
+                    match done {
+                        Ok(()) => shown.set_managing(false).and_then(|()| {
+                            let line = named::<ITextBlock>(&shown.root, "Meta")?.Text()?;
+                            set_text(&shown.root, "Meta", &format!("{line} · {said}"))
+                        }),
+                        Err(problem) => set_text(&shown.root, "Meta", &format!("操作失败：{problem}")),
+                    }
+                } else {
+                    shown.gone(&aids, done, &said)
+                };
+                if worked && let Some(heard) = shown.transfer_heard.borrow().as_ref() {
+                    heard(from, to, count, keep);
+                }
+            });
+        });
     }
 
     fn clear_finished(self: &Rc<Self>) {

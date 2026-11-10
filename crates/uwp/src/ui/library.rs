@@ -10,6 +10,8 @@ use windows_core::{IInspectable, Interface, Result};
 
 use crate::state::layout::WindowClass;
 use crate::state::library::{Shelf, folder_line};
+use crate::ui::card_menu::{self, Choice};
+use crate::ui::folder_edit::{self, Outcome};
 use crate::ui::rows::{add_rows, on_row, on_row_click};
 use crate::ui::shell::shell;
 use crate::ui::video_list::{Source, VideoList};
@@ -37,7 +39,16 @@ const FAVORITES: &str = r##"
       </Grid.RowDefinitions>
       <Button x:Name="BackToMe" Content="&#x2190; 我的" Visibility="Collapsed" Background="Transparent"
               BorderThickness="0" Padding="16,6" Foreground="#0050EF" />
-      <TextBlock Grid.Row="1" Text="收藏夹" FontSize="20" FontWeight="Light" Margin="16,12,16,6" />
+      <Grid Grid.Row="1" Margin="16,12,8,6">
+        <Grid.ColumnDefinitions><ColumnDefinition Width="*" /><ColumnDefinition Width="Auto" /></Grid.ColumnDefinitions>
+        <TextBlock Text="收藏夹" FontSize="20" FontWeight="Light" />
+        <Button x:Name="NewFolder" Grid.Column="1" Background="Transparent" BorderThickness="0" Padding="8,2"
+                Foreground="#0050EF" VerticalAlignment="Center">
+          <StackPanel Orientation="Horizontal">
+            <FontIcon Glyph="&#xE710;" FontSize="12" /><TextBlock Text="新建" Margin="6,0,0,0" />
+          </StackPanel>
+        </Button>
+      </Grid>
       <ListView x:Name="Folders" Grid.Row="2" SelectionMode="Single" IsItemClickEnabled="True">
         <ListView.ItemContainerTransitions><TransitionCollection /></ListView.ItemContainerTransitions>
         <ListView.ItemContainerStyle>
@@ -60,6 +71,8 @@ const FAVORITES: &str = r##"
   </Border>
   <ContentControl x:Name="VideoHost" Grid.Column="1" IsTabStop="False" HorizontalContentAlignment="Stretch"
                   VerticalContentAlignment="Stretch" />
+  <ContentControl x:Name="EditHost" Grid.ColumnSpan="2" IsTabStop="False" Visibility="Collapsed"
+                  VerticalAlignment="Top" HorizontalContentAlignment="Stretch" />
 </Grid>"##;
 
 /// 收藏夹: the folders, and the videos of the one open: beside each other, or by turns on a
@@ -73,6 +86,8 @@ pub struct Favorites {
     inside: Cell<bool>,
     /// The videos' way back has been set up.
     back_set: Cell<bool>,
+    /// The folder whose videos show, kept across a reload of the list.
+    open_id: Cell<Option<u64>>,
 }
 
 impl Favorites {
@@ -87,6 +102,7 @@ impl Favorites {
             class: Cell::new(WindowClass::Wide),
             inside: Cell::new(false),
             back_set: Cell::new(false),
+            open_id: Cell::new(None),
         });
         let list = named::<IFrameworkElement>(&root, "Folders")?;
         let filling = Rc::downgrade(&page);
@@ -98,6 +114,44 @@ impl Favorites {
             }
         })?;
         on_click(&root, "BackToMe", me::back_from_shelf)?;
+        let making = Rc::downgrade(&page);
+        on_click(&root, "NewFolder", move || {
+            if let Some(page) = making.upgrade() {
+                let _ = page.edit(None, false);
+            }
+        })?;
+        let asking = Rc::downgrade(&page);
+        card_menu::attach_choices(&list, move |at| {
+            let page = asking.upgrade()?;
+            let default = page.folders.borrow().get(at)?.default;
+            let editing = Rc::downgrade(&page);
+            let mut choices: Vec<Choice> = vec![(
+                "编辑".to_owned(),
+                Rc::new(move || {
+                    if let Some(page) = editing.upgrade() {
+                        let _ = page.edit(Some(at), false);
+                    }
+                }),
+            )];
+            if !default {
+                let deleting = Rc::downgrade(&page);
+                choices.push((
+                    "删除".to_owned(),
+                    Rc::new(move || {
+                        if let Some(page) = deleting.upgrade() {
+                            let _ = page.edit(Some(at), true);
+                        }
+                    }),
+                ));
+            }
+            Some(choices)
+        })?;
+        let moving = Rc::downgrade(&page);
+        page.videos.on_transfer(move |from, to, count, keep| {
+            if let Some(page) = moving.upgrade() {
+                let _ = page.transferred(from, to, count, keep);
+            }
+        });
         Ok(page)
     }
 
@@ -108,8 +162,42 @@ impl Favorites {
         parts.GetAt(1)?.cast::<ITextBlock>()?.SetText(&folder_line(folder))
     }
 
+    /// Opens the sheet for the folder at `at`, or a new one; ready to delete when `deleting`.
+    fn edit(self: &Rc<Self>, at: Option<usize>, deleting: bool) -> Result<()> {
+        let folder = at.and_then(|at| self.folders.borrow().get(at).cloned());
+        let weak = Rc::downgrade(self);
+        let gone = folder.as_ref().map(|f| f.id);
+        folder_edit::open(&named(&self.root, "EditHost")?, folder.as_ref(), deleting, move |outcome| {
+            let Some(page) = weak.upgrade() else { return };
+            if outcome == Outcome::Deleted && page.open_id.get() == gone {
+                page.open_id.set(None);
+                page.inside.set(false);
+            }
+            if outcome != Outcome::Cancelled {
+                page.reload();
+            }
+        })
+    }
+
+    /// Videos went from one folder to another: the counts follow at once.
+    fn transferred(&self, from: u64, to: u64, count: usize, keep: bool) -> Result<()> {
+        for folder in self.folders.borrow_mut().iter_mut() {
+            if folder.id == to {
+                folder.count += count as u32;
+            } else if folder.id == from && !keep {
+                folder.count = folder.count.saturating_sub(count as u32);
+            }
+        }
+        let list = named::<IFrameworkElement>(&self.root, "Folders")?;
+        let at = list.cast::<ISelector>()?.SelectedIndex()?;
+        list.cast::<IItemsControl>()?.Items()?.cast::<IVector<IInspectable>>()?.Clear()?;
+        add_rows(&list, 0, self.folders.borrow().len())?;
+        list.cast::<ISelector>()?.SetSelectedIndex(at)
+    }
+
     fn open(self: &Rc<Self>, at: usize) -> Result<()> {
         let Some(folder) = self.folders.borrow().get(at).cloned() else { return Ok(()) };
+        self.open_id.set(Some(folder.id));
         named::<ISelector>(&self.root, "Folders")?.SetSelectedIndex(at as i32)?;
         self.videos.open(Source::Folder(folder.id), &folder.title, &folder_line(&folder))?;
         self.inside.set(true);
@@ -140,11 +228,14 @@ impl Favorites {
         let count = folders.len();
         let list = named::<IFrameworkElement>(&self.root, "Folders")?;
         list.cast::<IItemsControl>()?.Items()?.cast::<IVector<IInspectable>>()?.Clear()?;
+        let targets = folders.iter().map(|f| (f.id, f.title.clone())).collect();
+        let kept = self.open_id.get().and_then(|id| folders.iter().position(|f| f.id == id));
         *self.folders.borrow_mut() = folders;
+        self.videos.set_targets(targets);
         add_rows(&list, 0, count)?;
-        if count > 0 && self.class.get() != WindowClass::Narrow {
+        if count > 0 && (self.class.get() != WindowClass::Narrow || kept.is_some()) {
             let inside = self.inside.get();
-            self.open(0)?;
+            self.open(kept.unwrap_or(0))?;
             self.inside.set(inside);
         }
         self.arrange()

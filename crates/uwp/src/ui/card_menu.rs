@@ -1,4 +1,5 @@
-//! The menu of a card in a list, by right click, long press or the menu key.
+//! The menu of a row in a list, by right click, long press or the menu key: a card's
+//! 稍后再看 / 复制链接, or whatever choices a list offers.
 
 use std::rc::Rc;
 
@@ -20,30 +21,47 @@ pub struct Target {
     pub link: String,
 }
 
-/// Offers the menu on `list`, whose rows are numbered by their data; `target` says what row is what.
+/// One line of a menu and what it does.
+pub type Choice = (String, Rc<dyn Fn()>);
+
+/// Offers a card's menu on `list`, whose rows are numbered by their data; `target` says what row is
+/// what.
 pub fn attach(list: &IFrameworkElement, target: impl Fn(usize) -> Option<Target> + 'static) -> Result<()> {
+    attach_choices(list, move |at| target(at).map(card_choices))
+}
+
+/// Offers on `list` the menu `choices` gives for a row; none for an empty one.
+pub fn attach_choices(
+    list: &IFrameworkElement,
+    choices: impl Fn(usize) -> Option<Vec<Choice>> + 'static,
+) -> Result<()> {
     keep(list.cast::<IUIElement4>()?.ContextRequested(
         move |sender: Ref<UIElement>, args: Ref<ContextRequestedEventArgs>| {
             let (Ok(sender), Ok(args)) = (sender.ok(), args.ok()) else { return };
-            let _ = requested(sender, args, &target);
+            let _ = requested(sender, args, &choices);
         },
     )?);
     Ok(())
 }
 
+/// Shows `choices` under `button`.
+pub fn show_under(button: &FrameworkElement, choices: Vec<Choice>) -> Result<()> {
+    menu(choices)?.cast::<IFlyoutBase>()?.ShowAt(button)
+}
+
 fn requested(
     list: &UIElement,
     args: &ContextRequestedEventArgs,
-    target: &impl Fn(usize) -> Option<Target>,
+    choices: &impl Fn(usize) -> Option<Vec<Choice>>,
 ) -> Result<()> {
     let source = args.cast::<IRoutedEventArgs>()?.OriginalSource()?;
     let row = source.cast::<IFrameworkElement>()?.DataContext()?.cast::<IPropertyValue>()?.GetInt32()?;
-    let Some(target) = target(row as usize) else { return Ok(()) };
+    let Some(choices) = choices(row as usize).filter(|c| !c.is_empty()) else { return Ok(()) };
     let asked = args.cast::<IContextRequestedEventArgs>()?;
     asked.SetHandled(true)?;
     let mut point = Point::default();
     let by_pointer = asked.TryGetPosition(list, &mut point)?;
-    let menu = build(target)?;
+    let menu = menu(choices)?;
     if by_pointer {
         menu.cast::<IMenuFlyout2>()?.ShowAt(list, point)
     } else {
@@ -55,34 +73,30 @@ fn item(label: &str) -> String {
     format!(r##"<MenuFlyoutItem Text="{}" />"##, escape(label))
 }
 
-fn build(target: Target) -> Result<IInspectable> {
+fn card_choices(target: Target) -> Vec<Choice> {
     let Target { later, link } = target;
-    let mut items = String::new();
-    if later.is_some() {
-        items.push_str(&item("稍后再看"));
+    let mut choices: Vec<Choice> = Vec::new();
+    if let Some(bvid) = later {
+        choices.push(("稍后再看".to_owned(), Rc::new(move || save_for_later(&bvid))));
     }
-    items.push_str(&item("复制链接"));
+    choices.push(("复制链接".to_owned(), Rc::new(move || copy(&link))));
+    choices
+}
+
+fn menu(choices: Vec<Choice>) -> Result<IInspectable> {
+    let items: String = choices.iter().map(|(label, _)| item(label)).collect();
     let menu = load_object(&format!(
         r##"<MenuFlyout xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation">{items}</MenuFlyout>"##
     ))?;
     let listed = menu.cast::<IMenuFlyout>()?.Items()?;
-    let mut at = 0;
-    if let Some(bvid) = later {
-        let bvid = Rc::new(bvid);
+    for (at, (_, act)) in choices.into_iter().enumerate() {
         keep(
             listed
-                .GetAt(at)?
+                .GetAt(at as u32)?
                 .cast::<IMenuFlyoutItem>()?
-                .Click(move |_: Ref<IInspectable>, _: Ref<RoutedEventArgs>| save_for_later(&bvid))?,
+                .Click(move |_: Ref<IInspectable>, _: Ref<RoutedEventArgs>| act())?,
         );
-        at += 1;
     }
-    keep(
-        listed
-            .GetAt(at)?
-            .cast::<IMenuFlyoutItem>()?
-            .Click(move |_: Ref<IInspectable>, _: Ref<RoutedEventArgs>| copy(&link))?,
-    );
     Ok(menu)
 }
 

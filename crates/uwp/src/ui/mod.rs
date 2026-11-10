@@ -7,6 +7,7 @@ pub mod card_menu;
 pub mod control_bar;
 pub mod danmaku;
 pub mod feed;
+pub mod folder_edit;
 pub mod follow;
 pub mod home;
 pub mod library;
