@@ -32,7 +32,7 @@ const LAYOUT: &str = r##"
     <RowDefinition Height="*" />
   </Grid.RowDefinitions>
   <Grid Margin="16,8,16,8">
-    <Grid.ColumnDefinitions><ColumnDefinition Width="Auto" /><ColumnDefinition Width="*" /><ColumnDefinition Width="Auto" /><ColumnDefinition Width="Auto" /></Grid.ColumnDefinitions>
+    <Grid.ColumnDefinitions><ColumnDefinition Width="Auto" /><ColumnDefinition Width="*" /><ColumnDefinition Width="Auto" /><ColumnDefinition Width="Auto" /><ColumnDefinition Width="Auto" /></Grid.ColumnDefinitions>
     <StackPanel Orientation="Horizontal">
       <StackPanel.Resources>
         <Style TargetType="Button">
@@ -50,6 +50,13 @@ const LAYOUT: &str = r##"
     <TextBlock x:Name="Status" Grid.Column="1" FontSize="13" VerticalAlignment="Center" TextTrimming="CharacterEllipsis"
                Foreground="{ThemeResource SystemControlForegroundBaseMediumBrush}" />
     <!--refresh-->
+    <Button x:Name="Portrait" Grid.Column="4" Background="Transparent" BorderThickness="1" BorderBrush="#0050EF"
+            Foreground="#0050EF" Padding="8,2" Margin="8,0,0,0" VerticalAlignment="Center">
+      <StackPanel Orientation="Horizontal">
+        <FontIcon Glyph="&#xE8EA;" FontSize="14" />
+        <TextBlock x:Name="PortraitLabel" Text="竖屏" FontSize="13" Margin="6,0,0,0" />
+      </StackPanel>
+    </Button>
     <Button x:Name="Search" Grid.Column="3" Visibility="Collapsed" Background="Transparent" BorderThickness="0"
             Padding="8,2" VerticalAlignment="Center"><FontIcon Glyph="&#xE721;" FontSize="14" /></Button>
   </Grid>
@@ -110,6 +117,9 @@ impl HomePage {
             }
         })?;
         on_click(&page.root, "Search", || show_tab(Tab::Search))?;
+        on_click(&page.root, "Portrait", || {
+            let _ = crate::ui::feed::open_from_pool();
+        })?;
         page.show_tab()?;
         Ok(page)
     }
@@ -165,7 +175,9 @@ impl HomePage {
         // A narrow window keeps 推荐, 热门 and 影视 in the row.
         let wide_only = if narrow { Visibility::Collapsed } else { Visibility::Visible };
         named::<IUIElement>(&self.root, "Tab2")?.SetVisibility(wide_only)?;
-        named::<IUIElement>(&self.root, "Tab3")?.SetVisibility(wide_only)
+        named::<IUIElement>(&self.root, "Tab3")?.SetVisibility(wide_only)?;
+        // A narrow window keeps the 竖屏 entry as its icon alone.
+        named::<IUIElement>(&self.root, "PortraitLabel")?.SetVisibility(wide_only)
     }
 
     fn reopen(&self) -> Result<()> {

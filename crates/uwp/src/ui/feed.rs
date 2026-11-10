@@ -1,6 +1,8 @@
 //! 竖屏推流: portrait videos one after another. It is the video page in another layout, so the
 //! actions, danmaku, fullscreen and comments are the same ones; this adds moving through the feed
-//! and deciding which videos open here.
+//! and deciding which videos open here. It starts from a portrait video opened anywhere, its
+//! related videos following; or from the 竖屏 entry on the home page, the recommendation pool's
+//! portrait videos following.
 
 use std::cell::{Cell, RefCell};
 use std::time::{Duration, Instant};
@@ -10,9 +12,9 @@ use windows_core::{IInspectable, Ref, Result};
 
 use crate::state::feed::{BATCH, Feed, Item};
 use crate::ui::keep;
-use crate::ui::shell::shell;
-use crate::ui::{named, on_click, player, post, set_text};
-use crate::xaml::{IFrameworkElement, IUIElement, PointerRoutedEventArgs};
+use crate::ui::shell::{shell, toast};
+use crate::ui::{load, named, on_click, player, post, set_text};
+use crate::xaml::{IFontIcon, IFrameworkElement, IUIElement, PointerRoutedEventArgs, Visibility};
 
 /// How long a video's shape is looked up before it opens anyway.
 const LOOKUP: Duration = Duration::from_millis(1_500);
@@ -128,7 +130,45 @@ thread_local! {
     static PANEL_OPEN: Cell<bool> = const { Cell::new(false) };
     static LAST_WHEEL: Cell<Option<Instant>> = const { Cell::new(None) };
     static LOADING: Cell<bool> = const { Cell::new(false) };
+    /// The feed was entered from 首页 and takes its videos from the recommendation pool.
+    static FROM_POOL: Cell<bool> = const { Cell::new(false) };
 }
+
+/// The page shown while the first portrait videos are picked.
+const PICKING: &str = r##"
+<Grid xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+      xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml" Background="Black" RequestedTheme="Dark">
+  <Grid.RowDefinitions><RowDefinition Height="Auto" /><RowDefinition Height="*" /></Grid.RowDefinitions>
+  <Grid>
+    <Grid.ColumnDefinitions><ColumnDefinition Width="Auto" /><ColumnDefinition Width="*" /></Grid.ColumnDefinitions>
+    <Button x:Name="Back" Background="Transparent" BorderThickness="0" Padding="12,8" Foreground="White">
+      <StackPanel Orientation="Horizontal">
+        <FontIcon Glyph="&#xE72B;" FontSize="16" /><TextBlock Text="返回" Margin="10,0,0,0" />
+      </StackPanel>
+    </Button>
+    <TextBlock Grid.Column="1" Text="竖屏推流 · 来自推荐" FontSize="12" Foreground="#B3FFFFFF"
+               HorizontalAlignment="Right" VerticalAlignment="Center" Margin="0,0,16,0" />
+  </Grid>
+  <StackPanel Grid.Row="1" HorizontalAlignment="Center" VerticalAlignment="Center" MaxWidth="420" Margin="24,0">
+    <FontIcon x:Name="PickIcon" Glyph="&#xE8EA;" FontSize="44" Foreground="#D9FFFFFF" />
+    <TextBlock x:Name="PickTitle" Text="正在挑选竖屏视频…" FontSize="16" Foreground="White" Margin="0,14,0,0"
+               HorizontalAlignment="Center" />
+    <TextBlock x:Name="PickLine" Text="从推荐池里挑，找到第一个就开始播放" FontSize="12" Foreground="#B3FFFFFF"
+               Margin="0,6,0,0" HorizontalAlignment="Center" TextWrapping="Wrap" TextAlignment="Center" />
+    <ProgressBar x:Name="PickBusy" IsIndeterminate="True" Width="180" Margin="0,16,0,0" Foreground="#0050EF" />
+    <StackPanel x:Name="PickChoices" Orientation="Horizontal" HorizontalAlignment="Center" Margin="0,16,0,0"
+                Visibility="Collapsed">
+      <Button x:Name="PickAgain" Content="继续等" Foreground="White" BorderBrush="White" BorderThickness="1"
+              Background="Transparent" Padding="14,4" Margin="0,0,8,0" />
+      <Button x:Name="PickHome" Content="返回首页" Foreground="White" BorderBrush="White" BorderThickness="1"
+              Background="Transparent" Padding="14,4" />
+    </StackPanel>
+  </StackPanel>
+</Grid>"##;
+
+/// Glyphs for the page's states: nothing found yet, and held back by risk control.
+const NONE_GLYPH: &str = "\u{E9CE}";
+const HELD_GLYPH: &str = "\u{E916}";
 
 pub fn panel_open() -> bool {
     PANEL_OPEN.get()
@@ -157,6 +197,7 @@ pub fn route(bvid: &str, title: &str, uploader: &str) -> Result<()> {
 }
 
 fn start(first: Item) -> Result<()> {
+    FROM_POOL.set(false);
     FEED.set(Feed::start(first));
     PANEL_OPEN.set(false);
     open_current()
@@ -172,9 +213,96 @@ fn open_current() -> Result<()> {
 
 fn show_position() {
     let at = FEED.with_borrow(Feed::position);
+    let from = if FROM_POOL.get() { " · 来自推荐" } else { "" };
     if let Some(root) = player::root() {
-        let _ = set_text(&root, "Position", &format!("竖屏推流 · 第 {at} 条"));
+        let _ = set_text(&root, "Position", &format!("竖屏推流{from} · 第 {at} 条"));
     }
+}
+
+/// The 竖屏 entry on 首页: picks the pool's portrait videos and plays the first as soon as there
+/// is one, picking the rest as it plays.
+pub fn open_from_pool() -> Result<()> {
+    let Some(host) = shell() else { return Ok(()) };
+    let root = load(PICKING)?;
+    let back = || {
+        if let Some(shell) = shell() {
+            shell.back();
+        }
+    };
+    on_click(&root, "Back", back)?;
+    on_click(&root, "PickHome", back)?;
+    on_click(&root, "PickAgain", || {
+        let _ = pick_first();
+    })?;
+    host.set_page(&root)?;
+    if let Some(backend) = host.backend.get() {
+        backend.services.portrait.start();
+    }
+    pick_first()
+}
+
+/// Asks for the first portrait videos, the picking page on show.
+fn pick_first() -> Result<()> {
+    let Some(host) = shell() else { return Ok(()) };
+    let Some(backend) = host.backend.get().cloned() else { return Ok(()) };
+    let root = host.current_page()?;
+    say_picking(&root, None)?;
+    let (turn, dispatcher, core) = (crate::ui::shell::page_turn(), host.dispatcher.clone(), backend.clone());
+    backend.spawn(async move {
+        let picked = core.services.portrait.next(1).await;
+        post(&dispatcher, move || {
+            if crate::ui::shell::page_turn() != turn {
+                return;
+            }
+            let picked = match picked {
+                Ok(picked) => picked,
+                Err(problem) => {
+                    if let Some(root) = shell().and_then(|s| s.current_page().ok()) {
+                        let _ = say_picking(&root, Some((NONE_GLYPH, "挑选失败", &problem.to_string())));
+                    }
+                    return;
+                }
+            };
+            let items: Vec<Item> = picked
+                .cards
+                .into_iter()
+                .map(|c| Item { bvid: c.bvid, title: c.title, uploader: c.owner.name })
+                .collect();
+            let mut items = items.into_iter();
+            let Some(first) = items.next() else {
+                let note = if picked.limited {
+                    (HELD_GLYPH, "B 站暂时限制了查询", "过一会儿再挑选；可以先返回首页")
+                } else {
+                    (NONE_GLYPH, "推荐池里暂时没有竖屏视频", "正在拉取新一批推荐并挑选，也会沿相关推荐找")
+                };
+                if let Some(root) = shell().and_then(|s| s.current_page().ok()) {
+                    let _ = say_picking(&root, Some(note));
+                }
+                return;
+            };
+            if picked.limited {
+                toast("B 站暂时限制了查询，已挑出的可以先看");
+            }
+            FEED.set(Feed::start(first));
+            FEED.with_borrow_mut(|f| f.add(items));
+            FROM_POOL.set(true);
+            PANEL_OPEN.set(false);
+            let _ = open_current();
+        });
+    });
+    Ok(())
+}
+
+/// The picking page busy, or saying why it stopped.
+fn say_picking(root: &IFrameworkElement, stopped: Option<(&str, &str, &str)>) -> Result<()> {
+    let shown = |on| if on { Visibility::Visible } else { Visibility::Collapsed };
+    named::<IUIElement>(root, "PickBusy")?.SetVisibility(shown(stopped.is_none()))?;
+    named::<IUIElement>(root, "PickChoices")?.SetVisibility(shown(stopped.is_some()))?;
+    let (glyph, title, line) =
+        stopped.unwrap_or(("\u{E8EA}", "正在挑选竖屏视频…", "从推荐池里挑，找到第一个就开始播放"));
+    named::<IFontIcon>(root, "PickIcon")?.SetGlyph(glyph)?;
+    set_text(root, "PickTitle", title)?;
+    set_text(root, "PickLine", line)
 }
 
 /// Moves `by` videos on through the feed.
@@ -187,7 +315,8 @@ pub fn step(by: isize) {
     }
 }
 
-/// Adds portrait videos related to the last ones.
+/// Adds portrait videos: from the recommendation pool when the feed began there, else related
+/// to the last ones.
 fn load_more() {
     let (wanted, sources) = FEED.with_borrow(|f| (f.wants_more(), f.sources()));
     let Some(shell) = shell() else { return };
@@ -196,6 +325,22 @@ fn load_more() {
         return;
     }
     let (dispatcher, core) = (shell.dispatcher.clone(), backend.clone());
+    if FROM_POOL.get() {
+        backend.spawn(async move {
+            let picked = core.services.portrait.next(BATCH).await;
+            post(&dispatcher, move || {
+                LOADING.set(false);
+                let Ok(picked) = picked else { return };
+                if picked.limited && picked.cards.is_empty() {
+                    player::say("B 站暂时限制了查询，过一会儿再挑选");
+                }
+                let found =
+                    picked.cards.into_iter().map(|c| Item { bvid: c.bvid, title: c.title, uploader: c.owner.name });
+                FEED.with_borrow_mut(|f| f.add(found));
+            });
+        });
+        return;
+    }
     backend.spawn(async move {
         let mut found = Vec::new();
         for source in sources {
