@@ -70,10 +70,16 @@ const MARKUP: &str = r##"
         </StackPanel>
       </Button>
     </StackPanel>
-    <Button x:Name="Full" Grid.Column="7" Background="Transparent" Foreground="White" BorderThickness="0"
-            Padding="8,6" VerticalAlignment="Center">
-      <FontIcon x:Name="FullIcon" Glyph="&#xE740;" FontSize="16" />
-    </Button>
+    <StackPanel Grid.Column="7" Orientation="Horizontal">
+      <Button x:Name="WindowFull" Visibility="Collapsed" Background="Transparent" Foreground="White"
+              BorderThickness="0" Padding="8,6" VerticalAlignment="Center">
+        <FontIcon x:Name="WindowFullIcon" Glyph="&#xE9A6;" FontSize="16" />
+      </Button>
+      <Button x:Name="Full" Background="Transparent" Foreground="White" BorderThickness="0"
+              Padding="8,6" VerticalAlignment="Center">
+        <FontIcon x:Name="FullIcon" Glyph="&#xE740;" FontSize="16" />
+      </Button>
+    </StackPanel>
   </Grid>
 </Grid>"##;
 
@@ -123,6 +129,7 @@ impl ControlBar {
             over_bar: Cell::new(false),
             turn: Arc::default(),
         });
+        bar.wake()?;
         let volume = named::<IRangeBase>(root, "Volume")?;
         volume.SetValue(f64::from(shell().map(|s| s.prefs()).unwrap_or_default().volume))?;
         let weak = Rc::downgrade(&bar);
@@ -203,13 +210,11 @@ impl ControlBar {
         self.wake()
     }
 
-    /// A sign of life: shows the bar, and in fullscreen sets it to go again.
+    /// A sign of life: shows the bar, and sets it to go again after a still moment.
     pub fn wake(&self) -> Result<()> {
         self.set_idle(false)?;
         let turn = self.turn.fetch_add(1, Ordering::Relaxed) + 1;
-        if self.full.get() {
-            self.hide_after(turn);
-        }
+        self.hide_after(turn);
         Ok(())
     }
 
@@ -234,9 +239,6 @@ impl ControlBar {
 
     /// Hides the bars, unless someone is at them: then it looks again later.
     fn hide(&self, turn: u64) -> Result<()> {
-        if !self.full.get() {
-            return Ok(());
-        }
         let typing = named::<IControl>(&self.root, "SendText")?.FocusState()? != FocusState::Unfocused;
         if typing || self.over_bar.get() {
             self.hide_after(turn);
@@ -253,6 +255,10 @@ impl ControlBar {
         named::<IUIElement>(&self.root, "ControlBar")?.SetVisibility(shown)?;
         for name in self.hide_too {
             named::<IUIElement>(&self.root, name)?.SetVisibility(shown)?;
+        }
+        // The pointer goes too only in fullscreen: in a window it may be wanted elsewhere.
+        if idle && !self.full.get() {
+            return Ok(());
         }
         let window = CoreWindow::GetForCurrentThread()?.cast::<ICoreWindow>()?;
         if idle {

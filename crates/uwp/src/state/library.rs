@@ -73,7 +73,7 @@ pub fn progress(seconds: i64) -> String {
 }
 
 pub fn count(n: u64) -> String {
-    if n >= 10_000 { format!("{:.1} 万", n as f64 / 10_000.0) } else { n.to_string() }
+    if n >= 10_000 { format!("{:.1}万", n as f64 / 10_000.0) } else { n.to_string() }
 }
 
 /// How long ago `unix` was; a date once it is a week old.
@@ -160,7 +160,7 @@ mod tests {
     #[test]
     fn counts_shorten_from_ten_thousand() {
         assert_eq!(count(9_999), "9999");
-        assert_eq!(count(1_203_000), "120.3 万");
+        assert_eq!(count(1_203_000), "120.3万");
     }
 
     #[test]

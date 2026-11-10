@@ -14,6 +14,7 @@ use windows_core::{Error, HRESULT, Interface, Ref, Result};
 
 use crate::state::handover::{Handover, Sample, Step};
 use crate::state::layout::WindowClass;
+use crate::state::library::count;
 use crate::state::manifest::dash_manifest;
 use crate::state::panes;
 use crate::state::quality::Offer;
@@ -237,8 +238,9 @@ struct Page {
     /// The position is being shown, not chosen.
     showing_position: Rc<Cell<bool>>,
     seeks: Arc<AtomicU64>,
-    /// Filling the screen.
+    /// Filling the screen, or only the window when `window_full`.
     full: Rc<Cell<bool>>,
+    window_full: Rc<Cell<bool>>,
 }
 
 fn page() -> Option<Page> {
@@ -309,22 +311,52 @@ fn reset_side() {
 /// Enters or leaves fullscreen. The video element stays where it is and only the page around
 /// it folds away, so the picture does not restart its swap chain and the danmaku stay over it.
 pub fn toggle_full() {
-    let _ = set_full(!page().is_some_and(|p| p.full.get()));
+    let on = !page().is_some_and(|p| p.full.get() && !p.window_full.get());
+    let _ = set_full_as(on, false);
+}
+
+/// 窗口全屏: the video fills the window, the screen left as it is.
+fn toggle_window_full() {
+    let on = !page().is_some_and(|p| p.full.get() && p.window_full.get());
+    let _ = set_full_as(on, true);
 }
 
 fn set_full(on: bool) -> Result<()> {
+    let window = page().is_some_and(|p| p.window_full.get());
+    set_full_as(on, on && window)
+}
+
+/// Fills the screen, or only the window when `window`; or neither.
+fn set_full_as(on: bool, window: bool) -> Result<()> {
     let (Some(page), Some(shell)) = (page(), shell()) else { return Ok(()) };
-    if page.full.replace(on) == on {
+    let (was, was_window) = (page.full.get(), page.window_full.get());
+    if was == on && (!on || was_window == window) {
         return Ok(());
     }
-    shell.fill_screen(on)?;
+    page.full.set(on);
+    page.window_full.set(on && window);
+    match (on, window) {
+        (true, true) => {
+            if shell.is_filling_screen() {
+                shell.fill_screen(false)?;
+            }
+            shell.immersive(true)?;
+        }
+        (true, false) => shell.fill_screen(true)?,
+        (false, _) if was_window => shell.immersive(false)?,
+        (false, _) => shell.fill_screen(false)?,
+    }
+    let glyph = if on && window { "\u{E73F}" } else { "\u{E9A6}" };
+    named::<IFontIcon>(&page.root, "WindowFullIcon")?.SetGlyph(glyph)?;
     apply_layout(&page.root)?;
-    page.bar.set_full(on)
+    page.bar.set_full(on && !window)?;
+    page.bar.wake()
 }
 
 /// The window left fullscreen by itself (the system's own control): the page follows.
 pub fn window_changed() {
-    if page().is_some_and(|p| p.full.get()) && !shell().is_some_and(|s| s.is_filling_screen()) {
+    let filling = page().is_some_and(|p| p.full.get() && !p.window_full.get());
+    if filling && !shell().is_some_and(|s| s.is_filling_screen()) {
         let _ = set_full(false);
     }
 }
@@ -567,10 +599,13 @@ pub fn open(feed: bool, bvid: &str, title: &str, uploader: &str) -> Result<()> {
         showing_position: Rc::default(),
         seeks: Arc::default(),
         full: Rc::new(Cell::new(false)),
+        window_full: Rc::default(),
     };
     PAGE.with(|p| *p.borrow_mut() = Some(opened));
     on_click(&root, "ActDanmaku", toggle_danmaku)?;
     on_click(&root, "Full", toggle_full)?;
+    on_click(&root, "WindowFull", toggle_window_full)?;
+    named::<IUIElement>(&root, "WindowFull")?.SetVisibility(Visibility::Visible)?;
     on_click(&root, "Quality", choose_quality)?;
     on_click(&root, "UpLink", open_up)?;
     on_click(&root, "PlayPause", toggle_play)?;
@@ -628,7 +663,7 @@ pub fn open(feed: bool, bvid: &str, title: &str, uploader: &str) -> Result<()> {
                 page.actions.set_counts(card.stats.like, card.stats.coin, card.stats.favorite);
                 let _ = set_text(&page.root, "Title", &card.title);
                 let _ = show_up_link(&page, card.owner.mid, &card.owner.name);
-                let _ = set_text(&page.root, "Meta", &format!("{} 播放 · {}", card.stats.view, card.desc));
+                let _ = set_text(&page.root, "Meta", &format!("{} 播放 · {}", count(card.stats.view), card.desc));
             }
             if let Some(relation) = relation {
                 page.actions.set_relation(relation);

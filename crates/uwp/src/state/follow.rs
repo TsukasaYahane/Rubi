@@ -164,7 +164,7 @@ mod tests {
     fn a_card_knows_its_comments() {
         let shown = Post::of(Dynamic { comment_kind: 17, comment_oid: 1265, comment_count: 12_400, ..post() }, NOW);
         assert_eq!(shown.comments, Some((17, 1265)));
-        assert_eq!(shown.comment_label, "评论 1.2 万");
+        assert_eq!(shown.comment_label, "评论 1.2万");
         let bare = Post::of(post(), NOW);
         assert_eq!((bare.comments, bare.comment_label.as_str()), (None, "评论"));
     }

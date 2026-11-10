@@ -34,12 +34,12 @@ mod tests {
 
     #[test]
     fn lines_read_well() {
-        assert_eq!(hit_line(124_300, 320), "粉丝 12.4 万 · 投稿 320");
+        assert_eq!(hit_line(124_300, 320), "粉丝 12.4万 · 投稿 320");
         let profile = UpProfile { level: 6, ..UpProfile::default() };
         assert_eq!(level_line(&profile), "Lv6");
         let official = UpProfile { official: "知名 UP 主".into(), ..profile };
         assert_eq!(level_line(&official), "Lv6 · 知名 UP 主");
-        assert_eq!(article_line(12_000, 1_800_000_000 - 7_200, 1_800_000_000), "1.2 万 阅读 · 2 小时前");
+        assert_eq!(article_line(12_000, 1_800_000_000 - 7_200, 1_800_000_000), "1.2万 阅读 · 2 小时前");
         assert_eq!(article_link(42), "cv42");
     }
 }

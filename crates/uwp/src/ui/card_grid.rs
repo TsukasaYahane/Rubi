@@ -14,7 +14,7 @@ use windows_core::{IInspectable, Interface, Ref, Result};
 
 use crate::backend::Backend;
 use crate::state::layout::grid_cell;
-use crate::state::library::{room_link, video_link};
+use crate::state::library::{count, room_link, video_link};
 use crate::state::live::room_line;
 use crate::ui::rows::{Covers, add_rows, on_row, on_row_click};
 use crate::ui::shell::shell;
@@ -94,7 +94,7 @@ impl Tile {
     fn video(card: VideoCard) -> Self {
         Self {
             key: card.bvid.clone(),
-            line: format!("{} · {} 播放", card.owner.name, card.stats.view),
+            line: format!("{} · {} 播放", card.owner.name, count(card.stats.view)),
             title: card.title,
             cover: card.cover,
             live: None,
@@ -115,6 +115,9 @@ impl Tile {
 }
 
 /// What a grid shows.
+/// Pooled videos sorted into portrait and landscape after each new batch.
+const SORT_AFTER_FETCH: usize = 24;
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Source {
     Recommended,
@@ -352,6 +355,10 @@ impl CardGrid {
                     let _ = grid.answered(turn, answer);
                 }
             });
+            // A fresh batch in the pool is sorted into portrait and landscape, for 竖屏推流.
+            if source == Source::Recommended && page == 1 {
+                let _ = core.services.portrait.sort(SORT_AFTER_FETCH).await;
+            }
         });
     }
 
