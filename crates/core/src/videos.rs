@@ -8,7 +8,7 @@ use rubi_api::{Page, PlayUrl, Season, VideoApi};
 use rubi_model::{VideoCard, VideoRef, find_video_ref};
 
 use crate::error::{CoreError, Result};
-use crate::ports::{VideoLookup, VideoStreams};
+use crate::ports::{ShapeLookup, VideoLookup, VideoStreams};
 use crate::recent::Recent;
 
 /// Cards kept so actions and signals on a shown video need no second lookup.
@@ -235,6 +235,17 @@ impl Videos {
         let mut url = self.api.playurl(bvid, cid, qn.min(MAX_FREE_QN)).await?;
         url.accept.retain(|(qn, _)| *qn <= MAX_FREE_QN);
         Ok(Playback { cid, url, headers: self.api.stream_headers() })
+    }
+}
+
+#[async_trait]
+impl ShapeLookup for Videos {
+    fn known_portrait(&self, bvid: &str) -> Option<bool> {
+        Videos::known_portrait(self, bvid)
+    }
+
+    async fn look_up_portrait(&self, bvid: &str) -> Result<bool> {
+        self.portrait(bvid).await
     }
 }
 

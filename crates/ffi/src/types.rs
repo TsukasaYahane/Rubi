@@ -1269,3 +1269,11 @@ pub struct FfiEsportsGame {
     pub id: u32,
     pub title: String,
 }
+
+/// Portrait videos to play next.
+#[derive(Debug, Clone, uniffi::Record)]
+pub struct FfiPortraitPick {
+    pub cards: Vec<FfiVideoCard>,
+    /// Risk control holds the sorting back; these are what was ready.
+    pub limited: bool,
+}

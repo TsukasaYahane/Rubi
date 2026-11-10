@@ -18,6 +18,7 @@ mod messages;
 mod pgc;
 mod player;
 mod playlist;
+mod portrait;
 mod reading;
 mod seasons;
 mod settings;
@@ -30,8 +31,8 @@ use std::sync::Arc;
 use rubi_core::Session;
 use rubi_core::{
     Account, Actions, Comments, Danmakus, Discover, Downloads, Emotes, Esports, Favorites, Following, History, Home,
-    Listening, Live, Messages, Pgc, PlayQueue, Playlists, Preferences, Reading, Seasons, Services, Space, Stein,
-    Videos, WatchLater,
+    Listening, Live, Messages, Pgc, PlayQueue, Playlists, PortraitFeed, Preferences, Reading, Seasons, Services, Space,
+    Stein, Videos, WatchLater,
 };
 
 pub use error::RubiError;
@@ -187,6 +188,12 @@ pub struct PgcService {
     pgc: Pgc,
 }
 
+/// 竖屏推流：从推荐池挑竖屏视频。
+#[derive(uniffi::Object)]
+pub struct PortraitService {
+    portrait: PortraitFeed,
+}
+
 /// 合集订阅。
 #[derive(uniffi::Object)]
 pub struct SeasonsService {
@@ -219,6 +226,7 @@ pub struct RubiCore {
     live: Arc<LiveService>,
     esports: Arc<EsportsService>,
     pgc: Arc<PgcService>,
+    portrait: Arc<PortraitService>,
     seasons: Arc<SeasonsService>,
 }
 
@@ -254,6 +262,7 @@ impl RubiCore {
             live,
             esports,
             pgc,
+            portrait,
             seasons,
         } = Services::open(PathBuf::from(data_dir), session)?;
         Ok(Arc::new(Self {
@@ -281,6 +290,7 @@ impl RubiCore {
             live: Arc::new(LiveService { live }),
             esports: Arc::new(EsportsService { esports }),
             pgc: Arc::new(PgcService { pgc }),
+            portrait: Arc::new(PortraitService { portrait }),
             seasons: Arc::new(SeasonsService { seasons }),
         }))
     }
@@ -403,6 +413,10 @@ impl RubiCore {
     /// 番剧与影视。
     pub fn pgc(&self) -> Arc<PgcService> {
         self.pgc.clone()
+    }
+
+    pub fn portrait(&self) -> Arc<PortraitService> {
+        self.portrait.clone()
     }
 
     /// 合集订阅。

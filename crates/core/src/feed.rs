@@ -17,7 +17,7 @@ use rubi_store::{
 };
 
 use crate::error::Result;
-use crate::ports::{FeedConfig, FeedbackSink, HomeFeed, ProfileBackup, WatchedSet};
+use crate::ports::{FeedConfig, FeedbackSink, HomeFeed, PortraitPool, ProfileBackup, WatchedSet};
 
 const KEY_PROFILE: &str = "profile";
 const KEY_FOLLOWED: &str = "followed";
@@ -463,6 +463,20 @@ impl<S: AppStore> FeedbackSink for FeedService<S> {
         sorted.sort_unstable();
         sorted.dedup();
         FeedService::set_followed(self, &sorted)
+    }
+}
+
+/// How many cards each source is asked for when the 竖屏推流 wants a new batch.
+const PORTRAIT_BATCH: usize = 20;
+
+#[async_trait]
+impl<S: AppStore> PortraitPool for FeedService<S> {
+    fn ranked(&self, n: usize, skip: &HashSet<String>) -> Result<Vec<VideoCard>> {
+        Ok(self.rank_pool(n, skip)?.into_iter().map(|r| r.card).collect())
+    }
+
+    async fn fetch_more(&self) -> Result<()> {
+        self.refresh(PORTRAIT_BATCH).await.map(|_| ())
     }
 }
 

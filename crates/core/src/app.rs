@@ -34,7 +34,11 @@ use crate::messages::Messages;
 use crate::pgc::Pgc;
 use crate::play_queue::PlayQueue;
 use crate::playlist::{Playlist, Playlists};
-use crate::ports::{FeedConfig, FeedbackSink, HomeFeed, PlaylistBackup, ProfileBackup, RuleSource, SettingsPort};
+use crate::portrait::PortraitFeed;
+use crate::ports::{
+    FeedConfig, FeedbackSink, HomeFeed, PlaylistBackup, PortraitPool, ProfileBackup, RuleSource, SettingsPort,
+    ShapeLookup,
+};
 use crate::preferences::Preferences;
 use crate::reading::Reading;
 use crate::seasons::Seasons;
@@ -73,6 +77,7 @@ pub struct Services {
     pub live: Live,
     pub esports: Esports,
     pub pgc: Pgc,
+    pub portrait: PortraitFeed,
     pub seasons: Seasons,
 }
 
@@ -104,6 +109,7 @@ impl Services {
         let feed = Arc::new(FeedService::new(store.clone(), feed_config, sources, seeded)?);
         let home_feed: Arc<dyn HomeFeed> = feed.clone();
         let feedback: Arc<dyn FeedbackSink> = feed.clone();
+        let portrait_pool: Arc<dyn PortraitPool> = feed.clone();
         let profile: Arc<dyn ProfileBackup> = feed;
 
         let web_account = Arc::new(WebAccount::new(http.clone()));
@@ -123,6 +129,8 @@ impl Services {
         let playlist_backup: Arc<dyn PlaylistBackup> = playlist.clone();
         let lineup = Arc::new(Lineup::new(playlist.clone(), videos.clone(), cards.clone()));
         let seasons = Seasons::new(Arc::new(WebSeasons::new(http.clone())), store.clone(), cards.clone());
+        let shapes: Arc<dyn ShapeLookup> = videos.clone();
+        let portrait = PortraitFeed::new(portrait_pool, shapes, feed_api.clone(), rules.clone(), store.clone());
         let downloads =
             Downloads::new(videos.clone(), Arc::new(WebMedia::new(http.clone())), store, data_dir.join("downloads"));
 
@@ -161,6 +169,7 @@ impl Services {
             live: Live::new(Arc::new(WebLive::new(http.clone())), Arc::new(WebChannels), rules.clone()),
             esports: Esports::new(Arc::new(WebEsports::new(http.clone()))),
             pgc: Pgc::new(Arc::new(WebPgc::new(http.clone()))),
+            portrait,
             seasons,
             emotes: Emotes::new(Arc::new(WebEmote::new(http))),
             account,

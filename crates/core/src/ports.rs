@@ -7,6 +7,8 @@
 //! - [`SettingsPort`], [`PlaylistBackup`]: settings and play lists for the backup.
 //! - [`VideoLookup`], [`VideoStreams`]: a video's card and streams ([`crate::videos::Videos`]).
 //! - [`LoginState`]: whether someone is signed in ([`crate::account::Account`]).
+//! - [`PortraitPool`], [`ShapeLookup`]: the pool and video shapes as the 竖屏推流 uses them
+//!   ([`crate::feed::FeedService`], [`crate::videos::Videos`]).
 
 use std::collections::HashSet;
 use std::sync::Arc;
@@ -91,6 +93,24 @@ pub trait VideoLookup: Send + Sync {
 #[async_trait]
 pub trait VideoStreams: VideoLookup {
     async fn playback(&self, bvid: &str, qn: u32) -> Result<Playback>;
+}
+
+/// The recommendation pool as the 竖屏推流 picks from it.
+#[async_trait]
+pub trait PortraitPool: Send + Sync {
+    /// Up to `n` pooled cards in ranked order, leaving out `skip`. Nothing is recorded as shown.
+    fn ranked(&self, n: usize, skip: &HashSet<String>) -> Result<Vec<VideoCard>>;
+    /// Fetches a new batch into the pool.
+    async fn fetch_more(&self) -> Result<()>;
+}
+
+/// Whether a video is portrait.
+#[async_trait]
+pub trait ShapeLookup: Send + Sync {
+    /// As the lists it was shown in said; None when they did not.
+    fn known_portrait(&self, bvid: &str) -> Option<bool>;
+    /// From its details: one request.
+    async fn look_up_portrait(&self, bvid: &str) -> Result<bool>;
 }
 
 pub trait LoginState: Send + Sync {
