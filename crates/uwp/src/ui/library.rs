@@ -65,7 +65,7 @@ const FAVORITES: &str = r##"
           </StackPanel>
         </DataTemplate></ListView.ItemTemplate>
       </ListView>
-      <TextBlock x:Name="Status" Grid.Row="2" FontSize="12" Margin="16,0" TextWrapping="Wrap"
+      <TextBlock x:Name="Status" Grid.Row="2" FontSize="12" Margin="16,0" TextWrapping="Wrap" IsHitTestVisible="False"
                  Foreground="{ThemeResource SystemControlForegroundBaseMediumBrush}" />
     </Grid>
   </Border>
@@ -167,7 +167,8 @@ impl Favorites {
         let folder = at.and_then(|at| self.folders.borrow().get(at).cloned());
         let weak = Rc::downgrade(self);
         let gone = folder.as_ref().map(|f| f.id);
-        folder_edit::open(&named(&self.root, "EditHost")?, folder.as_ref(), deleting, move |outcome| {
+        let host = named(&self.root, "EditHost")?;
+        let done = move |outcome| {
             let Some(page) = weak.upgrade() else { return };
             if outcome == Outcome::Deleted && page.open_id.get() == gone {
                 page.open_id.set(None);
@@ -176,7 +177,11 @@ impl Favorites {
             if outcome != Outcome::Cancelled {
                 page.reload();
             }
-        })
+        };
+        match folder.as_ref().filter(|_| deleting) {
+            Some(folder) => folder_edit::delete(&host, folder, done),
+            None => folder_edit::edit(&host, folder.as_ref(), done),
+        }
     }
 
     /// Videos went from one folder to another: the counts follow at once.

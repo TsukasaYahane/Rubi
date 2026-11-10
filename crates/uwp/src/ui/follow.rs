@@ -81,6 +81,7 @@ const LAYOUT: &str = r##"
     </DataTemplate></ListView.ItemTemplate>
   </ListView>
   <TextBlock x:Name="Status" Grid.Column="1" Grid.Row="1" FontSize="13" Margin="16,12" TextWrapping="Wrap"
+             IsHitTestVisible="False"
              Foreground="{ThemeResource SystemControlForegroundBaseMediumBrush}" />
   <Button x:Name="UpLink" Grid.Column="1" Grid.Row="1" Content="进入主页" Visibility="Collapsed"
           HorizontalAlignment="Right" VerticalAlignment="Top" Margin="0,8,16,0" Background="#59000000"

@@ -9,26 +9,43 @@ use windows_core::{IInspectable, Interface, Ref, Result};
 use crate::ui::shell::{shell, toast};
 use crate::ui::{keep, live_room, load, media, named, on_click, post};
 use crate::xaml::{
-    ApplicationView, ApplicationViewConsolidatedEventArgs, ApplicationViewMode, ApplicationViewSwitcher,
-    CoreApplication, CoreDispatcher, IApplicationView, IApplicationView4, ICoreApplicationView2, IFontIcon,
-    IFrameworkElement, IMediaPlayer, IMediaPlayerElement, IUIElement, IWindow, MediaPlayer, MediaSource,
-    PointerRoutedEventArgs, UIElement, Window,
+    ApplicationView, ApplicationViewConsolidatedEventArgs, ApplicationViewMode, ApplicationViewSwitcher, Color,
+    CoreApplication, CoreDispatcher, IApplicationView, IApplicationView3, IApplicationView4, ICoreApplicationView2,
+    ICoreApplicationView3, IFrameworkElement, IMediaPlayerElement, IUIElement, IWindow, IWindow2, MediaPlayer,
+    MediaSource, PointerRoutedEventArgs, UIElement, Window,
 };
 
-const MUTED: &str = "\u{E74F}";
-const SOUND: &str = "\u{E767}";
+/// How long the menu stays once the mouse is still.
+const MENU_STAYS: std::time::Duration = std::time::Duration::from_secs(3);
+const CLEAR: Color = Color { a: 0, r: 0, g: 0, b: 0 };
 
+/// The picture fills the window. The system title bar is gone: a strip along the top is what the
+/// window is dragged by, and the system's own buttons there are drawn see-through. On the mouse a
+/// dimmed menu comes up over the picture, as in a phone's 画中画.
 const LAYOUT: &str = r##"
 <Grid xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
       xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml" Background="Black" RequestedTheme="Dark">
   <MediaPlayerElement x:Name="PipVideo" AreTransportControlsEnabled="False" Stretch="Uniform" />
-  <StackPanel x:Name="PipBar" Orientation="Horizontal" HorizontalAlignment="Right" VerticalAlignment="Top"
-              Background="#99000000" Opacity="0">
-    <Button x:Name="PipMute" Background="Transparent" BorderThickness="0" Padding="10,6" Foreground="White">
-      <FontIcon x:Name="PipMuteIcon" Glyph="&#xE767;" FontSize="14" /></Button>
-    <Button x:Name="PipBack" Background="Transparent" BorderThickness="0" Padding="10,6" Foreground="White">
-      <FontIcon Glyph="&#xE73F;" FontSize="14" /></Button>
-  </StackPanel>
+  <Grid x:Name="PipMenu" Background="#80000000" Opacity="0">
+    <StackPanel Orientation="Horizontal" HorizontalAlignment="Center" VerticalAlignment="Center">
+      <StackPanel.Resources>
+        <Style TargetType="Button">
+          <Setter Property="Background" Value="Transparent" />
+          <Setter Property="Foreground" Value="White" />
+          <Setter Property="BorderThickness" Value="0" />
+          <Setter Property="Padding" Value="14,8" />
+          <Setter Property="Margin" Value="8,0" />
+        </Style>
+      </StackPanel.Resources>
+      <Button x:Name="PipBack"><StackPanel>
+        <FontIcon Glyph="&#xE73F;" FontSize="22" HorizontalAlignment="Center" />
+        <TextBlock Text="还原窗口" FontSize="12" Margin="0,6,0,0" HorizontalAlignment="Center" /></StackPanel></Button>
+      <Button x:Name="PipClose"><StackPanel>
+        <FontIcon Glyph="&#xE711;" FontSize="22" HorizontalAlignment="Center" />
+        <TextBlock Text="关闭小窗" FontSize="12" Margin="0,6,0,0" HorizontalAlignment="Center" /></StackPanel></Button>
+    </StackPanel>
+  </Grid>
+  <Border x:Name="PipDrag" Height="32" VerticalAlignment="Top" Background="Transparent" />
 </Grid>"##;
 
 /// The room playing in the small window, as the main thread holds it.
@@ -54,6 +71,8 @@ thread_local! {
     static PIP: RefCell<Option<Pip>> = const { RefCell::new(None) };
     /// On the small window's thread: its picture element.
     static ELEMENT: RefCell<Option<IMediaPlayerElement>> = const { RefCell::new(None) };
+    /// On the small window's thread: the menu over the picture.
+    static MENU: RefCell<Option<IUIElement>> = const { RefCell::new(None) };
 }
 
 /// Whether room `id` plays in the small window.
@@ -113,24 +132,13 @@ fn show_window(player: &MediaPlayer, main: &CoreDispatcher) -> Result<i32> {
     let element = named::<IMediaPlayerElement>(&root, "PipVideo")?;
     element.SetMediaPlayer(player)?;
     ELEMENT.with_borrow_mut(|e| *e = Some(element));
-    let bar = named::<IUIElement>(&root, "PipBar")?;
-    let showing = bar.clone();
-    keep(root.cast::<IUIElement>()?.PointerEntered(move |_: Ref<IInspectable>, _: Ref<PointerRoutedEventArgs>| {
-        let _ = showing.SetOpacity(1.0);
-    })?);
-    let hiding = bar.clone();
-    keep(root.cast::<IUIElement>()?.PointerExited(move |_: Ref<IInspectable>, _: Ref<PointerRoutedEventArgs>| {
-        let _ = hiding.SetOpacity(0.0);
-    })?);
-    let (muting, icon) = (player.clone(), root.clone());
-    on_click(&root, "PipMute", move || {
-        let _ = toggle_mute(&muting, &icon);
-    })?;
-    show_sound(player, &root)?;
+    wake_menu_on_mouse(&root)?;
     let asking = main.clone();
     on_click(&root, "PipBack", move || post(&asking, back_to_room))?;
+    on_click(&root, "PipClose", close_window)?;
     let window = Window::Current()?;
     window.cast::<IWindow>()?.SetContent(&root.cast::<UIElement>()?)?;
+    hide_title_bar(&root)?;
     window.cast::<IWindow>()?.Activate()?;
     let view = ApplicationView::GetForCurrentView()?;
     let closing = main.clone();
@@ -146,15 +154,62 @@ fn show_window(player: &MediaPlayer, main: &CoreDispatcher) -> Result<i32> {
     view.cast::<IApplicationView>()?.Id()
 }
 
-fn toggle_mute(player: &MediaPlayer, root: &IFrameworkElement) -> Result<()> {
-    let control = player.cast::<IMediaPlayer>()?;
-    control.SetIsMuted(!control.IsMuted()?)?;
-    show_sound(player, root)
+/// On the small window's thread: the view reaches up into the title bar, which keeps only a strip
+/// to drag by; the system's buttons there are drawn see-through.
+fn hide_title_bar(root: &IFrameworkElement) -> Result<()> {
+    CoreApplication::GetCurrentView()?.cast::<ICoreApplicationView3>()?.TitleBar()?.SetExtendViewIntoTitleBar(true)?;
+    Window::Current()?.cast::<IWindow2>()?.SetTitleBar(&named::<UIElement>(root, "PipDrag")?)?;
+    let bar = ApplicationView::GetForCurrentView()?.cast::<IApplicationView3>()?.TitleBar()?;
+    let clear = Some(CLEAR);
+    bar.SetButtonBackgroundColor(clear)?;
+    bar.SetButtonInactiveBackgroundColor(clear)?;
+    bar.SetButtonHoverBackgroundColor(clear)?;
+    bar.SetButtonPressedBackgroundColor(clear)?;
+    bar.SetButtonForegroundColor(clear)?;
+    bar.SetButtonInactiveForegroundColor(clear)?;
+    bar.SetButtonHoverForegroundColor(clear)?;
+    bar.SetButtonPressedForegroundColor(clear)?;
+    Ok(())
 }
 
-fn show_sound(player: &MediaPlayer, root: &IFrameworkElement) -> Result<()> {
-    let muted = player.cast::<IMediaPlayer>()?.IsMuted()?;
-    named::<IFontIcon>(root, "PipMuteIcon")?.SetGlyph(if muted { MUTED } else { SOUND })
+/// On the small window's thread: the menu comes up while the mouse moves over the window, and
+/// goes when it leaves or has been still a while.
+fn wake_menu_on_mouse(root: &IFrameworkElement) -> Result<()> {
+    let menu = named::<IUIElement>(root, "PipMenu")?;
+    let moves = std::sync::Arc::new(std::sync::atomic::AtomicU64::new(0));
+    let dispatcher = Window::Current()?.cast::<IWindow>()?.Dispatcher()?;
+    let (waking, counting) = (menu.clone(), moves.clone());
+    keep(root.cast::<IUIElement>()?.PointerMoved(move |_: Ref<IInspectable>, _: Ref<PointerRoutedEventArgs>| {
+        let _ = waking.SetOpacity(1.0);
+        let this = counting.fetch_add(1, std::sync::atomic::Ordering::Relaxed) + 1;
+        let (still, dispatcher) = (counting.clone(), dispatcher.clone());
+        std::thread::spawn(move || {
+            std::thread::sleep(MENU_STAYS);
+            if still.load(std::sync::atomic::Ordering::Relaxed) == this {
+                post(&dispatcher, hide_menu);
+            }
+        });
+    })?);
+    keep(root.cast::<IUIElement>()?.PointerExited(move |_: Ref<IInspectable>, _: Ref<PointerRoutedEventArgs>| {
+        let _ = menu.SetOpacity(0.0);
+    })?);
+    let held = named::<IUIElement>(root, "PipMenu")?;
+    MENU.with_borrow_mut(|m| *m = Some(held));
+    Ok(())
+}
+
+fn hide_menu() {
+    if let Some(menu) = MENU.with_borrow(Clone::clone) {
+        let _ = menu.SetOpacity(0.0);
+    }
+}
+
+/// On the small window's thread: 关闭小窗. The window goes as if closed by hand, so the room takes
+/// its picture back if it is still on show.
+fn close_window() {
+    if let Ok(view) = ApplicationView::GetForCurrentView() {
+        let _ = view.cast::<IApplicationView4>().and_then(|v| v.TryConsolidateAsync()).map(drop);
+    }
 }
 
 /// On the small window's thread: the element lets go of the player.

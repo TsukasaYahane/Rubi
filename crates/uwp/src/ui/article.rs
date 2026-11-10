@@ -19,7 +19,7 @@ const LAYOUT: &str = r##"
       <FontIcon Glyph="&#xE72B;" FontSize="16" /><TextBlock Text="返回" Margin="10,0,0,0" />
     </StackPanel>
   </Button>
-  <TextBlock x:Name="Status" Grid.Row="1" Margin="16,8" FontSize="13"
+  <TextBlock x:Name="Status" Grid.Row="1" Margin="16,8" FontSize="13" IsHitTestVisible="False"
              Foreground="{ThemeResource SystemControlForegroundBaseMediumBrush}" />
   <ScrollViewer Grid.Row="1">
     <Grid>
