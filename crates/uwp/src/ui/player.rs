@@ -177,24 +177,7 @@ const LISTS: &str = r##"    <GridView x:Name="Related" Grid.Row="1" SelectionMod
         <ItemsPanelTemplate><ItemsWrapGrid Orientation="Horizontal" /></ItemsPanelTemplate>
       </GridView.ItemsPanel>
     </GridView>
-    <ListView x:Name="Comments" Grid.Row="1" SelectionMode="None" Visibility="Collapsed">
-      <ListView.ItemContainerStyle>
-        <Style TargetType="ListViewItem">
-          <Setter Property="HorizontalContentAlignment" Value="Stretch" />
-          <Setter Property="Padding" Value="16,8" />
-        </Style>
-      </ListView.ItemContainerStyle>
-      <ListView.ItemTemplate>
-        <DataTemplate>
-          <StackPanel>
-            <TextBlock FontSize="12" Foreground="#0050EF" />
-            <TextBlock FontSize="14" TextWrapping="Wrap" Margin="0,3,0,0" />
-            <TextBlock FontSize="11" Margin="0,3,0,0"
-                       Foreground="{ThemeResource SystemControlForegroundBaseMediumBrush}" />
-          </StackPanel>
-        </DataTemplate>
-      </ListView.ItemTemplate>
-    </ListView>
+    <Border x:Name="CommentsHost" Grid.Row="1" Visibility="Collapsed" />
     <ListView x:Name="Queue" Grid.Row="1" SelectionMode="None" IsItemClickEnabled="True" Visibility="Collapsed">
       <ListView.ItemContainerTransitions><TransitionCollection /></ListView.ItemContainerTransitions>
       <ListView.ItemContainerStyle>
@@ -272,14 +255,6 @@ fn page() -> Option<Page> {
 /// Which opening of the page is current; answers for another are dropped.
 pub fn run() -> u64 {
     RUN.load(Ordering::Relaxed)
-}
-
-/// The side pane, if opening `run` is still on show.
-pub fn side(run: u64) -> Option<Rc<Side>> {
-    if run != self::run() {
-        return None;
-    }
-    page().map(|p| p.side)
 }
 
 /// The action row, if opening `run` is still on show.
@@ -706,7 +681,7 @@ pub fn open(feed: bool, bvid: &str, title: &str, uploader: &str) -> Result<()> {
         post(&info_dispatcher, move || {
             let Some(page) = (run == self::run()).then(page).flatten() else { return };
             if let Some(card) = detail {
-                page.side.set_aid(card.aid);
+                page.side.set_aid(card.aid, card.stats.reply);
                 page.actions.set_counts(card.stats.like, card.stats.coin, card.stats.favorite);
                 let _ = set_text(&page.root, "Title", &card.title);
                 let _ = show_up_link(&page, card.owner.mid, &card.owner.name);

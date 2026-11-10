@@ -47,6 +47,11 @@ pub struct Post {
     pub link: String,
     /// The link is an article the app can show.
     pub readable: bool,
+    /// Its comment area (`type`, `oid`), if it has one.
+    pub comments: Option<(u32, u64)>,
+    /// What the comment button says.
+    pub comment_label: String,
+    pub comment_count: u64,
 }
 
 fn kind_label(kind: DynamicKind) -> &'static str {
@@ -83,6 +88,9 @@ impl Post {
         let more_pictures = pictures.len().saturating_sub(PICTURES);
         pictures.truncate(PICTURES);
         let readable = matches!(post.kind, DynamicKind::Article | DynamicKind::Opus);
+        let comments = (post.comment_kind > 0 && post.comment_oid > 0).then_some((post.comment_kind, post.comment_oid));
+        let comment_label =
+            if post.comment_count > 0 { format!("评论 {}", count(post.comment_count)) } else { "评论".to_owned() };
         let link = if post.link.is_empty() { orig.map_or_else(String::new, |o| o.link.clone()) } else { post.link };
         Self {
             id: post.id,
@@ -96,6 +104,9 @@ impl Post {
             quote,
             link,
             readable,
+            comments,
+            comment_label,
+            comment_count: post.comment_count,
         }
     }
 }
@@ -147,6 +158,15 @@ mod tests {
         let shown = Post::of(Dynamic { pictures, ..post() }, NOW);
         assert_eq!(shown.pictures.len(), PICTURES);
         assert_eq!(shown.more_pictures, 2);
+    }
+
+    #[test]
+    fn a_card_knows_its_comments() {
+        let shown = Post::of(Dynamic { comment_kind: 17, comment_oid: 1265, comment_count: 12_400, ..post() }, NOW);
+        assert_eq!(shown.comments, Some((17, 1265)));
+        assert_eq!(shown.comment_label, "评论 1.2 万");
+        let bare = Post::of(post(), NOW);
+        assert_eq!((bare.comments, bare.comment_label.as_str()), (None, "评论"));
     }
 
     #[test]

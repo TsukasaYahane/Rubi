@@ -4,25 +4,24 @@ use std::cell::{Cell, RefCell};
 use std::rc::Rc;
 
 use rubi_core::CommentArea;
-use rubi_model::{Comment, VideoCard};
+use rubi_model::VideoCard;
 use windows_collections::IVector;
 use windows_core::{IInspectable, Interface, Ref, Result};
 
 use crate::state::panes::{SideLayout, side_layout};
 use crate::state::queue::Queue;
+use crate::ui::comment_list::CommentList;
 use crate::ui::feed;
 use crate::ui::keep;
 use crate::ui::rows::{Covers, add_rows, on_row, on_row_click};
-use crate::ui::shell::shell;
-use crate::ui::{load_object, named, on_click, player, post, queue};
+use crate::ui::{load_object, named, on_click, queue};
 use crate::xaml::{
-    DataTemplate, IContentControl, IControl, IFrameworkElement, IImage, IItemsControl, IItemsControl2, IItemsWrapGrid,
-    ITextBlock, IUIElement, PropertyValue, SizeChangedEventArgs, SolidColorBrush, UIElement, Visibility,
+    DataTemplate, IBorder, IContentControl, IControl, IFrameworkElement, IImage, IItemsControl, IItemsControl2,
+    IItemsWrapGrid, ITextBlock, IUIElement, PropertyValue, SizeChangedEventArgs, SolidColorBrush, UIElement,
+    Visibility,
 };
 
 const COVER_DECODE_WIDTH: i32 = 320;
-/// Rows from the end at which more comments load.
-const LOAD_AHEAD: usize = 6;
 
 /// A related video with its cover beside the words: a narrow pane.
 const SMALL_ROW: &str = r##"<DataTemplate xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation">
@@ -57,20 +56,13 @@ pub enum Pane {
     Queue,
 }
 
-/// A comment as a row: replies carry how deep they sit.
-struct CommentRow {
-    depth: u32,
-    comment: Comment,
-}
-
 pub struct Side {
     root: IFrameworkElement,
     aid: Cell<u64>,
     related: RefCell<Vec<VideoCard>>,
-    comments: RefCell<Vec<CommentRow>>,
-    next_comments: RefCell<Option<String>>,
+    replies: Cell<u64>,
+    comments: Rc<CommentList>,
     comments_opened: Cell<bool>,
-    loading: Cell<bool>,
     /// The row template in use, so it changes only when the pane crosses a width.
     large_rows: Cell<Option<bool>>,
     /// The list's panel exists only once it has rows: until then the fit has to be tried again.
@@ -88,10 +80,9 @@ impl Side {
             root: root.clone(),
             aid: Cell::new(0),
             related: RefCell::default(),
-            comments: RefCell::default(),
-            next_comments: RefCell::new(None),
+            replies: Cell::new(0),
+            comments: CommentList::new()?,
             comments_opened: Cell::new(false),
-            loading: Cell::new(false),
             large_rows: Cell::new(None),
             fitted: Cell::new(false),
             covers: Covers::default(),
@@ -119,9 +110,7 @@ impl Side {
             }
         })?;
 
-        let comments = named::<IFrameworkElement>(root, "Comments")?;
-        let filling = Rc::downgrade(&side);
-        on_row(&comments, move |at, parts| filling.upgrade().map_or(Ok(()), |s| s.fill_comment(at, parts)))?;
+        named::<IBorder>(root, "CommentsHost")?.SetChild(&side.comments.element().cast::<UIElement>()?)?;
 
         for (name, pane) in [("TabRelated", Pane::Related), ("TabComments", Pane::Comments), ("TabQueue", Pane::Queue)]
         {
@@ -141,12 +130,11 @@ impl Side {
         Ok(side)
     }
 
-    /// The video's aid is known: comments can load.
-    pub fn set_aid(&self, aid: u64) {
+    /// The video's aid and how many comments it has are known: comments can load.
+    pub fn set_aid(&self, aid: u64, replies: u64) {
         self.aid.set(aid);
-        if self.comments_opened.get() {
-            self.load_comments();
-        }
+        self.replies.set(replies);
+        self.load_comments();
     }
 
     pub fn set_related(&self, cards: Vec<VideoCard>) -> Result<()> {
@@ -181,7 +169,7 @@ impl Side {
     pub fn select(&self, pane: Pane) -> Result<()> {
         let shown = |on| if on { Visibility::Visible } else { Visibility::Collapsed };
         named::<IUIElement>(&self.root, "Related")?.SetVisibility(shown(pane == Pane::Related))?;
-        named::<IUIElement>(&self.root, "Comments")?.SetVisibility(shown(pane == Pane::Comments))?;
+        named::<IUIElement>(&self.root, "CommentsHost")?.SetVisibility(shown(pane == Pane::Comments))?;
         if let Ok(list) = named::<IUIElement>(&self.root, "Queue") {
             list.SetVisibility(shown(pane == Pane::Queue))?;
         }
@@ -230,47 +218,11 @@ impl Side {
         parts.GetAt(1)?.cast::<ITextBlock>()?.SetText(&entry.owner)
     }
 
+    /// The comments load once both the aid is known and the tab has been opened.
     fn load_comments(&self) {
-        let (Some(shell), aid) = (shell(), self.aid.get()) else { return };
-        let Some(backend) = shell.backend.get().cloned() else { return };
-        if aid == 0 || self.loading.replace(true) {
-            return;
-        }
-        let offset = self.next_comments.borrow().clone();
-        let dispatcher = shell.dispatcher.clone();
-        let core = backend.clone();
-        let run = player::run();
-        backend.spawn(async move {
-            let area = CommentArea { kind: 1, oid: aid };
-            let page = core.services.comments.page(area, false, offset.as_deref()).await.map_err(|e| e.to_string());
-            let page = page.map(|p| {
-                let pinned = p.pinned.into_iter().map(|comment| (0, comment));
-                let threads = p.threads.into_iter().flat_map(|t| t.rows).map(|(row, comment)| (row.depth, comment));
-                (pinned.chain(threads).collect::<Vec<_>>(), p.next_offset)
-            });
-            post(&dispatcher, move || {
-                if let Some(side) = player::side(run) {
-                    side.comments_loaded(page);
-                }
-            });
-        });
-    }
-
-    fn comments_loaded(&self, page: std::result::Result<(Vec<(u32, Comment)>, Option<String>), String>) {
-        self.loading.set(false);
-        match page {
-            Ok((rows, next)) => {
-                let from = self.comments.borrow().len();
-                self.comments
-                    .borrow_mut()
-                    .extend(rows.into_iter().map(|(depth, comment)| CommentRow { depth, comment }));
-                *self.next_comments.borrow_mut() = next;
-                let to = self.comments.borrow().len();
-                if let Ok(list) = named(&self.root, "Comments") {
-                    let _ = add_rows(&list, from, to);
-                }
-            }
-            Err(problem) => player::say(&format!("评论读取失败：{problem}")),
+        let aid = self.aid.get();
+        if aid > 0 && self.comments_opened.get() {
+            let _ = self.comments.show(CommentArea { kind: 1, oid: aid }, self.replies.get());
         }
     }
 
@@ -283,20 +235,5 @@ impl Side {
         parts.GetAt(0)?.cast::<IImage>()?.SetSource(&self.covers.get(&card.cover, COVER_DECODE_WIDTH)?)?;
         parts.GetAt(1)?.cast::<ITextBlock>()?.SetText(&card.title)?;
         parts.GetAt(2)?.cast::<ITextBlock>()?.SetText(&card.owner.name)
-    }
-
-    fn fill_comment(&self, at: usize, parts: &IVector<UIElement>) -> Result<()> {
-        let rows = self.comments.borrow();
-        let Some(row) = rows.get(at) else { return Ok(()) };
-        let name = if row.depth > 0 { format!("↳ {}", row.comment.name) } else { row.comment.name.clone() };
-        parts.GetAt(0)?.cast::<ITextBlock>()?.SetText(&name)?;
-        parts.GetAt(1)?.cast::<ITextBlock>()?.SetText(&row.comment.text)?;
-        parts.GetAt(2)?.cast::<ITextBlock>()?.SetText(&format!("赞 {}", row.comment.likes))?;
-        let near_end = at + LOAD_AHEAD >= rows.len();
-        drop(rows);
-        if near_end && self.next_comments.borrow().is_some() {
-            self.load_comments();
-        }
-        Ok(())
     }
 }

@@ -6,16 +6,17 @@ use std::rc::{Rc, Weak};
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::{SystemTime, UNIX_EPOCH};
 
+use rubi_core::CommentArea;
 use windows_collections::IVector;
-use windows_core::{IInspectable, Interface, Result};
+use windows_core::{IInspectable, Interface, Ref, Result};
 
 use crate::state::follow::{PICTURES, Post};
 use crate::ui::rows::{Covers, add_rows, on_row, on_row_click};
 use crate::ui::shell::shell;
-use crate::ui::{article, feed, load, post};
+use crate::ui::{article, comment_list, feed, keep, load, post};
 use crate::xaml::{
-    IBorder, IFrameworkElement, IImage, IItemsControl, IPanel, ITextBlock, IUIElement, Launcher, UIElement, Uri,
-    Visibility,
+    IBorder, IButtonBase, IContentControl, IFrameworkElement, IImage, IItemsControl, IPanel, IPropertyValue,
+    ITextBlock, IUIElement, Launcher, PropertyValue, RoutedEventArgs, UIElement, Uri, Visibility,
 };
 
 const FACE_DECODE_WIDTH: i32 = 64;
@@ -44,6 +45,7 @@ const LIST: &str = r##"
         <Grid.RowDefinitions>
           <RowDefinition Height="Auto" /><RowDefinition Height="Auto" /><RowDefinition Height="Auto" />
           <RowDefinition Height="Auto" /><RowDefinition Height="Auto" /><RowDefinition Height="Auto" />
+          <RowDefinition Height="Auto" />
         </Grid.RowDefinitions>
         <Image Grid.RowSpan="2" Width="36" Height="36" Stretch="UniformToFill" VerticalAlignment="Top" />
         <TextBlock Grid.Column="1" FontSize="13" TextTrimming="CharacterEllipsis" />
@@ -73,6 +75,8 @@ const LIST: &str = r##"
           <TextBlock FontSize="12" TextWrapping="Wrap" MaxLines="3" TextTrimming="CharacterEllipsis"
                      Foreground="{ThemeResource SystemControlForegroundBaseMediumBrush}" />
         </Border>
+        <Button Grid.Column="1" Grid.Row="6" Margin="0,6,0,0" Padding="0,2" Background="Transparent"
+                BorderThickness="0" FontSize="12" Foreground="#0050EF" />
       </Grid>
     </DataTemplate></ListView.ItemTemplate>
   </ListView>
@@ -97,6 +101,8 @@ pub struct PostList {
     spoke: Box<dyn Fn()>,
     /// Told before a post opens something: the way back is the owner's to set up.
     leaving: Box<dyn Fn()>,
+    /// Shows a post's comments; a page of their own when the owner says nothing.
+    comments_asked: RefCell<Option<Box<dyn Fn(CommentArea, u64)>>>,
     posts: RefCell<Vec<Post>>,
     /// The UP whose posts show; 0 for everyone.
     mid: Cell<u64>,
@@ -117,6 +123,7 @@ impl PostList {
             list: list.clone(),
             spoke: Box::new(spoke),
             leaving: Box::new(leaving),
+            comments_asked: RefCell::default(),
             posts: RefCell::default(),
             mid: Cell::new(0),
             next: RefCell::default(),
@@ -141,6 +148,11 @@ impl PostList {
 
     pub fn element(&self) -> &IFrameworkElement {
         &self.list
+    }
+
+    /// Says how to show a post's comments, from its area and count.
+    pub fn on_comments(&self, show: impl Fn(CommentArea, u64) + 'static) {
+        *self.comments_asked.borrow_mut() = Some(Box::new(show));
     }
 
     pub fn said(&self) -> String {
@@ -261,12 +273,49 @@ impl PostList {
             let border = parts.GetAt(6)?.cast::<IBorder>()?;
             border.Child()?.cast::<ITextBlock>()?.SetText(&post.quote)?;
         }
+        let button = parts.GetAt(7)?.cast::<IFrameworkElement>()?;
+        shown(parts.GetAt(7), post.comments.is_some())?;
+        button.cast::<IContentControl>()?.SetContent(&PropertyValue::CreateString(&post.comment_label)?)?;
+        self.wire_comments(&button)?;
         let near_end = at + LOAD_AHEAD >= posts.len();
         drop(posts);
         if near_end {
             self.load();
         }
         Ok(())
+    }
+
+    /// Rows are reused: a card's comment button is wired once, and finds its post through the
+    /// row's data.
+    fn wire_comments(&self, button: &IFrameworkElement) -> Result<()> {
+        if button.Tag().is_ok() {
+            return Ok(());
+        }
+        button.SetTag(&PropertyValue::CreateString("wired")?)?;
+        let id = self.id;
+        keep(button.cast::<IButtonBase>()?.Click(move |sender: Ref<IInspectable>, _: Ref<RoutedEventArgs>| {
+            let at = sender
+                .ok()
+                .and_then(|s| s.cast::<IFrameworkElement>()?.DataContext()?.cast::<IPropertyValue>()?.GetInt32());
+            if let (Ok(at), Some(shown)) = (at, LISTS.with_borrow(|l| l.get(&id).and_then(Weak::upgrade))) {
+                let _ = shown.show_comments(at as usize);
+            }
+        })?);
+        Ok(())
+    }
+
+    fn show_comments(&self, at: usize) -> Result<()> {
+        let posts = self.posts.borrow();
+        let Some((kind, oid)) = posts.get(at).and_then(|p| p.comments) else { return Ok(()) };
+        let total = posts.get(at).map_or(0, |p| p.comment_count);
+        drop(posts);
+        let area = CommentArea { kind, oid };
+        if let Some(show) = self.comments_asked.borrow().as_ref() {
+            show(area, total);
+            return Ok(());
+        }
+        (self.leaving)();
+        comment_list::open_page(area, total)
     }
 
     /// The card's video, its article, or what it links to in the browser.

@@ -4,18 +4,20 @@
 use std::cell::{Cell, RefCell};
 use std::rc::Rc;
 
+use rubi_core::CommentArea;
 use rubi_model::{FollowedUp, FollowingUp};
 use windows_collections::IVector;
 use windows_core::{IInspectable, Interface, Result};
 
 use crate::state::layout::WindowClass;
+use crate::ui::comment_list::{self, CommentList};
 use crate::ui::post_list::PostList;
 use crate::ui::rows::{Covers, add_rows, on_row, on_row_click};
 use crate::ui::shell::{shell, toast};
 use crate::ui::{load, named, on_click, post, set_text, up};
 use crate::xaml::{
-    GridLength, GridUnitType, IColumnDefinition, IFrameworkElement, IImage, IItemsControl, IPanel, IRowDefinition,
-    ISelector, ITextBlock, IUIElement, UIElement, Visibility,
+    GridLength, GridUnitType, IBorder, IColumnDefinition, IFrameworkElement, IImage, IItemsControl, IPanel,
+    IRowDefinition, ISelector, ITextBlock, IUIElement, UIElement, Visibility,
 };
 
 /// The row that lists the rest of the followed UPs.
@@ -24,12 +26,15 @@ const FACE_DECODE_WIDTH: i32 = 64;
 /// Width of the UP list on a wide and a medium window.
 const UPS_WIDE: f64 = 230.0;
 const UPS_MEDIUM: f64 = 190.0;
+/// Width of the comment pane beside the posts.
+const COMMENTS_WIDE: f64 = 380.0;
 
 const LAYOUT: &str = r##"
 <Grid xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
       xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml">
   <Grid.ColumnDefinitions>
     <ColumnDefinition x:Name="UpsColumn" Width="230" /><ColumnDefinition Width="*" />
+    <ColumnDefinition x:Name="CommentsColumn" Width="0" />
   </Grid.ColumnDefinitions>
   <Grid.RowDefinitions><RowDefinition x:Name="BarRow" Height="0" /><RowDefinition Height="*" /></Grid.RowDefinitions>
   <Border x:Name="UpsPane" Grid.RowSpan="2" BorderThickness="0,0,1,0"
@@ -81,6 +86,8 @@ const LAYOUT: &str = r##"
           HorizontalAlignment="Right" VerticalAlignment="Top" Margin="0,8,16,0" Background="#59000000"
           Foreground="White" BorderThickness="0" Padding="10,4" FontSize="12" Canvas.ZIndex="1" />
   <Grid x:Name="PostsHost" Grid.Column="1" Grid.Row="1" />
+  <Border x:Name="CommentsPane" Grid.Column="2" Grid.RowSpan="2" Visibility="Collapsed" BorderThickness="1,0,0,0"
+          BorderBrush="{ThemeResource SystemControlForegroundBaseLowBrush}" />
 </Grid>"##;
 
 fn shown(element: windows_core::Result<UIElement>, on: bool) -> Result<()> {
@@ -91,6 +98,9 @@ pub struct FollowPage {
     root: IFrameworkElement,
     ups: RefCell<Vec<FollowedUp>>,
     posts: Rc<PostList>,
+    comments: Rc<CommentList>,
+    /// The comment pane is open on a wide window.
+    comments_open: Cell<bool>,
     /// The UP whose posts show; 0 for everyone.
     mid: Cell<u64>,
     started: Cell<bool>,
@@ -112,10 +122,14 @@ impl FollowPage {
             .Children()?
             .cast::<IVector<UIElement>>()?
             .Append(&posts.element().cast::<UIElement>()?)?;
+        let comments = CommentList::new()?;
+        named::<IBorder>(&root, "CommentsPane")?.SetChild(&comments.element().cast::<UIElement>()?)?;
         let page = Rc::new(Self {
             root: root.clone(),
             ups: RefCell::default(),
             posts,
+            comments,
+            comments_open: Cell::new(false),
             mid: Cell::new(0),
             started: Cell::new(false),
             covers: Covers::default(),
@@ -131,6 +145,19 @@ impl FollowPage {
                 }
             })?;
         }
+        let asking = Rc::downgrade(&page);
+        page.posts.on_comments(move |area, total| {
+            if let Some(page) = asking.upgrade() {
+                let _ = page.open_comments(area, total);
+            }
+        });
+        let closing = Rc::downgrade(&page);
+        page.comments.set_close(move || {
+            if let (Some(page), Some(shell)) = (closing.upgrade(), shell()) {
+                page.comments_open.set(false);
+                let _ = page.arrange(shell.class());
+            }
+        })?;
         let weak = Rc::downgrade(&page);
         on_click(&root, "UpLink", move || {
             if let Some(page) = weak.upgrade() {
@@ -247,8 +274,24 @@ impl FollowPage {
         parts.GetAt(1)?.cast::<ITextBlock>()?.SetText(&up.name)
     }
 
+    /// Beside the posts on a wide window; a page of their own otherwise, back to here.
+    fn open_comments(&self, area: CommentArea, total: u64) -> Result<()> {
+        let Some(shell) = shell() else { return Ok(()) };
+        if shell.class() != WindowClass::Wide {
+            return comment_list::open_page(area, total);
+        }
+        self.comments.show(area, total)?;
+        self.comments_open.set(true);
+        self.arrange(shell.class())
+    }
+
     fn arrange(&self, class: WindowClass) -> Result<()> {
         let narrow = class == WindowClass::Narrow;
+        let beside = class == WindowClass::Wide && self.comments_open.get();
+        let comments =
+            GridLength { value: if beside { COMMENTS_WIDE } else { 0.0 }, grid_unit_type: GridUnitType::Pixel };
+        named::<IColumnDefinition>(&self.root, "CommentsColumn")?.SetWidth(comments)?;
+        shown(named(&self.root, "CommentsPane"), beside)?;
         let pixels = |value| GridLength { value, grid_unit_type: GridUnitType::Pixel };
         let auto = GridLength { value: 0.0, grid_unit_type: GridUnitType::Auto };
         let ups = match class {
