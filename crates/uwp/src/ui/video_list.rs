@@ -11,10 +11,11 @@ use windows_collections::IVector;
 use windows_core::{IInspectable, Interface, Ref, Result};
 
 use crate::backend::Backend;
-use crate::state::library::{Row, row_size, video_link};
+use crate::state::library::{Row, Shelf, row_size, video_link};
+use crate::state::queue::Entry;
 use crate::ui::rows::{Covers, add_rows, on_row, on_row_click};
 use crate::ui::shell::shell;
-use crate::ui::{card_menu, feed, keep, load, named, on_click, post, set_text};
+use crate::ui::{card_menu, feed, keep, load, named, on_click, post, queue, set_text};
 use crate::xaml::{
     IContentControl, IFrameworkElement, IImage, IItemsControl, IItemsControl2, IItemsWrapGrid, IListViewBase,
     IPropertyValue, ISelector, ITextBlock, IUIElement, ListViewSelectionMode, PropertyValue, SelectionChangedEventArgs,
@@ -37,9 +38,17 @@ const LAYOUT: &str = r##"
   <Button x:Name="Back" Visibility="Collapsed" Background="Transparent" BorderThickness="0" Padding="16,6"
           Foreground="#0050EF" />
   <Grid Grid.Row="1" Margin="16,12,8,2">
-    <Grid.ColumnDefinitions><ColumnDefinition Width="*" /><ColumnDefinition Width="Auto" /></Grid.ColumnDefinitions>
+    <Grid.ColumnDefinitions>
+      <ColumnDefinition Width="*" /><ColumnDefinition Width="Auto" /><ColumnDefinition Width="Auto" />
+    </Grid.ColumnDefinitions>
     <TextBlock x:Name="Title" FontSize="20" FontWeight="Light" TextTrimming="CharacterEllipsis" />
-    <Button x:Name="Manage" Grid.Column="1" Visibility="Collapsed" Background="Transparent" BorderThickness="0"
+    <Button x:Name="PlayAll" Grid.Column="1" Visibility="Collapsed" Background="#0050EF" Foreground="White"
+            BorderThickness="0" Padding="12,4" Margin="0,0,8,0">
+      <StackPanel Orientation="Horizontal">
+        <FontIcon Glyph="&#xE768;" FontSize="14" /><TextBlock Text="全部播放" Margin="8,0,0,0" />
+      </StackPanel>
+    </Button>
+    <Button x:Name="Manage" Grid.Column="2" Visibility="Collapsed" Background="Transparent" BorderThickness="0"
             Padding="8,2" Foreground="#0050EF" />
   </Grid>
   <TextBlock x:Name="Meta" Grid.Row="2" FontSize="12" Margin="16,0,16,6" TextWrapping="Wrap"
@@ -218,6 +227,15 @@ impl VideoList {
             let _ = s.set_managing(!s.managing.get());
         })?;
         shown.wire("Remove", Self::remove_picked)?;
+        shown.wire("PlayAll", |s| {
+            let entries = s
+                .rows
+                .borrow()
+                .iter()
+                .map(|r| Entry { bvid: r.bvid.clone(), title: r.title.clone(), owner: r.owner.clone() })
+                .collect();
+            let _ = queue::start(Shelf::Later.label(), entries, 0);
+        })?;
         shown.wire("Clear", Self::clear_finished)?;
         Ok(shown)
     }
@@ -270,6 +288,7 @@ impl VideoList {
         self.loading.set(false);
         self.reset_items()?;
         self.show(&self.root, "Manage", false)?;
+        self.show(&self.root, "PlayAll", false)?;
         set_text(&self.root, "Meta", "正在读取…")?;
         self.load();
         Ok(())
@@ -313,6 +332,7 @@ impl VideoList {
                 let to = self.rows.borrow().len();
                 add_rows(&self.list, from, to)?;
                 self.show(&self.root, "Manage", self.source.get().manages() && to > 0)?;
+                self.show_play_all()?;
                 self.show_count()
             }
             Err(problem) => {
@@ -353,6 +373,12 @@ impl VideoList {
         Ok(())
     }
 
+    /// 稍后再看 plays through from the first, outside managing.
+    fn show_play_all(&self) -> Result<()> {
+        let on = self.source.get() == Source::Later && !self.managing.get() && !self.rows.borrow().is_empty();
+        self.show(&self.root, "PlayAll", on)
+    }
+
     fn picked(&self) -> Result<Vec<usize>> {
         let items = self.list.cast::<IListViewBase>()?.SelectedItems()?;
         (0..items.Size()?).map(|at| Ok(items.GetAt(at)?.cast::<IPropertyValue>()?.GetInt32()? as usize)).collect()
@@ -387,6 +413,7 @@ impl VideoList {
         self.label("Manage", manage)?;
         self.label("Remove", if source == Source::Later { "移除选中" } else { "移出收藏夹" })?;
         self.show(&self.root, "Bar", on)?;
+        self.show_play_all()?;
         self.show(&self.root, "Clear", on && source == Source::Later)?;
         self.show_count()
     }
@@ -436,6 +463,7 @@ impl VideoList {
             Ok(()) => {
                 self.rows.borrow_mut().retain(|r| !aids.contains(&r.aid));
                 self.reset_items()?;
+                self.show_play_all()?;
                 self.show_count()?;
                 let line = named::<ITextBlock>(&self.root, "Meta")?.Text()?;
                 set_text(&self.root, "Meta", &format!("{line} · {said}"))

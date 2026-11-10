@@ -9,14 +9,15 @@ use windows_collections::IVector;
 use windows_core::{IInspectable, Interface, Ref, Result};
 
 use crate::state::panes::{SideLayout, side_layout};
+use crate::state::queue::Queue;
 use crate::ui::feed;
 use crate::ui::keep;
 use crate::ui::rows::{Covers, add_rows, on_row, on_row_click};
 use crate::ui::shell::shell;
-use crate::ui::{load_object, named, on_click, player, post};
+use crate::ui::{load_object, named, on_click, player, post, queue};
 use crate::xaml::{
-    DataTemplate, IControl, IFrameworkElement, IImage, IItemsControl, IItemsControl2, IItemsWrapGrid, ITextBlock,
-    IUIElement, SizeChangedEventArgs, SolidColorBrush, UIElement, Visibility,
+    DataTemplate, IContentControl, IControl, IFrameworkElement, IImage, IItemsControl, IItemsControl2, IItemsWrapGrid,
+    ITextBlock, IUIElement, PropertyValue, SizeChangedEventArgs, SolidColorBrush, UIElement, Visibility,
 };
 
 const COVER_DECODE_WIDTH: i32 = 320;
@@ -48,6 +49,14 @@ const LARGE_ROW: &str = r##"<DataTemplate xmlns="http://schemas.microsoft.com/wi
                Foreground="{ThemeResource SystemControlForegroundBaseMediumBrush}" />
   </Grid></DataTemplate>"##;
 
+/// What the pane shows.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Pane {
+    Related,
+    Comments,
+    Queue,
+}
+
 /// A comment as a row: replies carry how deep they sit.
 struct CommentRow {
     depth: u32,
@@ -69,6 +78,8 @@ pub struct Side {
     covers: Covers,
     /// The layout the rows were last set to.
     layout: Cell<Option<SideLayout>>,
+    /// The queue on play, as the video opened.
+    queue: Option<Queue>,
 }
 
 impl Side {
@@ -85,6 +96,7 @@ impl Side {
             fitted: Cell::new(false),
             covers: Covers::default(),
             layout: Cell::new(None),
+            queue: queue::view(),
         });
 
         let related = named::<IFrameworkElement>(root, "Related")?;
@@ -111,19 +123,21 @@ impl Side {
         let filling = Rc::downgrade(&side);
         on_row(&comments, move |at, parts| filling.upgrade().map_or(Ok(()), |s| s.fill_comment(at, parts)))?;
 
-        let tab = Rc::downgrade(&side);
-        on_click(root, "TabRelated", move || {
-            if let Some(side) = tab.upgrade() {
-                let _ = side.show_tab(false);
+        for (name, pane) in [("TabRelated", Pane::Related), ("TabComments", Pane::Comments), ("TabQueue", Pane::Queue)]
+        {
+            // The 竖屏推流 layout has no queue tab.
+            if named::<IFrameworkElement>(root, name).is_err() {
+                continue;
             }
-        })?;
-        let tab = Rc::downgrade(&side);
-        on_click(root, "TabComments", move || {
-            if let Some(side) = tab.upgrade() {
-                let _ = side.show_tab(true);
-            }
-        })?;
-        side.mark_tabs(false)?;
+            let tab = Rc::downgrade(&side);
+            on_click(root, name, move || {
+                if let Some(side) = tab.upgrade() {
+                    let _ = side.select(pane);
+                }
+            })?;
+        }
+        side.mark_tabs(Pane::Related)?;
+        side.show_queue()?;
         Ok(side)
     }
 
@@ -164,26 +178,56 @@ impl Side {
         Ok(())
     }
 
-    pub fn show_tab(&self, comments: bool) -> Result<()> {
+    pub fn select(&self, pane: Pane) -> Result<()> {
         let shown = |on| if on { Visibility::Visible } else { Visibility::Collapsed };
-        named::<IUIElement>(&self.root, "Related")?.SetVisibility(shown(!comments))?;
-        named::<IUIElement>(&self.root, "Comments")?.SetVisibility(shown(comments))?;
-        self.mark_tabs(comments)?;
-        if comments && !self.comments_opened.replace(true) {
+        named::<IUIElement>(&self.root, "Related")?.SetVisibility(shown(pane == Pane::Related))?;
+        named::<IUIElement>(&self.root, "Comments")?.SetVisibility(shown(pane == Pane::Comments))?;
+        if let Ok(list) = named::<IUIElement>(&self.root, "Queue") {
+            list.SetVisibility(shown(pane == Pane::Queue))?;
+        }
+        self.mark_tabs(pane)?;
+        if pane == Pane::Comments && !self.comments_opened.replace(true) {
             self.load_comments();
         }
         Ok(())
     }
 
-    fn mark_tabs(&self, comments: bool) -> Result<()> {
+    fn mark_tabs(&self, pane: Pane) -> Result<()> {
         let tint = |on| {
             use crate::xaml::Color;
             let color =
                 if on { Color { a: 255, r: 0, g: 0x50, b: 0xEF } } else { Color { a: 255, r: 0x76, g: 0x76, b: 0x76 } };
             SolidColorBrush::CreateInstanceWithColor(color)
         };
-        named::<IControl>(&self.root, "TabRelated")?.SetForeground(&tint(!comments)?)?;
-        named::<IControl>(&self.root, "TabComments")?.SetForeground(&tint(comments)?)
+        for (name, of) in [("TabRelated", Pane::Related), ("TabComments", Pane::Comments), ("TabQueue", Pane::Queue)] {
+            if let Ok(tab) = named::<IControl>(&self.root, name) {
+                tab.SetForeground(&tint(of == pane)?)?;
+            }
+        }
+        Ok(())
+    }
+
+    /// With a queue on play, its tab shows and opens first.
+    fn show_queue(self: &Rc<Self>) -> Result<()> {
+        let (Some(queue), Ok(list)) = (&self.queue, named::<IFrameworkElement>(&self.root, "Queue")) else {
+            return Ok(());
+        };
+        let Ok(tab) = named::<IContentControl>(&self.root, "TabQueue") else { return Ok(()) };
+        tab.SetContent(&PropertyValue::CreateString(&queue.label())?)?;
+        tab.cast::<IUIElement>()?.SetVisibility(Visibility::Visible)?;
+        let filling = Rc::downgrade(self);
+        on_row(&list, move |at, parts| filling.upgrade().map_or(Ok(()), |s| s.fill_queue(at, parts)))?;
+        on_row_click(&list, queue::go)?;
+        add_rows(&list, 0, queue.entries().len())?;
+        self.select(Pane::Queue)
+    }
+
+    fn fill_queue(&self, at: usize, parts: &IVector<UIElement>) -> Result<()> {
+        let Some(queue) = &self.queue else { return Ok(()) };
+        let Some(entry) = queue.entries().get(at) else { return Ok(()) };
+        let title = if at == queue.at() { format!("▶ {}", entry.title) } else { entry.title.clone() };
+        parts.GetAt(0)?.cast::<ITextBlock>()?.SetText(&title)?;
+        parts.GetAt(1)?.cast::<ITextBlock>()?.SetText(&entry.owner)
     }
 
     fn load_comments(&self) {

@@ -40,8 +40,14 @@ const MARKUP: &str = r##"
       <ColumnDefinition Width="Auto" /><ColumnDefinition Width="*" /><ColumnDefinition Width="Auto" />
       <ColumnDefinition Width="Auto" /><ColumnDefinition Width="Auto" />
     </Grid.ColumnDefinitions>
-    <Button x:Name="PlayPause" Visibility="Collapsed" Background="Transparent" Foreground="White" BorderThickness="0"
-            Padding="8,6" VerticalAlignment="Center"><FontIcon x:Name="PlayIcon" Glyph="&#xE769;" FontSize="16" /></Button>
+    <StackPanel Orientation="Horizontal">
+      <Button x:Name="Prev" Visibility="Collapsed" Background="Transparent" Foreground="White" BorderThickness="0"
+              Padding="8,6" VerticalAlignment="Center"><FontIcon Glyph="&#xE892;" FontSize="16" /></Button>
+      <Button x:Name="PlayPause" Visibility="Collapsed" Background="Transparent" Foreground="White" BorderThickness="0"
+              Padding="8,6" VerticalAlignment="Center"><FontIcon x:Name="PlayIcon" Glyph="&#xE769;" FontSize="16" /></Button>
+      <Button x:Name="Next" Visibility="Collapsed" Background="Transparent" Foreground="White" BorderThickness="0"
+              Padding="8,6" VerticalAlignment="Center"><FontIcon Glyph="&#xE893;" FontSize="16" /></Button>
+    </StackPanel>
     <Button x:Name="Mute" Grid.Column="1" Background="Transparent" Foreground="White" BorderThickness="0" Padding="8,6"
             VerticalAlignment="Center"><FontIcon x:Name="MuteIcon" Glyph="&#xE767;" FontSize="16" /></Button>
     <Slider x:Name="Volume" Grid.Column="2" Width="96" Minimum="0" Maximum="100" StepFrequency="1"

@@ -19,6 +19,7 @@ pub mod player_actions;
 pub mod player_side;
 pub mod post_list;
 pub mod quality;
+pub mod queue;
 pub mod rows;
 pub mod schedule;
 pub mod search;

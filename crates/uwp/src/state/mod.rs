@@ -11,6 +11,7 @@ pub mod manifest;
 pub mod panes;
 pub mod qr;
 pub mod quality;
+pub mod queue;
 pub mod search;
 pub mod settings;
 pub mod watch;

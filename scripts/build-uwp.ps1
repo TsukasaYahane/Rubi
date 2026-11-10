@@ -36,8 +36,8 @@ Write-Host "Layout: $layout"
 
 if ($Register) {
     Add-AppxPackage -Register (Join-Path $layout 'AppxManifest.xml')
-    $package = Get-AppxPackage -Name 'Rubi'
-    Write-Host "Registered: $($package.PackageFamilyName)"
+    $registered = Get-AppxPackage -Name 'Rubi'
+    Write-Host "Registered: $($registered.PackageFamilyName)"
 }
 
 if ($Package) {

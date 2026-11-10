@@ -24,8 +24,9 @@ use crate::ui::feed;
 use crate::ui::keep;
 use crate::ui::media;
 use crate::ui::player_actions::Actions;
-use crate::ui::player_side::Side;
+use crate::ui::player_side::{Pane, Side};
 use crate::ui::quality;
+use crate::ui::queue;
 use crate::ui::shell::{shell, toast};
 use crate::ui::splitter;
 use crate::ui::twin_video::{SECOND_ELEMENT, TwinVideo};
@@ -155,6 +156,8 @@ const LAYOUT: &str = r##"
               FontWeight="Light" Padding="12,2" />
       <Button x:Name="TabComments" Content="评论" Background="Transparent" BorderThickness="0" FontSize="20"
               FontWeight="Light" Padding="12,2" />
+      <Button x:Name="TabQueue" Visibility="Collapsed" Background="Transparent" BorderThickness="0" FontSize="20"
+              FontWeight="Light" Padding="12,2" />
     </StackPanel>
     <!--lists-->
   </Grid>
@@ -187,6 +190,24 @@ const LISTS: &str = r##"    <GridView x:Name="Related" Grid.Row="1" SelectionMod
             <TextBlock FontSize="12" Foreground="#0050EF" />
             <TextBlock FontSize="14" TextWrapping="Wrap" Margin="0,3,0,0" />
             <TextBlock FontSize="11" Margin="0,3,0,0"
+                       Foreground="{ThemeResource SystemControlForegroundBaseMediumBrush}" />
+          </StackPanel>
+        </DataTemplate>
+      </ListView.ItemTemplate>
+    </ListView>
+    <ListView x:Name="Queue" Grid.Row="1" SelectionMode="None" IsItemClickEnabled="True" Visibility="Collapsed">
+      <ListView.ItemContainerTransitions><TransitionCollection /></ListView.ItemContainerTransitions>
+      <ListView.ItemContainerStyle>
+        <Style TargetType="ListViewItem">
+          <Setter Property="HorizontalContentAlignment" Value="Stretch" />
+          <Setter Property="Padding" Value="16,8" />
+        </Style>
+      </ListView.ItemContainerStyle>
+      <ListView.ItemTemplate>
+        <DataTemplate>
+          <StackPanel>
+            <TextBlock FontSize="14" TextTrimming="CharacterEllipsis" />
+            <TextBlock FontSize="11" Margin="0,2,0,0" TextTrimming="CharacterEllipsis"
                        Foreground="{ThemeResource SystemControlForegroundBaseMediumBrush}" />
           </StackPanel>
         </DataTemplate>
@@ -571,6 +592,7 @@ pub fn show(bvid: &str, title: &str, uploader: &str) -> Result<()> {
 /// Opens a video, in the 竖屏推流 layout when `feed`.
 pub fn open(feed: bool, bvid: &str, title: &str, uploader: &str) -> Result<()> {
     let Some(shell) = shell() else { return Ok(()) };
+    queue::opening(bvid);
     leave();
     crate::ui::me::leave();
     let layout = if feed { feed::LAYOUT } else { LAYOUT };
@@ -594,7 +616,7 @@ pub fn open(feed: bool, bvid: &str, title: &str, uploader: &str) -> Result<()> {
     splitter::attach(&root, "SideBar", drag_side, crate::ui::shell::save_widths, reset_side)?;
     let pane = Side::attach(&root)?;
     if feed {
-        pane.show_tab(true)?;
+        pane.select(Pane::Comments)?;
     }
     let actions = Actions::attach(&root, bvid)?;
     let (shown_overlay, cid) = (Rc::new(RefCell::new(None)), Rc::new(Cell::new(0)));
@@ -633,6 +655,13 @@ pub fn open(feed: bool, bvid: &str, title: &str, uploader: &str) -> Result<()> {
     on_click(&root, "Quality", choose_quality)?;
     on_click(&root, "UpLink", open_up)?;
     on_click(&root, "PlayPause", toggle_play)?;
+    on_click(&root, "Prev", || queue::step(-1))?;
+    on_click(&root, "Next", || queue::step(1))?;
+    if let Some(queued) = queue::view() {
+        let shown = |on| if on { Visibility::Visible } else { Visibility::Collapsed };
+        named::<IUIElement>(&root, "Prev")?.SetVisibility(shown(queued.has_previous()))?;
+        named::<IUIElement>(&root, "Next")?.SetVisibility(shown(queued.has_next()))?;
+    }
     on_click(&root, "DanmakuSwitch", toggle_danmaku)?;
     keep(
         named::<IUIElement>(&root, "Video")?
@@ -715,7 +744,7 @@ pub fn open(feed: bool, bvid: &str, title: &str, uploader: &str) -> Result<()> {
 /// video and never repeats the last button; in the words style they show no icons.
 fn settle_buttons(root: &IFrameworkElement) -> Result<()> {
     let words = shell().is_some_and(|s| s.prefs().words);
-    let plain = ["Back", "Full", "SendButton", "Prev", "Next", "Normal", "TabComments", "TabRelated"];
+    let plain = ["Back", "Full", "SendButton", "Prev", "Next", "Normal", "TabComments", "TabRelated", "TabQueue"];
     let acting = ["ActLike", "ActCoin", "ActFav", "ActLater", "ActDanmaku", "ActFollow", "ActComment"];
     for name in plain.into_iter().chain(acting) {
         if let Ok(button) = named::<IFrameworkElement4>(root, name) {
@@ -876,6 +905,7 @@ fn handover_step() -> bool {
 fn take_over(page: &Page, standby: Standby, playing: bool) -> Result<()> {
     let Standby { player, source, offer, .. } = standby;
     report_failures(&player)?;
+    report_end(&player)?;
     let control = player.cast::<IMediaPlayer>()?;
     control.SetIsLoopingEnabled(page.feed)?;
     if playing {
@@ -1041,6 +1071,22 @@ fn send_typed() -> Result<()> {
 }
 
 /// A failure in the player shows on the page.
+/// The video's end moves a queue on to the next one.
+fn report_end(player: &MediaPlayer) -> Result<()> {
+    let Some(dispatcher) = shell().map(|s| s.dispatcher.clone()) else { return Ok(()) };
+    let run = RUN.load(Ordering::Relaxed);
+    let revoker =
+        player.cast::<IMediaPlayer>()?.MediaEnded(move |_: Ref<MediaPlayer>, _: Ref<windows_core::IInspectable>| {
+            post(&dispatcher, move || {
+                if RUN.load(Ordering::Relaxed) == run {
+                    queue::ended();
+                }
+            });
+        })?;
+    keep(revoker);
+    Ok(())
+}
+
 fn report_failures(player: &MediaPlayer) -> Result<()> {
     let Some(dispatcher) = shell().map(|s| s.dispatcher.clone()) else { return Ok(()) };
     let run = RUN.load(Ordering::Relaxed);
@@ -1069,6 +1115,7 @@ fn report_failures(player: &MediaPlayer) -> Result<()> {
 fn play(root: &IFrameworkElement, source: &MediaSource) -> Result<MediaPlaybackSession> {
     let player = media::play(&named::<IMediaPlayerElement>(root, "Video")?, source)?;
     report_failures(&player)?;
+    report_end(&player)?;
     if page().is_some_and(|p| p.feed) {
         player.cast::<IMediaPlayer>()?.SetIsLoopingEnabled(true)?;
     }
