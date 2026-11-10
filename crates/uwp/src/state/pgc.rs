@@ -10,14 +10,15 @@ const POSTER_MIN: f64 = 150.0;
 const POSTER_COLUMNS: (u32, u32) = (3, 8);
 /// Room under a poster for its three lines.
 const POSTER_TEXT: f64 = 64.0;
-const POSTER_GAP: f64 = 12.0;
+/// A poster's margin all round, as a home card's.
+const POSTER_MARGIN: f64 = 7.0;
 
 /// Columns, cell width and cell height for posters in `width`.
 pub fn poster_cell(width: f64) -> (u32, f64, f64) {
     let columns = ((width / POSTER_MIN).floor() as u32).clamp(POSTER_COLUMNS.0, POSTER_COLUMNS.1);
     let cell = (width / f64::from(columns)).floor().max(1.0);
-    let poster = ((cell - POSTER_GAP).max(1.0) * 4.0 / 3.0).floor();
-    (columns, cell, poster + POSTER_TEXT)
+    let poster = ((cell - 2.0 * POSTER_MARGIN).max(1.0) * 4.0 / 3.0).floor();
+    (columns, cell, poster + POSTER_TEXT + 2.0 * POSTER_MARGIN)
 }
 
 /// A poster at `width` pixels: B站's image server scales it down, as the originals are PNGs of a
@@ -71,7 +72,7 @@ mod tests {
         assert_eq!(poster_cell(300.0).0, 3);
         let (columns, cell, height) = poster_cell(900.0);
         assert_eq!((columns, cell), (6, 150.0));
-        assert_eq!(height, ((150.0_f64 - 12.0) * 4.0 / 3.0).floor() + 64.0);
+        assert_eq!(height, ((150.0_f64 - 14.0) * 4.0 / 3.0).floor() + 64.0 + 14.0);
         assert_eq!(poster_cell(5000.0).0, 8);
     }
 

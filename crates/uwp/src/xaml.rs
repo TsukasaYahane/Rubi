@@ -4309,6 +4309,29 @@ impl windows_core::RuntimeType for FlowDirection {
 }
 #[repr(transparent)]
 #[derive(Clone, Debug, Eq, PartialEq)]
+pub struct Flyout(windows_core::IUnknown);
+windows_core::imp::interface_hierarchy!(Flyout, windows_core::IUnknown, windows_core::IInspectable);
+windows_core::imp::required_hierarchy!(Flyout, FlyoutBase, DependencyObject);
+impl windows_core::RuntimeType for Flyout {
+    const SIGNATURE: windows_core::imp::ConstBuffer = windows_core::imp::ConstBuffer::for_class::<Self, IFlyout>();
+}
+unsafe impl windows_core::Interface for Flyout {
+    type Vtable = <IFlyout as windows_core::Interface>::Vtable;
+    const IID: windows_core::GUID = <IFlyout as windows_core::Interface>::IID;
+}
+impl core::ops::Deref for Flyout {
+    type Target = IFlyout;
+    fn deref(&self) -> &Self::Target {
+        unsafe { core::mem::transmute(self) }
+    }
+}
+impl windows_core::RuntimeName for Flyout {
+    const NAME: &'static str = "Windows.UI.Xaml.Controls.Flyout";
+}
+unsafe impl Send for Flyout {}
+unsafe impl Sync for Flyout {}
+#[repr(transparent)]
+#[derive(Clone, Debug, Eq, PartialEq)]
 pub struct FlyoutBase(windows_core::IUnknown);
 windows_core::imp::interface_hierarchy!(FlyoutBase, windows_core::IUnknown, windows_core::IInspectable);
 windows_core::imp::required_hierarchy!(FlyoutBase, DependencyObject);
@@ -11581,6 +11604,64 @@ windows_core::imp::interface_hierarchy!(
 #[repr(C)]
 pub struct IFileSavePickerActivatedEventArgs_Vtbl {
     pub base__: windows_core::IInspectable_Vtbl,
+}
+windows_core::imp::define_interface!(IFlyout, IFlyout_Vtbl, 0x6584ebdf_cbc7_4e19_843a_a14f24a793ea);
+impl windows_core::RuntimeType for IFlyout {
+    const SIGNATURE: windows_core::imp::ConstBuffer = windows_core::imp::ConstBuffer::for_interface::<Self>();
+}
+impl IFlyout {
+    pub fn Content(&self) -> windows_core::Result<UIElement> {
+        unsafe {
+            let mut result__ = core::mem::zeroed();
+            (windows_core::Interface::vtable(self).Content)(windows_core::Interface::as_raw(self), &mut result__)
+                .and_then(|| windows_core::imp::Type::from_abi(result__))
+        }
+    }
+    pub fn SetContent<P0>(&self, value: P0) -> windows_core::Result<()>
+    where
+        P0: windows_core::Param<UIElement>,
+    {
+        unsafe {
+            (windows_core::Interface::vtable(self).SetContent)(
+                windows_core::Interface::as_raw(self),
+                value.param().abi(),
+            )
+            .ok()
+        }
+    }
+    pub fn FlyoutPresenterStyle(&self) -> windows_core::Result<Style> {
+        unsafe {
+            let mut result__ = core::mem::zeroed();
+            (windows_core::Interface::vtable(self).FlyoutPresenterStyle)(
+                windows_core::Interface::as_raw(self),
+                &mut result__,
+            )
+            .and_then(|| windows_core::imp::Type::from_abi(result__))
+        }
+    }
+    pub fn SetFlyoutPresenterStyle<P0>(&self, value: P0) -> windows_core::Result<()>
+    where
+        P0: windows_core::Param<Style>,
+    {
+        unsafe {
+            (windows_core::Interface::vtable(self).SetFlyoutPresenterStyle)(
+                windows_core::Interface::as_raw(self),
+                value.param().abi(),
+            )
+            .ok()
+        }
+    }
+}
+#[repr(C)]
+pub struct IFlyout_Vtbl {
+    pub base__: windows_core::IInspectable_Vtbl,
+    pub Content:
+        unsafe extern "system" fn(*mut core::ffi::c_void, *mut *mut core::ffi::c_void) -> windows_core::HRESULT,
+    pub SetContent: unsafe extern "system" fn(*mut core::ffi::c_void, *mut core::ffi::c_void) -> windows_core::HRESULT,
+    pub FlyoutPresenterStyle:
+        unsafe extern "system" fn(*mut core::ffi::c_void, *mut *mut core::ffi::c_void) -> windows_core::HRESULT,
+    pub SetFlyoutPresenterStyle:
+        unsafe extern "system" fn(*mut core::ffi::c_void, *mut core::ffi::c_void) -> windows_core::HRESULT,
 }
 windows_core::imp::define_interface!(IFlyoutBase, IFlyoutBase_Vtbl, 0x723eea0b_d12e_430d_a9f0_9bb32bbf9913);
 impl windows_core::RuntimeType for IFlyoutBase {

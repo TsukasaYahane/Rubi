@@ -269,3 +269,5 @@ Windows.UI.Xaml.Hosting.IElementCompositionPreviewStatics
 Windows.Media.Playback.MediaPlayerSurface
 Windows.Media.Playback.IMediaPlayerSurface
 Windows.Media.Playback.IMediaPlayer4
+Windows.UI.Xaml.Controls.Flyout
+Windows.UI.Xaml.Controls.IFlyout

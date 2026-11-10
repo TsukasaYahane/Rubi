@@ -14,7 +14,7 @@ use crate::state::pgc::{paid, poster_cell, poster_url, season_line};
 use crate::state::settings::escape;
 use crate::ui::card_menu::{self, Choice};
 use crate::ui::rows::{Covers, add_rows, on_row, on_row_click};
-use crate::ui::shell::shell;
+use crate::ui::shell::{shell, toast};
 use crate::ui::{keep, load, named, on_click, pgc_season, post};
 use crate::xaml::{
     Color, FrameworkElement, IBorder, IContentControl, IFrameworkElement, IImage, IItemsControl, IItemsControl2,
@@ -28,6 +28,8 @@ const POSTER_DECODE_WIDTH: i32 = 300;
 const RELEASES_SHOWN: usize = 6;
 /// Rows from the end at which more load.
 const LOAD_AHEAD: usize = 10;
+/// The wall's padding either side, as the home grid's.
+const GRID_PADDING: f64 = 18.0;
 
 static NEXT_ID: AtomicU64 = AtomicU64::new(1);
 
@@ -40,19 +42,19 @@ const LAYOUT: &str = r##"
   <ContentControl x:Name="TimelineHost" IsTabStop="False" HorizontalContentAlignment="Stretch" Margin="16,0,16,6" />
   <ContentControl x:Name="FilterHost" Grid.Row="1" IsTabStop="False" HorizontalContentAlignment="Stretch"
                   Margin="16,0,16,6" />
-  <GridView x:Name="Posters" Grid.Row="2" SelectionMode="None" IsItemClickEnabled="True" Padding="16,0,4,0">
+  <GridView x:Name="Posters" Grid.Row="2" SelectionMode="None" IsItemClickEnabled="True" Padding="9,0,9,12">
     <GridView.ItemContainerTransitions><TransitionCollection /></GridView.ItemContainerTransitions>
     <GridView.ItemContainerStyle>
       <Style TargetType="GridViewItem">
         <Setter Property="Margin" Value="0" />
-        <Setter Property="Padding" Value="0,0,12,12" />
+        <Setter Property="Padding" Value="0" />
         <Setter Property="HorizontalContentAlignment" Value="Stretch" />
         <Setter Property="VerticalContentAlignment" Value="Stretch" />
       </Style>
     </GridView.ItemContainerStyle>
     <GridView.ItemsPanel><ItemsPanelTemplate><ItemsWrapGrid Orientation="Horizontal" /></ItemsPanelTemplate></GridView.ItemsPanel>
     <GridView.ItemTemplate><DataTemplate>
-      <Grid>
+      <Grid Margin="7">
         <Grid.RowDefinitions>
           <RowDefinition Height="*" /><RowDefinition Height="Auto" /><RowDefinition Height="Auto" />
           <RowDefinition Height="Auto" />
@@ -303,7 +305,9 @@ impl PgcZone {
             let chip = row.clone();
             on_click(&row, &format!("Filter{at}"), move || {
                 if let Some(zone) = weak.upgrade() {
-                    let _ = zone.offer_filter(&chip, at);
+                    if let Err(problem) = zone.offer_filter(&chip, at) {
+                        toast(&format!("菜单打不开：{}", problem.message()));
+                    }
                 }
             })?;
         }
@@ -311,7 +315,9 @@ impl PgcZone {
         let chip = row.clone();
         on_click(&row, "Order", move || {
             if let Some(zone) = weak.upgrade() {
-                let _ = zone.offer_orders(&chip);
+                if let Err(problem) = zone.offer_orders(&chip) {
+                    toast(&format!("菜单打不开：{}", problem.message()));
+                }
             }
         })?;
         named::<IContentControl>(&self.root, "FilterHost")?.SetContent(&row.cast::<UIElement>()?)
@@ -320,11 +326,11 @@ impl PgcZone {
     fn offer_filter(self: &Rc<Self>, row: &IFrameworkElement, at: usize) -> Result<()> {
         let Some(filter) = self.conditions.borrow().filters.get(at).cloned() else { return Ok(()) };
         let current = self.picked.borrow().iter().find(|(f, _)| *f == filter.field).map(|(_, v)| v.clone());
+        let chosen = filter.values.iter().position(|(value, _)| current.as_deref() == Some(value.as_str())).or(Some(0));
         let choices: Vec<Choice> = filter
             .values
             .iter()
             .map(|(value, name)| {
-                let mark = if current.as_deref() == Some(value.as_str()) { "● " } else { "" };
                 let (weak, field, value) = (Rc::downgrade(self), filter.field.clone(), value.clone());
                 let act: Rc<dyn Fn()> = Rc::new(move || {
                     if let Some(zone) = weak.upgrade() {
@@ -334,21 +340,21 @@ impl PgcZone {
                         let _ = zone.restart();
                     }
                 });
-                (format!("{mark}{name}"), act)
+                (name.clone(), act)
             })
             .collect();
-        card_menu::show_under(&named::<FrameworkElement>(row, &format!("Filter{at}"))?, choices)
+        card_menu::show_grid_under(&named::<FrameworkElement>(row, &format!("Filter{at}"))?, choices, chosen)
     }
 
     fn offer_orders(self: &Rc<Self>, row: &IFrameworkElement) -> Result<()> {
         let current = self.order.borrow().clone();
+        let chosen = self.conditions.borrow().orders.iter().position(|(value, _)| *value == current);
         let choices: Vec<Choice> = self
             .conditions
             .borrow()
             .orders
             .iter()
             .map(|(value, name)| {
-                let mark = if *value == current { "● " } else { "" };
                 let (weak, value) = (Rc::downgrade(self), value.clone());
                 let act: Rc<dyn Fn()> = Rc::new(move || {
                     if let Some(zone) = weak.upgrade() {
@@ -357,10 +363,10 @@ impl PgcZone {
                         let _ = zone.restart();
                     }
                 });
-                (format!("{mark}{name}"), act)
+                (name.clone(), act)
             })
             .collect();
-        card_menu::show_under(&named::<FrameworkElement>(row, "Order")?, choices)
+        card_menu::show_grid_under(&named::<FrameworkElement>(row, "Order")?, choices, chosen)
     }
 
     fn restart(&self) -> Result<()> {
@@ -415,7 +421,7 @@ impl PgcZone {
 
     /// Sets the poster cells for the width there is.
     pub fn fit(&self) -> Result<()> {
-        let width = self.posters.ActualWidth()? - 20.0;
+        let width = self.posters.ActualWidth()? - GRID_PADDING;
         if width <= 0.0 {
             return Ok(());
         }

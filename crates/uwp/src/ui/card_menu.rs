@@ -3,15 +3,20 @@
 
 use std::rc::Rc;
 
+use windows_collections::IVector;
 use windows_core::{IInspectable, Interface, Ref, Result};
 
 use crate::state::settings::escape;
 use crate::ui::shell::{shell, toast};
 use crate::ui::{keep, load_object, post};
+
+/// A cell of a grid menu: wide enough for a filter's longest names.
+const GRID_CELL_WIDTH: u32 = 112;
+const GRID_CELL_HEIGHT: u32 = 40;
 use crate::xaml::{
-    Clipboard, ContextRequestedEventArgs, DataPackage, FrameworkElement, IContextRequestedEventArgs, IDataPackage,
-    IFlyoutBase, IFrameworkElement, IMenuFlyout, IMenuFlyout2, IMenuFlyoutItem, IPropertyValue, IRoutedEventArgs,
-    IUIElement4, Point, RoutedEventArgs, UIElement,
+    Clipboard, ContextRequestedEventArgs, DataPackage, FrameworkElement, IButtonBase, IContextRequestedEventArgs,
+    IDataPackage, IFlyout, IFlyoutBase, IFrameworkElement, IMenuFlyout, IMenuFlyout2, IMenuFlyoutItem, IPanel,
+    IPropertyValue, IRoutedEventArgs, IUIElement4, IWindow, Point, RoutedEventArgs, UIElement, Window,
 };
 
 /// What a card's menu acts on.
@@ -42,6 +47,54 @@ pub fn attach_choices(
         },
     )?);
     Ok(())
+}
+
+/// Shows `choices` under `button` as a grid of buttons, for a list too long for one column;
+/// `chosen` is marked.
+pub fn show_grid_under(button: &FrameworkElement, choices: Vec<Choice>, chosen: Option<usize>) -> Result<()> {
+    // As many columns as the window has room for, the flyout's own padding aside.
+    let room = Window::Current()?.cast::<IWindow>()?.Bounds()?.width as f64 - 48.0;
+    let fits = ((room / f64::from(GRID_CELL_WIDTH)).floor() as usize).max(1);
+    let columns = grid_columns(choices.len()).min(fits);
+    let cells: String = choices
+        .iter()
+        .enumerate()
+        .map(|(at, (label, _))| {
+            let tint = if chosen == Some(at) { r##" Foreground="#0050EF" BorderBrush="#0050EF""## } else { "" };
+            format!(
+                r##"<Button AutomationProperties.AutomationId="Pick{at}" Content="{}" Margin="3" Padding="8,4" FontSize="13" BorderThickness="1"
+                  HorizontalAlignment="Stretch" VerticalAlignment="Stretch" Background="Transparent"{tint} />"##,
+                escape(label)
+            )
+        })
+        .collect();
+    let flyout = load_object(&format!(
+        r##"<Flyout xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+            xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml" Placement="Bottom">
+          <VariableSizedWrapGrid Orientation="Horizontal" MaximumRowsOrColumns="{columns}" ItemWidth="{GRID_CELL_WIDTH}"
+            ItemHeight="{GRID_CELL_HEIGHT}">{cells}</VariableSizedWrapGrid></Flyout>"##
+    ))?;
+    // Names inside a flyout are not found from its content: the buttons are taken in order.
+    let cells = flyout.cast::<IFlyout>()?.Content()?.cast::<IPanel>()?.Children()?.cast::<IVector<UIElement>>()?;
+    let closing = flyout.cast::<IFlyoutBase>()?;
+    for (at, (_, act)) in choices.into_iter().enumerate() {
+        let closing = closing.clone();
+        let button = cells.GetAt(at as u32)?.cast::<IButtonBase>()?;
+        keep(button.Click(move |_: Ref<IInspectable>, _: Ref<RoutedEventArgs>| {
+            let _ = closing.Hide();
+            act();
+        })?);
+    }
+    closing.ShowAt(button)
+}
+
+/// Columns for a grid menu of `count` choices.
+fn grid_columns(count: usize) -> usize {
+    match count {
+        0..=6 => 2,
+        7..=12 => 3,
+        _ => 4,
+    }
 }
 
 /// Shows `choices` under `button`.
