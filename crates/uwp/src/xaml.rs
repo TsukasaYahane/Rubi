@@ -1865,6 +1865,235 @@ impl windows_core::RuntimeType for ComponentResourceLocation {
 }
 #[repr(transparent)]
 #[derive(Clone, Debug, Eq, PartialEq)]
+pub struct CompositionAnimation(windows_core::IUnknown);
+windows_core::imp::interface_hierarchy!(CompositionAnimation, windows_core::IUnknown, windows_core::IInspectable);
+windows_core::imp::required_hierarchy!(CompositionAnimation, CompositionObject);
+impl windows_core::RuntimeType for CompositionAnimation {
+    const SIGNATURE: windows_core::imp::ConstBuffer =
+        windows_core::imp::ConstBuffer::for_class::<Self, ICompositionAnimation>();
+}
+unsafe impl windows_core::Interface for CompositionAnimation {
+    type Vtable = <ICompositionAnimation as windows_core::Interface>::Vtable;
+    const IID: windows_core::GUID = <ICompositionAnimation as windows_core::Interface>::IID;
+}
+impl core::ops::Deref for CompositionAnimation {
+    type Target = ICompositionAnimation;
+    fn deref(&self) -> &Self::Target {
+        unsafe { core::mem::transmute(self) }
+    }
+}
+impl windows_core::RuntimeName for CompositionAnimation {
+    const NAME: &'static str = "Windows.UI.Composition.CompositionAnimation";
+}
+unsafe impl Send for CompositionAnimation {}
+unsafe impl Sync for CompositionAnimation {}
+#[repr(transparent)]
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
+pub struct CompositionBackfaceVisibility(pub i32);
+impl CompositionBackfaceVisibility {
+    pub const Inherit: Self = Self(0);
+    pub const Visible: Self = Self(1);
+    pub const Hidden: Self = Self(2);
+}
+impl windows_core::imp::TypeKind for CompositionBackfaceVisibility {
+    type TypeKind = windows_core::imp::CopyType;
+}
+impl windows_core::RuntimeType for CompositionBackfaceVisibility {
+    const SIGNATURE: windows_core::imp::ConstBuffer =
+        windows_core::imp::ConstBuffer::from_slice(b"enum(Windows.UI.Composition.CompositionBackfaceVisibility;i4)");
+}
+#[repr(transparent)]
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
+pub struct CompositionBitmapInterpolationMode(pub i32);
+impl CompositionBitmapInterpolationMode {
+    pub const NearestNeighbor: Self = Self(0);
+    pub const Linear: Self = Self(1);
+    pub const MagLinearMinLinearMipLinear: Self = Self(2);
+    pub const MagLinearMinLinearMipNearest: Self = Self(3);
+    pub const MagLinearMinNearestMipLinear: Self = Self(4);
+    pub const MagLinearMinNearestMipNearest: Self = Self(5);
+    pub const MagNearestMinLinearMipLinear: Self = Self(6);
+    pub const MagNearestMinLinearMipNearest: Self = Self(7);
+    pub const MagNearestMinNearestMipLinear: Self = Self(8);
+    pub const MagNearestMinNearestMipNearest: Self = Self(9);
+}
+impl windows_core::imp::TypeKind for CompositionBitmapInterpolationMode {
+    type TypeKind = windows_core::imp::CopyType;
+}
+impl windows_core::RuntimeType for CompositionBitmapInterpolationMode {
+    const SIGNATURE: windows_core::imp::ConstBuffer = windows_core::imp::ConstBuffer::from_slice(
+        b"enum(Windows.UI.Composition.CompositionBitmapInterpolationMode;i4)",
+    );
+}
+#[repr(transparent)]
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
+pub struct CompositionBorderMode(pub i32);
+impl CompositionBorderMode {
+    pub const Inherit: Self = Self(0);
+    pub const Soft: Self = Self(1);
+    pub const Hard: Self = Self(2);
+}
+impl windows_core::imp::TypeKind for CompositionBorderMode {
+    type TypeKind = windows_core::imp::CopyType;
+}
+impl windows_core::RuntimeType for CompositionBorderMode {
+    const SIGNATURE: windows_core::imp::ConstBuffer =
+        windows_core::imp::ConstBuffer::from_slice(b"enum(Windows.UI.Composition.CompositionBorderMode;i4)");
+}
+#[repr(transparent)]
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct CompositionBrush(windows_core::IUnknown);
+windows_core::imp::interface_hierarchy!(CompositionBrush, windows_core::IUnknown, windows_core::IInspectable);
+windows_core::imp::required_hierarchy!(CompositionBrush, IClosable, CompositionObject);
+impl windows_core::RuntimeType for CompositionBrush {
+    const SIGNATURE: windows_core::imp::ConstBuffer =
+        windows_core::imp::ConstBuffer::for_class::<Self, ICompositionBrush>();
+}
+unsafe impl windows_core::Interface for CompositionBrush {
+    type Vtable = <ICompositionBrush as windows_core::Interface>::Vtable;
+    const IID: windows_core::GUID = <ICompositionBrush as windows_core::Interface>::IID;
+}
+impl core::ops::Deref for CompositionBrush {
+    type Target = ICompositionBrush;
+    fn deref(&self) -> &Self::Target {
+        unsafe { core::mem::transmute(self) }
+    }
+}
+impl windows_core::RuntimeName for CompositionBrush {
+    const NAME: &'static str = "Windows.UI.Composition.CompositionBrush";
+}
+unsafe impl Send for CompositionBrush {}
+unsafe impl Sync for CompositionBrush {}
+#[repr(transparent)]
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct CompositionClip(windows_core::IUnknown);
+windows_core::imp::interface_hierarchy!(CompositionClip, windows_core::IUnknown, windows_core::IInspectable);
+windows_core::imp::required_hierarchy!(CompositionClip, CompositionObject);
+impl windows_core::RuntimeType for CompositionClip {
+    const SIGNATURE: windows_core::imp::ConstBuffer =
+        windows_core::imp::ConstBuffer::for_class::<Self, ICompositionClip>();
+}
+unsafe impl windows_core::Interface for CompositionClip {
+    type Vtable = <ICompositionClip as windows_core::Interface>::Vtable;
+    const IID: windows_core::GUID = <ICompositionClip as windows_core::Interface>::IID;
+}
+impl core::ops::Deref for CompositionClip {
+    type Target = ICompositionClip;
+    fn deref(&self) -> &Self::Target {
+        unsafe { core::mem::transmute(self) }
+    }
+}
+impl windows_core::RuntimeName for CompositionClip {
+    const NAME: &'static str = "Windows.UI.Composition.CompositionClip";
+}
+unsafe impl Send for CompositionClip {}
+unsafe impl Sync for CompositionClip {}
+#[repr(transparent)]
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
+pub struct CompositionCompositeMode(pub i32);
+impl CompositionCompositeMode {
+    pub const Inherit: Self = Self(0);
+    pub const SourceOver: Self = Self(1);
+    pub const DestinationInvert: Self = Self(2);
+    pub const MinBlend: Self = Self(3);
+}
+impl windows_core::imp::TypeKind for CompositionCompositeMode {
+    type TypeKind = windows_core::imp::CopyType;
+}
+impl windows_core::RuntimeType for CompositionCompositeMode {
+    const SIGNATURE: windows_core::imp::ConstBuffer =
+        windows_core::imp::ConstBuffer::from_slice(b"enum(Windows.UI.Composition.CompositionCompositeMode;i4)");
+}
+#[repr(transparent)]
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct CompositionObject(windows_core::IUnknown);
+windows_core::imp::interface_hierarchy!(CompositionObject, windows_core::IUnknown, windows_core::IInspectable);
+windows_core::imp::required_hierarchy!(CompositionObject, IClosable);
+impl windows_core::RuntimeType for CompositionObject {
+    const SIGNATURE: windows_core::imp::ConstBuffer =
+        windows_core::imp::ConstBuffer::for_class::<Self, ICompositionObject>();
+}
+unsafe impl windows_core::Interface for CompositionObject {
+    type Vtable = <ICompositionObject as windows_core::Interface>::Vtable;
+    const IID: windows_core::GUID = <ICompositionObject as windows_core::Interface>::IID;
+}
+impl core::ops::Deref for CompositionObject {
+    type Target = ICompositionObject;
+    fn deref(&self) -> &Self::Target {
+        unsafe { core::mem::transmute(self) }
+    }
+}
+impl windows_core::RuntimeName for CompositionObject {
+    const NAME: &'static str = "Windows.UI.Composition.CompositionObject";
+}
+unsafe impl Send for CompositionObject {}
+unsafe impl Sync for CompositionObject {}
+#[repr(transparent)]
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct CompositionPropertySet(windows_core::IUnknown);
+windows_core::imp::interface_hierarchy!(CompositionPropertySet, windows_core::IUnknown, windows_core::IInspectable);
+windows_core::imp::required_hierarchy!(CompositionPropertySet, CompositionObject);
+impl windows_core::RuntimeType for CompositionPropertySet {
+    const SIGNATURE: windows_core::imp::ConstBuffer =
+        windows_core::imp::ConstBuffer::for_class::<Self, ICompositionPropertySet>();
+}
+unsafe impl windows_core::Interface for CompositionPropertySet {
+    type Vtable = <ICompositionPropertySet as windows_core::Interface>::Vtable;
+    const IID: windows_core::GUID = <ICompositionPropertySet as windows_core::Interface>::IID;
+}
+impl core::ops::Deref for CompositionPropertySet {
+    type Target = ICompositionPropertySet;
+    fn deref(&self) -> &Self::Target {
+        unsafe { core::mem::transmute(self) }
+    }
+}
+impl windows_core::RuntimeName for CompositionPropertySet {
+    const NAME: &'static str = "Windows.UI.Composition.CompositionPropertySet";
+}
+unsafe impl Send for CompositionPropertySet {}
+unsafe impl Sync for CompositionPropertySet {}
+#[repr(transparent)]
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
+pub struct CompositionStretch(pub i32);
+impl CompositionStretch {
+    pub const None: Self = Self(0);
+    pub const Fill: Self = Self(1);
+    pub const Uniform: Self = Self(2);
+    pub const UniformToFill: Self = Self(3);
+}
+impl windows_core::imp::TypeKind for CompositionStretch {
+    type TypeKind = windows_core::imp::CopyType;
+}
+impl windows_core::RuntimeType for CompositionStretch {
+    const SIGNATURE: windows_core::imp::ConstBuffer =
+        windows_core::imp::ConstBuffer::from_slice(b"enum(Windows.UI.Composition.CompositionStretch;i4)");
+}
+#[repr(transparent)]
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct CompositionSurfaceBrush(windows_core::IUnknown);
+windows_core::imp::interface_hierarchy!(CompositionSurfaceBrush, windows_core::IUnknown, windows_core::IInspectable);
+windows_core::imp::required_hierarchy!(CompositionSurfaceBrush, IClosable, CompositionBrush, CompositionObject);
+impl windows_core::RuntimeType for CompositionSurfaceBrush {
+    const SIGNATURE: windows_core::imp::ConstBuffer =
+        windows_core::imp::ConstBuffer::for_class::<Self, ICompositionSurfaceBrush>();
+}
+unsafe impl windows_core::Interface for CompositionSurfaceBrush {
+    type Vtable = <ICompositionSurfaceBrush as windows_core::Interface>::Vtable;
+    const IID: windows_core::GUID = <ICompositionSurfaceBrush as windows_core::Interface>::IID;
+}
+impl core::ops::Deref for CompositionSurfaceBrush {
+    type Target = ICompositionSurfaceBrush;
+    fn deref(&self) -> &Self::Target {
+        unsafe { core::mem::transmute(self) }
+    }
+}
+impl windows_core::RuntimeName for CompositionSurfaceBrush {
+    const NAME: &'static str = "Windows.UI.Composition.CompositionSurfaceBrush";
+}
+unsafe impl Send for CompositionSurfaceBrush {}
+unsafe impl Sync for CompositionSurfaceBrush {}
+#[repr(transparent)]
+#[derive(Clone, Debug, Eq, PartialEq)]
 pub struct CompositionTarget(windows_core::IUnknown);
 windows_core::imp::interface_hierarchy!(CompositionTarget, windows_core::IUnknown, windows_core::IInspectable);
 impl CompositionTarget {
@@ -1949,6 +2178,29 @@ unsafe impl Send for CompositionTarget {}
 unsafe impl Sync for CompositionTarget {}
 #[repr(transparent)]
 #[derive(Clone, Debug, Eq, PartialEq)]
+pub struct Compositor(windows_core::IUnknown);
+windows_core::imp::interface_hierarchy!(Compositor, windows_core::IUnknown, windows_core::IInspectable);
+windows_core::imp::required_hierarchy!(Compositor, IClosable);
+impl windows_core::RuntimeType for Compositor {
+    const SIGNATURE: windows_core::imp::ConstBuffer = windows_core::imp::ConstBuffer::for_class::<Self, ICompositor>();
+}
+unsafe impl windows_core::Interface for Compositor {
+    type Vtable = <ICompositor as windows_core::Interface>::Vtable;
+    const IID: windows_core::GUID = <ICompositor as windows_core::Interface>::IID;
+}
+impl core::ops::Deref for Compositor {
+    type Target = ICompositor;
+    fn deref(&self) -> &Self::Target {
+        unsafe { core::mem::transmute(self) }
+    }
+}
+impl windows_core::RuntimeName for Compositor {
+    const NAME: &'static str = "Windows.UI.Composition.Compositor";
+}
+unsafe impl Send for Compositor {}
+unsafe impl Sync for Compositor {}
+#[repr(transparent)]
+#[derive(Clone, Debug, Eq, PartialEq)]
 pub struct ContainerContentChangingEventArgs(windows_core::IUnknown);
 windows_core::imp::interface_hierarchy!(
     ContainerContentChangingEventArgs,
@@ -1974,6 +2226,30 @@ impl windows_core::RuntimeName for ContainerContentChangingEventArgs {
 }
 unsafe impl Send for ContainerContentChangingEventArgs {}
 unsafe impl Sync for ContainerContentChangingEventArgs {}
+#[repr(transparent)]
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct ContainerVisual(windows_core::IUnknown);
+windows_core::imp::interface_hierarchy!(ContainerVisual, windows_core::IUnknown, windows_core::IInspectable);
+windows_core::imp::required_hierarchy!(ContainerVisual, IClosable, Visual, CompositionObject);
+impl windows_core::RuntimeType for ContainerVisual {
+    const SIGNATURE: windows_core::imp::ConstBuffer =
+        windows_core::imp::ConstBuffer::for_class::<Self, IContainerVisual>();
+}
+unsafe impl windows_core::Interface for ContainerVisual {
+    type Vtable = <IContainerVisual as windows_core::Interface>::Vtable;
+    const IID: windows_core::GUID = <IContainerVisual as windows_core::Interface>::IID;
+}
+impl core::ops::Deref for ContainerVisual {
+    type Target = IContainerVisual;
+    fn deref(&self) -> &Self::Target {
+        unsafe { core::mem::transmute(self) }
+    }
+}
+impl windows_core::RuntimeName for ContainerVisual {
+    const NAME: &'static str = "Windows.UI.Composition.ContainerVisual";
+}
+unsafe impl Send for ContainerVisual {}
+unsafe impl Sync for ContainerVisual {}
 #[repr(transparent)]
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct ContentControl(windows_core::IUnknown);
@@ -3647,6 +3923,97 @@ impl<F: Fn(windows_core::Ref<windows_core::IInspectable>, windows_core::Ref<Drag
         }
     }
 }
+#[repr(transparent)]
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct ElementCompositionPreview(windows_core::IUnknown);
+windows_core::imp::interface_hierarchy!(ElementCompositionPreview, windows_core::IUnknown, windows_core::IInspectable);
+impl ElementCompositionPreview {
+    pub fn GetElementVisual<P0>(element: P0) -> windows_core::Result<Visual>
+    where
+        P0: windows_core::Param<UIElement>,
+    {
+        Self::IElementCompositionPreviewStatics(|this| unsafe {
+            let mut result__ = core::mem::zeroed();
+            (windows_core::Interface::vtable(this).GetElementVisual)(
+                windows_core::Interface::as_raw(this),
+                element.param().abi(),
+                &mut result__,
+            )
+            .and_then(|| windows_core::imp::Type::from_abi(result__))
+        })
+    }
+    pub fn GetElementChildVisual<P0>(element: P0) -> windows_core::Result<Visual>
+    where
+        P0: windows_core::Param<UIElement>,
+    {
+        Self::IElementCompositionPreviewStatics(|this| unsafe {
+            let mut result__ = core::mem::zeroed();
+            (windows_core::Interface::vtable(this).GetElementChildVisual)(
+                windows_core::Interface::as_raw(this),
+                element.param().abi(),
+                &mut result__,
+            )
+            .and_then(|| windows_core::imp::Type::from_abi(result__))
+        })
+    }
+    pub fn SetElementChildVisual<P0, P1>(element: P0, visual: P1) -> windows_core::Result<()>
+    where
+        P0: windows_core::Param<UIElement>,
+        P1: windows_core::Param<Visual>,
+    {
+        Self::IElementCompositionPreviewStatics(|this| unsafe {
+            (windows_core::Interface::vtable(this).SetElementChildVisual)(
+                windows_core::Interface::as_raw(this),
+                element.param().abi(),
+                visual.param().abi(),
+            )
+            .ok()
+        })
+    }
+    pub fn GetScrollViewerManipulationPropertySet<P0>(scrollviewer: P0) -> windows_core::Result<CompositionPropertySet>
+    where
+        P0: windows_core::Param<ScrollViewer>,
+    {
+        Self::IElementCompositionPreviewStatics(|this| unsafe {
+            let mut result__ = core::mem::zeroed();
+            (windows_core::Interface::vtable(this).GetScrollViewerManipulationPropertySet)(
+                windows_core::Interface::as_raw(this),
+                scrollviewer.param().abi(),
+                &mut result__,
+            )
+            .and_then(|| windows_core::imp::Type::from_abi(result__))
+        })
+    }
+    fn IElementCompositionPreviewStatics<
+        R,
+        F: FnOnce(&IElementCompositionPreviewStatics) -> windows_core::Result<R>,
+    >(
+        callback: F,
+    ) -> windows_core::Result<R> {
+        static SHARED: windows_core::imp::FactoryCache<ElementCompositionPreview, IElementCompositionPreviewStatics> =
+            windows_core::imp::FactoryCache::new();
+        SHARED.call(callback)
+    }
+}
+impl windows_core::RuntimeType for ElementCompositionPreview {
+    const SIGNATURE: windows_core::imp::ConstBuffer =
+        windows_core::imp::ConstBuffer::for_class::<Self, IElementCompositionPreview>();
+}
+unsafe impl windows_core::Interface for ElementCompositionPreview {
+    type Vtable = <IElementCompositionPreview as windows_core::Interface>::Vtable;
+    const IID: windows_core::GUID = <IElementCompositionPreview as windows_core::Interface>::IID;
+}
+impl core::ops::Deref for ElementCompositionPreview {
+    type Target = IElementCompositionPreview;
+    fn deref(&self) -> &Self::Target {
+        unsafe { core::mem::transmute(self) }
+    }
+}
+impl windows_core::RuntimeName for ElementCompositionPreview {
+    const NAME: &'static str = "Windows.UI.Xaml.Hosting.ElementCompositionPreview";
+}
+unsafe impl Send for ElementCompositionPreview {}
+unsafe impl Sync for ElementCompositionPreview {}
 #[repr(transparent)]
 #[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
 pub struct ElementTheme(pub i32);
@@ -8043,6 +8410,244 @@ pub struct ICommand_Vtbl {
     pub base__: windows_core::IInspectable_Vtbl,
 }
 windows_core::imp::define_interface!(
+    ICompositionAnimation,
+    ICompositionAnimation_Vtbl,
+    0x464c4c2c_1caa_4061_9b40_e13fde1503ca
+);
+impl windows_core::RuntimeType for ICompositionAnimation {
+    const SIGNATURE: windows_core::imp::ConstBuffer = windows_core::imp::ConstBuffer::for_interface::<Self>();
+}
+#[repr(C)]
+pub struct ICompositionAnimation_Vtbl {
+    pub base__: windows_core::IInspectable_Vtbl,
+}
+windows_core::imp::define_interface!(ICompositionBrush, ICompositionBrush_Vtbl, 0xab0d7608_30c0_40e9_b568_b60a6bd1fb46);
+impl windows_core::RuntimeType for ICompositionBrush {
+    const SIGNATURE: windows_core::imp::ConstBuffer = windows_core::imp::ConstBuffer::for_interface::<Self>();
+}
+#[repr(C)]
+pub struct ICompositionBrush_Vtbl {
+    pub base__: windows_core::IInspectable_Vtbl,
+}
+windows_core::imp::define_interface!(ICompositionClip, ICompositionClip_Vtbl, 0x1ccd2a52_cfc7_4ace_9983_146bb8eb6a3c);
+impl windows_core::RuntimeType for ICompositionClip {
+    const SIGNATURE: windows_core::imp::ConstBuffer = windows_core::imp::ConstBuffer::for_interface::<Self>();
+}
+#[repr(C)]
+pub struct ICompositionClip_Vtbl {
+    pub base__: windows_core::IInspectable_Vtbl,
+}
+windows_core::imp::define_interface!(
+    ICompositionObject,
+    ICompositionObject_Vtbl,
+    0xbcb4ad45_7609_4550_934f_16002a68fded
+);
+impl windows_core::RuntimeType for ICompositionObject {
+    const SIGNATURE: windows_core::imp::ConstBuffer = windows_core::imp::ConstBuffer::for_interface::<Self>();
+}
+impl ICompositionObject {
+    pub fn Compositor(&self) -> windows_core::Result<Compositor> {
+        unsafe {
+            let mut result__ = core::mem::zeroed();
+            (windows_core::Interface::vtable(self).Compositor)(windows_core::Interface::as_raw(self), &mut result__)
+                .and_then(|| windows_core::imp::Type::from_abi(result__))
+        }
+    }
+    pub fn Dispatcher(&self) -> windows_core::Result<CoreDispatcher> {
+        unsafe {
+            let mut result__ = core::mem::zeroed();
+            (windows_core::Interface::vtable(self).Dispatcher)(windows_core::Interface::as_raw(self), &mut result__)
+                .and_then(|| windows_core::imp::Type::from_abi(result__))
+        }
+    }
+    pub fn Properties(&self) -> windows_core::Result<CompositionPropertySet> {
+        unsafe {
+            let mut result__ = core::mem::zeroed();
+            (windows_core::Interface::vtable(self).Properties)(windows_core::Interface::as_raw(self), &mut result__)
+                .and_then(|| windows_core::imp::Type::from_abi(result__))
+        }
+    }
+    pub fn StartAnimation<P1>(&self, propertyname: &str, animation: P1) -> windows_core::Result<()>
+    where
+        P1: windows_core::Param<CompositionAnimation>,
+    {
+        unsafe {
+            (windows_core::Interface::vtable(self).StartAnimation)(
+                windows_core::Interface::as_raw(self),
+                core::mem::transmute_copy(&windows_core::HSTRING::from(propertyname)),
+                animation.param().abi(),
+            )
+            .ok()
+        }
+    }
+    pub fn StopAnimation(&self, propertyname: &str) -> windows_core::Result<()> {
+        unsafe {
+            (windows_core::Interface::vtable(self).StopAnimation)(
+                windows_core::Interface::as_raw(self),
+                core::mem::transmute_copy(&windows_core::HSTRING::from(propertyname)),
+            )
+            .ok()
+        }
+    }
+}
+#[repr(C)]
+pub struct ICompositionObject_Vtbl {
+    pub base__: windows_core::IInspectable_Vtbl,
+    pub Compositor:
+        unsafe extern "system" fn(*mut core::ffi::c_void, *mut *mut core::ffi::c_void) -> windows_core::HRESULT,
+    pub Dispatcher:
+        unsafe extern "system" fn(*mut core::ffi::c_void, *mut *mut core::ffi::c_void) -> windows_core::HRESULT,
+    pub Properties:
+        unsafe extern "system" fn(*mut core::ffi::c_void, *mut *mut core::ffi::c_void) -> windows_core::HRESULT,
+    pub StartAnimation: unsafe extern "system" fn(
+        *mut core::ffi::c_void,
+        *mut core::ffi::c_void,
+        *mut core::ffi::c_void,
+    ) -> windows_core::HRESULT,
+    pub StopAnimation:
+        unsafe extern "system" fn(*mut core::ffi::c_void, *mut core::ffi::c_void) -> windows_core::HRESULT,
+}
+windows_core::imp::define_interface!(
+    ICompositionPropertySet,
+    ICompositionPropertySet_Vtbl,
+    0xc9d6d202_5f67_4453_9117_9eadd430d3c2
+);
+impl windows_core::RuntimeType for ICompositionPropertySet {
+    const SIGNATURE: windows_core::imp::ConstBuffer = windows_core::imp::ConstBuffer::for_interface::<Self>();
+}
+#[repr(C)]
+pub struct ICompositionPropertySet_Vtbl {
+    pub base__: windows_core::IInspectable_Vtbl,
+}
+windows_core::imp::define_interface!(
+    ICompositionSurface,
+    ICompositionSurface_Vtbl,
+    0x1527540d_42c7_47a6_a408_668f79a90dfb
+);
+impl windows_core::RuntimeType for ICompositionSurface {
+    const SIGNATURE: windows_core::imp::ConstBuffer = windows_core::imp::ConstBuffer::for_interface::<Self>();
+}
+windows_core::imp::interface_hierarchy!(ICompositionSurface, windows_core::IUnknown, windows_core::IInspectable);
+#[repr(C)]
+pub struct ICompositionSurface_Vtbl {
+    pub base__: windows_core::IInspectable_Vtbl,
+}
+windows_core::imp::define_interface!(
+    ICompositionSurfaceBrush,
+    ICompositionSurfaceBrush_Vtbl,
+    0xad016d79_1e4c_4c0d_9c29_83338c87c162
+);
+impl windows_core::RuntimeType for ICompositionSurfaceBrush {
+    const SIGNATURE: windows_core::imp::ConstBuffer = windows_core::imp::ConstBuffer::for_interface::<Self>();
+}
+impl ICompositionSurfaceBrush {
+    pub fn BitmapInterpolationMode(&self) -> windows_core::Result<CompositionBitmapInterpolationMode> {
+        unsafe {
+            let mut result__ = core::mem::zeroed();
+            (windows_core::Interface::vtable(self).BitmapInterpolationMode)(
+                windows_core::Interface::as_raw(self),
+                &mut result__,
+            )
+            .map(|| result__)
+        }
+    }
+    pub fn SetBitmapInterpolationMode(&self, value: CompositionBitmapInterpolationMode) -> windows_core::Result<()> {
+        unsafe {
+            (windows_core::Interface::vtable(self).SetBitmapInterpolationMode)(
+                windows_core::Interface::as_raw(self),
+                value,
+            )
+            .ok()
+        }
+    }
+    pub fn HorizontalAlignmentRatio(&self) -> windows_core::Result<f32> {
+        unsafe {
+            let mut result__ = core::mem::zeroed();
+            (windows_core::Interface::vtable(self).HorizontalAlignmentRatio)(
+                windows_core::Interface::as_raw(self),
+                &mut result__,
+            )
+            .map(|| result__)
+        }
+    }
+    pub fn SetHorizontalAlignmentRatio(&self, value: f32) -> windows_core::Result<()> {
+        unsafe {
+            (windows_core::Interface::vtable(self).SetHorizontalAlignmentRatio)(
+                windows_core::Interface::as_raw(self),
+                value,
+            )
+            .ok()
+        }
+    }
+    pub fn Stretch(&self) -> windows_core::Result<CompositionStretch> {
+        unsafe {
+            let mut result__ = core::mem::zeroed();
+            (windows_core::Interface::vtable(self).Stretch)(windows_core::Interface::as_raw(self), &mut result__)
+                .map(|| result__)
+        }
+    }
+    pub fn SetStretch(&self, value: CompositionStretch) -> windows_core::Result<()> {
+        unsafe { (windows_core::Interface::vtable(self).SetStretch)(windows_core::Interface::as_raw(self), value).ok() }
+    }
+    pub fn Surface(&self) -> windows_core::Result<ICompositionSurface> {
+        unsafe {
+            let mut result__ = core::mem::zeroed();
+            (windows_core::Interface::vtable(self).Surface)(windows_core::Interface::as_raw(self), &mut result__)
+                .and_then(|| windows_core::imp::Type::from_abi(result__))
+        }
+    }
+    pub fn SetSurface<P0>(&self, value: P0) -> windows_core::Result<()>
+    where
+        P0: windows_core::Param<ICompositionSurface>,
+    {
+        unsafe {
+            (windows_core::Interface::vtable(self).SetSurface)(
+                windows_core::Interface::as_raw(self),
+                value.param().abi(),
+            )
+            .ok()
+        }
+    }
+    pub fn VerticalAlignmentRatio(&self) -> windows_core::Result<f32> {
+        unsafe {
+            let mut result__ = core::mem::zeroed();
+            (windows_core::Interface::vtable(self).VerticalAlignmentRatio)(
+                windows_core::Interface::as_raw(self),
+                &mut result__,
+            )
+            .map(|| result__)
+        }
+    }
+    pub fn SetVerticalAlignmentRatio(&self, value: f32) -> windows_core::Result<()> {
+        unsafe {
+            (windows_core::Interface::vtable(self).SetVerticalAlignmentRatio)(
+                windows_core::Interface::as_raw(self),
+                value,
+            )
+            .ok()
+        }
+    }
+}
+#[repr(C)]
+pub struct ICompositionSurfaceBrush_Vtbl {
+    pub base__: windows_core::IInspectable_Vtbl,
+    pub BitmapInterpolationMode: unsafe extern "system" fn(
+        *mut core::ffi::c_void,
+        *mut CompositionBitmapInterpolationMode,
+    ) -> windows_core::HRESULT,
+    pub SetBitmapInterpolationMode:
+        unsafe extern "system" fn(*mut core::ffi::c_void, CompositionBitmapInterpolationMode) -> windows_core::HRESULT,
+    pub HorizontalAlignmentRatio: unsafe extern "system" fn(*mut core::ffi::c_void, *mut f32) -> windows_core::HRESULT,
+    pub SetHorizontalAlignmentRatio: unsafe extern "system" fn(*mut core::ffi::c_void, f32) -> windows_core::HRESULT,
+    pub Stretch: unsafe extern "system" fn(*mut core::ffi::c_void, *mut CompositionStretch) -> windows_core::HRESULT,
+    pub SetStretch: unsafe extern "system" fn(*mut core::ffi::c_void, CompositionStretch) -> windows_core::HRESULT,
+    pub Surface:
+        unsafe extern "system" fn(*mut core::ffi::c_void, *mut *mut core::ffi::c_void) -> windows_core::HRESULT,
+    pub SetSurface: unsafe extern "system" fn(*mut core::ffi::c_void, *mut core::ffi::c_void) -> windows_core::HRESULT,
+    pub VerticalAlignmentRatio: unsafe extern "system" fn(*mut core::ffi::c_void, *mut f32) -> windows_core::HRESULT,
+    pub SetVerticalAlignmentRatio: unsafe extern "system" fn(*mut core::ffi::c_void, f32) -> windows_core::HRESULT,
+}
+windows_core::imp::define_interface!(
     ICompositionTarget,
     ICompositionTarget_Vtbl,
     0x26cfbff0_713c_4bec_8803_e101f7b14ed3
@@ -8071,6 +8676,64 @@ pub struct ICompositionTargetStatics_Vtbl {
     pub SurfaceContentsLost:
         unsafe extern "system" fn(*mut core::ffi::c_void, *mut core::ffi::c_void, *mut i64) -> windows_core::HRESULT,
     pub RemoveSurfaceContentsLost: unsafe extern "system" fn(*mut core::ffi::c_void, i64) -> windows_core::HRESULT,
+}
+windows_core::imp::define_interface!(ICompositor, ICompositor_Vtbl, 0xb403ca50_7f8c_4e83_985f_cc45060036d8);
+impl windows_core::RuntimeType for ICompositor {
+    const SIGNATURE: windows_core::imp::ConstBuffer = windows_core::imp::ConstBuffer::for_interface::<Self>();
+}
+impl ICompositor {
+    pub fn CreateSpriteVisual(&self) -> windows_core::Result<SpriteVisual> {
+        unsafe {
+            let mut result__ = core::mem::zeroed();
+            (windows_core::Interface::vtable(self).CreateSpriteVisual)(
+                windows_core::Interface::as_raw(self),
+                &mut result__,
+            )
+            .and_then(|| windows_core::imp::Type::from_abi(result__))
+        }
+    }
+    pub fn CreateSurfaceBrushWithSurface<P0>(&self, surface: P0) -> windows_core::Result<CompositionSurfaceBrush>
+    where
+        P0: windows_core::Param<ICompositionSurface>,
+    {
+        unsafe {
+            let mut result__ = core::mem::zeroed();
+            (windows_core::Interface::vtable(self).CreateSurfaceBrushWithSurface)(
+                windows_core::Interface::as_raw(self),
+                surface.param().abi(),
+                &mut result__,
+            )
+            .and_then(|| windows_core::imp::Type::from_abi(result__))
+        }
+    }
+}
+#[repr(C)]
+pub struct ICompositor_Vtbl {
+    pub base__: windows_core::IInspectable_Vtbl,
+    CreateColorKeyFrameAnimation: usize,
+    CreateColorBrush: usize,
+    CreateColorBrushWithColor: usize,
+    CreateContainerVisual: usize,
+    CreateCubicBezierEasingFunction: usize,
+    CreateEffectFactory: usize,
+    CreateEffectFactoryWithProperties: usize,
+    CreateExpressionAnimation: usize,
+    CreateExpressionAnimationWithExpression: usize,
+    CreateInsetClip: usize,
+    CreateInsetClipWithInsets: usize,
+    CreateLinearEasingFunction: usize,
+    CreatePropertySet: usize,
+    CreateQuaternionKeyFrameAnimation: usize,
+    CreateScalarKeyFrameAnimation: usize,
+    CreateScopedBatch: usize,
+    pub CreateSpriteVisual:
+        unsafe extern "system" fn(*mut core::ffi::c_void, *mut *mut core::ffi::c_void) -> windows_core::HRESULT,
+    CreateSurfaceBrush: usize,
+    pub CreateSurfaceBrushWithSurface: unsafe extern "system" fn(
+        *mut core::ffi::c_void,
+        *mut core::ffi::c_void,
+        *mut *mut core::ffi::c_void,
+    ) -> windows_core::HRESULT,
 }
 windows_core::imp::define_interface!(
     IContainerContentChangingEventArgs,
@@ -8167,6 +8830,14 @@ pub struct IContainerContentChangingEventArgs_Vtbl {
         unsafe extern "system" fn(*mut core::ffi::c_void, *mut core::ffi::c_void) -> windows_core::HRESULT,
     pub RegisterUpdateCallbackWithPhase:
         unsafe extern "system" fn(*mut core::ffi::c_void, u32, *mut core::ffi::c_void) -> windows_core::HRESULT,
+}
+windows_core::imp::define_interface!(IContainerVisual, IContainerVisual_Vtbl, 0x02f6bc74_ed20_4773_afe6_d49b4a93db32);
+impl windows_core::RuntimeType for IContainerVisual {
+    const SIGNATURE: windows_core::imp::ConstBuffer = windows_core::imp::ConstBuffer::for_interface::<Self>();
+}
+#[repr(C)]
+pub struct IContainerVisual_Vtbl {
+    pub base__: windows_core::IInspectable_Vtbl,
 }
 windows_core::imp::define_interface!(IContentControl, IContentControl_Vtbl, 0xa26dd1dc_cd44_435c_be94_01d6241c231c);
 impl windows_core::RuntimeType for IContentControl {
@@ -10807,6 +11478,50 @@ impl windows_core::RuntimeType for IDragStartedEventArgs {
 #[repr(C)]
 pub struct IDragStartedEventArgs_Vtbl {
     pub base__: windows_core::IInspectable_Vtbl,
+}
+windows_core::imp::define_interface!(
+    IElementCompositionPreview,
+    IElementCompositionPreview_Vtbl,
+    0xb6f1a676_cfe6_46ac_acf6_c4687bb65e60
+);
+impl windows_core::RuntimeType for IElementCompositionPreview {
+    const SIGNATURE: windows_core::imp::ConstBuffer = windows_core::imp::ConstBuffer::for_interface::<Self>();
+}
+#[repr(C)]
+pub struct IElementCompositionPreview_Vtbl {
+    pub base__: windows_core::IInspectable_Vtbl,
+}
+windows_core::imp::define_interface!(
+    IElementCompositionPreviewStatics,
+    IElementCompositionPreviewStatics_Vtbl,
+    0x08c92b38_ec99_4c55_bc85_a1c180b27646
+);
+impl windows_core::RuntimeType for IElementCompositionPreviewStatics {
+    const SIGNATURE: windows_core::imp::ConstBuffer = windows_core::imp::ConstBuffer::for_interface::<Self>();
+}
+#[repr(C)]
+pub struct IElementCompositionPreviewStatics_Vtbl {
+    pub base__: windows_core::IInspectable_Vtbl,
+    pub GetElementVisual: unsafe extern "system" fn(
+        *mut core::ffi::c_void,
+        *mut core::ffi::c_void,
+        *mut *mut core::ffi::c_void,
+    ) -> windows_core::HRESULT,
+    pub GetElementChildVisual: unsafe extern "system" fn(
+        *mut core::ffi::c_void,
+        *mut core::ffi::c_void,
+        *mut *mut core::ffi::c_void,
+    ) -> windows_core::HRESULT,
+    pub SetElementChildVisual: unsafe extern "system" fn(
+        *mut core::ffi::c_void,
+        *mut core::ffi::c_void,
+        *mut core::ffi::c_void,
+    ) -> windows_core::HRESULT,
+    pub GetScrollViewerManipulationPropertySet: unsafe extern "system" fn(
+        *mut core::ffi::c_void,
+        *mut core::ffi::c_void,
+        *mut *mut core::ffi::c_void,
+    ) -> windows_core::HRESULT,
 }
 windows_core::imp::define_interface!(
     IExceptionRoutedEventArgs,
@@ -15804,6 +16519,41 @@ pub struct IMediaPlayer3_Vtbl {
     pub GetAsCastingSource:
         unsafe extern "system" fn(*mut core::ffi::c_void, *mut *mut core::ffi::c_void) -> windows_core::HRESULT,
 }
+windows_core::imp::define_interface!(IMediaPlayer4, IMediaPlayer4_Vtbl, 0x80035db0_7448_4770_afcf_2a57450914c5);
+impl windows_core::RuntimeType for IMediaPlayer4 {
+    const SIGNATURE: windows_core::imp::ConstBuffer = windows_core::imp::ConstBuffer::for_interface::<Self>();
+}
+impl IMediaPlayer4 {
+    pub fn SetSurfaceSize(&self, size: Size) -> windows_core::Result<()> {
+        unsafe {
+            (windows_core::Interface::vtable(self).SetSurfaceSize)(windows_core::Interface::as_raw(self), size).ok()
+        }
+    }
+    pub fn GetSurface<P0>(&self, compositor: P0) -> windows_core::Result<MediaPlayerSurface>
+    where
+        P0: windows_core::Param<Compositor>,
+    {
+        unsafe {
+            let mut result__ = core::mem::zeroed();
+            (windows_core::Interface::vtable(self).GetSurface)(
+                windows_core::Interface::as_raw(self),
+                compositor.param().abi(),
+                &mut result__,
+            )
+            .and_then(|| windows_core::imp::Type::from_abi(result__))
+        }
+    }
+}
+#[repr(C)]
+pub struct IMediaPlayer4_Vtbl {
+    pub base__: windows_core::IInspectable_Vtbl,
+    pub SetSurfaceSize: unsafe extern "system" fn(*mut core::ffi::c_void, Size) -> windows_core::HRESULT,
+    pub GetSurface: unsafe extern "system" fn(
+        *mut core::ffi::c_void,
+        *mut core::ffi::c_void,
+        *mut *mut core::ffi::c_void,
+    ) -> windows_core::HRESULT,
+}
 windows_core::imp::define_interface!(
     IMediaPlayerElement,
     IMediaPlayerElement_Vtbl,
@@ -16066,6 +16816,50 @@ pub struct IMediaPlayerSource2_Vtbl {
     pub base__: windows_core::IInspectable_Vtbl,
     pub Source: unsafe extern "system" fn(*mut core::ffi::c_void, *mut *mut core::ffi::c_void) -> windows_core::HRESULT,
     pub SetSource: unsafe extern "system" fn(*mut core::ffi::c_void, *mut core::ffi::c_void) -> windows_core::HRESULT,
+}
+windows_core::imp::define_interface!(
+    IMediaPlayerSurface,
+    IMediaPlayerSurface_Vtbl,
+    0x0ed653bc_b736_49c3_830b_764a3845313a
+);
+impl windows_core::RuntimeType for IMediaPlayerSurface {
+    const SIGNATURE: windows_core::imp::ConstBuffer = windows_core::imp::ConstBuffer::for_interface::<Self>();
+}
+impl IMediaPlayerSurface {
+    pub fn CompositionSurface(&self) -> windows_core::Result<ICompositionSurface> {
+        unsafe {
+            let mut result__ = core::mem::zeroed();
+            (windows_core::Interface::vtable(self).CompositionSurface)(
+                windows_core::Interface::as_raw(self),
+                &mut result__,
+            )
+            .and_then(|| windows_core::imp::Type::from_abi(result__))
+        }
+    }
+    pub fn Compositor(&self) -> windows_core::Result<Compositor> {
+        unsafe {
+            let mut result__ = core::mem::zeroed();
+            (windows_core::Interface::vtable(self).Compositor)(windows_core::Interface::as_raw(self), &mut result__)
+                .and_then(|| windows_core::imp::Type::from_abi(result__))
+        }
+    }
+    pub fn MediaPlayer(&self) -> windows_core::Result<MediaPlayer> {
+        unsafe {
+            let mut result__ = core::mem::zeroed();
+            (windows_core::Interface::vtable(self).MediaPlayer)(windows_core::Interface::as_raw(self), &mut result__)
+                .and_then(|| windows_core::imp::Type::from_abi(result__))
+        }
+    }
+}
+#[repr(C)]
+pub struct IMediaPlayerSurface_Vtbl {
+    pub base__: windows_core::IInspectable_Vtbl,
+    pub CompositionSurface:
+        unsafe extern "system" fn(*mut core::ffi::c_void, *mut *mut core::ffi::c_void) -> windows_core::HRESULT,
+    pub Compositor:
+        unsafe extern "system" fn(*mut core::ffi::c_void, *mut *mut core::ffi::c_void) -> windows_core::HRESULT,
+    pub MediaPlayer:
+        unsafe extern "system" fn(*mut core::ffi::c_void, *mut *mut core::ffi::c_void) -> windows_core::HRESULT,
 }
 windows_core::imp::define_interface!(IMediaSource, IMediaSource_Vtbl, 0xe7bfb599_a09d_4c21_bcdf_20af4f86b3d9);
 impl windows_core::RuntimeType for IMediaSource {
@@ -18192,6 +18986,14 @@ pub struct IRowDefinition_Vtbl {
     pub SetMinHeight: unsafe extern "system" fn(*mut core::ffi::c_void, f64) -> windows_core::HRESULT,
     pub ActualHeight: unsafe extern "system" fn(*mut core::ffi::c_void, *mut f64) -> windows_core::HRESULT,
 }
+windows_core::imp::define_interface!(IScrollViewer, IScrollViewer_Vtbl, 0x64e9be00_4dc1_493d_abe7_cbd3c577490d);
+impl windows_core::RuntimeType for IScrollViewer {
+    const SIGNATURE: windows_core::imp::ConstBuffer = windows_core::imp::ConstBuffer::for_interface::<Self>();
+}
+#[repr(C)]
+pub struct IScrollViewer_Vtbl {
+    pub base__: windows_core::IInspectable_Vtbl,
+}
 windows_core::imp::define_interface!(
     ISearchActivatedEventArgs,
     ISearchActivatedEventArgs_Vtbl,
@@ -18437,6 +19239,34 @@ pub struct ISolidColorBrushFactory_Vtbl {
     pub base__: windows_core::IInspectable_Vtbl,
     pub CreateInstanceWithColor:
         unsafe extern "system" fn(*mut core::ffi::c_void, Color, *mut *mut core::ffi::c_void) -> windows_core::HRESULT,
+}
+windows_core::imp::define_interface!(ISpriteVisual, ISpriteVisual_Vtbl, 0x08e05581_1ad1_4f97_9757_402d76e4233b);
+impl windows_core::RuntimeType for ISpriteVisual {
+    const SIGNATURE: windows_core::imp::ConstBuffer = windows_core::imp::ConstBuffer::for_interface::<Self>();
+}
+impl ISpriteVisual {
+    pub fn Brush(&self) -> windows_core::Result<CompositionBrush> {
+        unsafe {
+            let mut result__ = core::mem::zeroed();
+            (windows_core::Interface::vtable(self).Brush)(windows_core::Interface::as_raw(self), &mut result__)
+                .and_then(|| windows_core::imp::Type::from_abi(result__))
+        }
+    }
+    pub fn SetBrush<P0>(&self, value: P0) -> windows_core::Result<()>
+    where
+        P0: windows_core::Param<CompositionBrush>,
+    {
+        unsafe {
+            (windows_core::Interface::vtable(self).SetBrush)(windows_core::Interface::as_raw(self), value.param().abi())
+                .ok()
+        }
+    }
+}
+#[repr(C)]
+pub struct ISpriteVisual_Vtbl {
+    pub base__: windows_core::IInspectable_Vtbl,
+    pub Brush: unsafe extern "system" fn(*mut core::ffi::c_void, *mut *mut core::ffi::c_void) -> windows_core::HRESULT,
+    pub SetBrush: unsafe extern "system" fn(*mut core::ffi::c_void, *mut core::ffi::c_void) -> windows_core::HRESULT,
 }
 windows_core::imp::define_interface!(IStorageFile, IStorageFile_Vtbl, 0xfa3f6186_4214_428c_a64c_14c9ac7315ea);
 impl windows_core::RuntimeType for IStorageFile {
@@ -21917,6 +22747,277 @@ impl windows_core::RuntimeType for IVisibilityChangedEventArgs {
 pub struct IVisibilityChangedEventArgs_Vtbl {
     pub base__: windows_core::IInspectable_Vtbl,
 }
+windows_core::imp::define_interface!(IVisual, IVisual_Vtbl, 0x117e202d_a859_4c89_873b_c2aa566788e3);
+impl windows_core::RuntimeType for IVisual {
+    const SIGNATURE: windows_core::imp::ConstBuffer = windows_core::imp::ConstBuffer::for_interface::<Self>();
+}
+impl IVisual {
+    pub fn AnchorPoint(&self) -> windows_core::Result<windows_numerics::Vector2> {
+        unsafe {
+            let mut result__ = core::mem::zeroed();
+            (windows_core::Interface::vtable(self).AnchorPoint)(windows_core::Interface::as_raw(self), &mut result__)
+                .map(|| result__)
+        }
+    }
+    pub fn SetAnchorPoint(&self, value: windows_numerics::Vector2) -> windows_core::Result<()> {
+        unsafe {
+            (windows_core::Interface::vtable(self).SetAnchorPoint)(windows_core::Interface::as_raw(self), value).ok()
+        }
+    }
+    pub fn BackfaceVisibility(&self) -> windows_core::Result<CompositionBackfaceVisibility> {
+        unsafe {
+            let mut result__ = core::mem::zeroed();
+            (windows_core::Interface::vtable(self).BackfaceVisibility)(
+                windows_core::Interface::as_raw(self),
+                &mut result__,
+            )
+            .map(|| result__)
+        }
+    }
+    pub fn SetBackfaceVisibility(&self, value: CompositionBackfaceVisibility) -> windows_core::Result<()> {
+        unsafe {
+            (windows_core::Interface::vtable(self).SetBackfaceVisibility)(windows_core::Interface::as_raw(self), value)
+                .ok()
+        }
+    }
+    pub fn BorderMode(&self) -> windows_core::Result<CompositionBorderMode> {
+        unsafe {
+            let mut result__ = core::mem::zeroed();
+            (windows_core::Interface::vtable(self).BorderMode)(windows_core::Interface::as_raw(self), &mut result__)
+                .map(|| result__)
+        }
+    }
+    pub fn SetBorderMode(&self, value: CompositionBorderMode) -> windows_core::Result<()> {
+        unsafe {
+            (windows_core::Interface::vtable(self).SetBorderMode)(windows_core::Interface::as_raw(self), value).ok()
+        }
+    }
+    pub fn CenterPoint(&self) -> windows_core::Result<windows_numerics::Vector3> {
+        unsafe {
+            let mut result__ = core::mem::zeroed();
+            (windows_core::Interface::vtable(self).CenterPoint)(windows_core::Interface::as_raw(self), &mut result__)
+                .map(|| result__)
+        }
+    }
+    pub fn SetCenterPoint(&self, value: windows_numerics::Vector3) -> windows_core::Result<()> {
+        unsafe {
+            (windows_core::Interface::vtable(self).SetCenterPoint)(windows_core::Interface::as_raw(self), value).ok()
+        }
+    }
+    pub fn Clip(&self) -> windows_core::Result<CompositionClip> {
+        unsafe {
+            let mut result__ = core::mem::zeroed();
+            (windows_core::Interface::vtable(self).Clip)(windows_core::Interface::as_raw(self), &mut result__)
+                .and_then(|| windows_core::imp::Type::from_abi(result__))
+        }
+    }
+    pub fn SetClip<P0>(&self, value: P0) -> windows_core::Result<()>
+    where
+        P0: windows_core::Param<CompositionClip>,
+    {
+        unsafe {
+            (windows_core::Interface::vtable(self).SetClip)(windows_core::Interface::as_raw(self), value.param().abi())
+                .ok()
+        }
+    }
+    pub fn CompositeMode(&self) -> windows_core::Result<CompositionCompositeMode> {
+        unsafe {
+            let mut result__ = core::mem::zeroed();
+            (windows_core::Interface::vtable(self).CompositeMode)(windows_core::Interface::as_raw(self), &mut result__)
+                .map(|| result__)
+        }
+    }
+    pub fn SetCompositeMode(&self, value: CompositionCompositeMode) -> windows_core::Result<()> {
+        unsafe {
+            (windows_core::Interface::vtable(self).SetCompositeMode)(windows_core::Interface::as_raw(self), value).ok()
+        }
+    }
+    pub fn IsVisible(&self) -> windows_core::Result<bool> {
+        unsafe {
+            let mut result__ = core::mem::zeroed();
+            (windows_core::Interface::vtable(self).IsVisible)(windows_core::Interface::as_raw(self), &mut result__)
+                .map(|| result__)
+        }
+    }
+    pub fn SetIsVisible(&self, value: bool) -> windows_core::Result<()> {
+        unsafe {
+            (windows_core::Interface::vtable(self).SetIsVisible)(windows_core::Interface::as_raw(self), value).ok()
+        }
+    }
+    pub fn Offset(&self) -> windows_core::Result<windows_numerics::Vector3> {
+        unsafe {
+            let mut result__ = core::mem::zeroed();
+            (windows_core::Interface::vtable(self).Offset)(windows_core::Interface::as_raw(self), &mut result__)
+                .map(|| result__)
+        }
+    }
+    pub fn SetOffset(&self, value: windows_numerics::Vector3) -> windows_core::Result<()> {
+        unsafe { (windows_core::Interface::vtable(self).SetOffset)(windows_core::Interface::as_raw(self), value).ok() }
+    }
+    pub fn Opacity(&self) -> windows_core::Result<f32> {
+        unsafe {
+            let mut result__ = core::mem::zeroed();
+            (windows_core::Interface::vtable(self).Opacity)(windows_core::Interface::as_raw(self), &mut result__)
+                .map(|| result__)
+        }
+    }
+    pub fn SetOpacity(&self, value: f32) -> windows_core::Result<()> {
+        unsafe { (windows_core::Interface::vtable(self).SetOpacity)(windows_core::Interface::as_raw(self), value).ok() }
+    }
+    pub fn Orientation(&self) -> windows_core::Result<Quaternion> {
+        unsafe {
+            let mut result__ = core::mem::zeroed();
+            (windows_core::Interface::vtable(self).Orientation)(windows_core::Interface::as_raw(self), &mut result__)
+                .map(|| result__)
+        }
+    }
+    pub fn SetOrientation(&self, value: Quaternion) -> windows_core::Result<()> {
+        unsafe {
+            (windows_core::Interface::vtable(self).SetOrientation)(windows_core::Interface::as_raw(self), value).ok()
+        }
+    }
+    pub fn Parent(&self) -> windows_core::Result<ContainerVisual> {
+        unsafe {
+            let mut result__ = core::mem::zeroed();
+            (windows_core::Interface::vtable(self).Parent)(windows_core::Interface::as_raw(self), &mut result__)
+                .and_then(|| windows_core::imp::Type::from_abi(result__))
+        }
+    }
+    pub fn RotationAngle(&self) -> windows_core::Result<f32> {
+        unsafe {
+            let mut result__ = core::mem::zeroed();
+            (windows_core::Interface::vtable(self).RotationAngle)(windows_core::Interface::as_raw(self), &mut result__)
+                .map(|| result__)
+        }
+    }
+    pub fn SetRotationAngle(&self, value: f32) -> windows_core::Result<()> {
+        unsafe {
+            (windows_core::Interface::vtable(self).SetRotationAngle)(windows_core::Interface::as_raw(self), value).ok()
+        }
+    }
+    pub fn RotationAngleInDegrees(&self) -> windows_core::Result<f32> {
+        unsafe {
+            let mut result__ = core::mem::zeroed();
+            (windows_core::Interface::vtable(self).RotationAngleInDegrees)(
+                windows_core::Interface::as_raw(self),
+                &mut result__,
+            )
+            .map(|| result__)
+        }
+    }
+    pub fn SetRotationAngleInDegrees(&self, value: f32) -> windows_core::Result<()> {
+        unsafe {
+            (windows_core::Interface::vtable(self).SetRotationAngleInDegrees)(
+                windows_core::Interface::as_raw(self),
+                value,
+            )
+            .ok()
+        }
+    }
+    pub fn RotationAxis(&self) -> windows_core::Result<windows_numerics::Vector3> {
+        unsafe {
+            let mut result__ = core::mem::zeroed();
+            (windows_core::Interface::vtable(self).RotationAxis)(windows_core::Interface::as_raw(self), &mut result__)
+                .map(|| result__)
+        }
+    }
+    pub fn SetRotationAxis(&self, value: windows_numerics::Vector3) -> windows_core::Result<()> {
+        unsafe {
+            (windows_core::Interface::vtable(self).SetRotationAxis)(windows_core::Interface::as_raw(self), value).ok()
+        }
+    }
+    pub fn Scale(&self) -> windows_core::Result<windows_numerics::Vector3> {
+        unsafe {
+            let mut result__ = core::mem::zeroed();
+            (windows_core::Interface::vtable(self).Scale)(windows_core::Interface::as_raw(self), &mut result__)
+                .map(|| result__)
+        }
+    }
+    pub fn SetScale(&self, value: windows_numerics::Vector3) -> windows_core::Result<()> {
+        unsafe { (windows_core::Interface::vtable(self).SetScale)(windows_core::Interface::as_raw(self), value).ok() }
+    }
+    pub fn Size(&self) -> windows_core::Result<windows_numerics::Vector2> {
+        unsafe {
+            let mut result__ = core::mem::zeroed();
+            (windows_core::Interface::vtable(self).Size)(windows_core::Interface::as_raw(self), &mut result__)
+                .map(|| result__)
+        }
+    }
+    pub fn SetSize(&self, value: windows_numerics::Vector2) -> windows_core::Result<()> {
+        unsafe { (windows_core::Interface::vtable(self).SetSize)(windows_core::Interface::as_raw(self), value).ok() }
+    }
+    pub fn TransformMatrix(&self) -> windows_core::Result<windows_numerics::Matrix4x4> {
+        unsafe {
+            let mut result__ = core::mem::zeroed();
+            (windows_core::Interface::vtable(self).TransformMatrix)(
+                windows_core::Interface::as_raw(self),
+                &mut result__,
+            )
+            .map(|| result__)
+        }
+    }
+    pub fn SetTransformMatrix(&self, value: windows_numerics::Matrix4x4) -> windows_core::Result<()> {
+        unsafe {
+            (windows_core::Interface::vtable(self).SetTransformMatrix)(windows_core::Interface::as_raw(self), value)
+                .ok()
+        }
+    }
+}
+#[repr(C)]
+pub struct IVisual_Vtbl {
+    pub base__: windows_core::IInspectable_Vtbl,
+    pub AnchorPoint:
+        unsafe extern "system" fn(*mut core::ffi::c_void, *mut windows_numerics::Vector2) -> windows_core::HRESULT,
+    pub SetAnchorPoint:
+        unsafe extern "system" fn(*mut core::ffi::c_void, windows_numerics::Vector2) -> windows_core::HRESULT,
+    pub BackfaceVisibility:
+        unsafe extern "system" fn(*mut core::ffi::c_void, *mut CompositionBackfaceVisibility) -> windows_core::HRESULT,
+    pub SetBackfaceVisibility:
+        unsafe extern "system" fn(*mut core::ffi::c_void, CompositionBackfaceVisibility) -> windows_core::HRESULT,
+    pub BorderMode:
+        unsafe extern "system" fn(*mut core::ffi::c_void, *mut CompositionBorderMode) -> windows_core::HRESULT,
+    pub SetBorderMode:
+        unsafe extern "system" fn(*mut core::ffi::c_void, CompositionBorderMode) -> windows_core::HRESULT,
+    pub CenterPoint:
+        unsafe extern "system" fn(*mut core::ffi::c_void, *mut windows_numerics::Vector3) -> windows_core::HRESULT,
+    pub SetCenterPoint:
+        unsafe extern "system" fn(*mut core::ffi::c_void, windows_numerics::Vector3) -> windows_core::HRESULT,
+    pub Clip: unsafe extern "system" fn(*mut core::ffi::c_void, *mut *mut core::ffi::c_void) -> windows_core::HRESULT,
+    pub SetClip: unsafe extern "system" fn(*mut core::ffi::c_void, *mut core::ffi::c_void) -> windows_core::HRESULT,
+    pub CompositeMode:
+        unsafe extern "system" fn(*mut core::ffi::c_void, *mut CompositionCompositeMode) -> windows_core::HRESULT,
+    pub SetCompositeMode:
+        unsafe extern "system" fn(*mut core::ffi::c_void, CompositionCompositeMode) -> windows_core::HRESULT,
+    pub IsVisible: unsafe extern "system" fn(*mut core::ffi::c_void, *mut bool) -> windows_core::HRESULT,
+    pub SetIsVisible: unsafe extern "system" fn(*mut core::ffi::c_void, bool) -> windows_core::HRESULT,
+    pub Offset:
+        unsafe extern "system" fn(*mut core::ffi::c_void, *mut windows_numerics::Vector3) -> windows_core::HRESULT,
+    pub SetOffset:
+        unsafe extern "system" fn(*mut core::ffi::c_void, windows_numerics::Vector3) -> windows_core::HRESULT,
+    pub Opacity: unsafe extern "system" fn(*mut core::ffi::c_void, *mut f32) -> windows_core::HRESULT,
+    pub SetOpacity: unsafe extern "system" fn(*mut core::ffi::c_void, f32) -> windows_core::HRESULT,
+    pub Orientation: unsafe extern "system" fn(*mut core::ffi::c_void, *mut Quaternion) -> windows_core::HRESULT,
+    pub SetOrientation: unsafe extern "system" fn(*mut core::ffi::c_void, Quaternion) -> windows_core::HRESULT,
+    pub Parent: unsafe extern "system" fn(*mut core::ffi::c_void, *mut *mut core::ffi::c_void) -> windows_core::HRESULT,
+    pub RotationAngle: unsafe extern "system" fn(*mut core::ffi::c_void, *mut f32) -> windows_core::HRESULT,
+    pub SetRotationAngle: unsafe extern "system" fn(*mut core::ffi::c_void, f32) -> windows_core::HRESULT,
+    pub RotationAngleInDegrees: unsafe extern "system" fn(*mut core::ffi::c_void, *mut f32) -> windows_core::HRESULT,
+    pub SetRotationAngleInDegrees: unsafe extern "system" fn(*mut core::ffi::c_void, f32) -> windows_core::HRESULT,
+    pub RotationAxis:
+        unsafe extern "system" fn(*mut core::ffi::c_void, *mut windows_numerics::Vector3) -> windows_core::HRESULT,
+    pub SetRotationAxis:
+        unsafe extern "system" fn(*mut core::ffi::c_void, windows_numerics::Vector3) -> windows_core::HRESULT,
+    pub Scale:
+        unsafe extern "system" fn(*mut core::ffi::c_void, *mut windows_numerics::Vector3) -> windows_core::HRESULT,
+    pub SetScale: unsafe extern "system" fn(*mut core::ffi::c_void, windows_numerics::Vector3) -> windows_core::HRESULT,
+    pub Size:
+        unsafe extern "system" fn(*mut core::ffi::c_void, *mut windows_numerics::Vector2) -> windows_core::HRESULT,
+    pub SetSize: unsafe extern "system" fn(*mut core::ffi::c_void, windows_numerics::Vector2) -> windows_core::HRESULT,
+    pub TransformMatrix:
+        unsafe extern "system" fn(*mut core::ffi::c_void, *mut windows_numerics::Matrix4x4) -> windows_core::HRESULT,
+    pub SetTransformMatrix:
+        unsafe extern "system" fn(*mut core::ffi::c_void, windows_numerics::Matrix4x4) -> windows_core::HRESULT,
+}
 windows_core::imp::define_interface!(IWindow, IWindow_Vtbl, 0x3276167d_c9f6_462d_9de2_ae4c1fd8c2e5);
 impl windows_core::RuntimeType for IWindow {
     const SIGNATURE: windows_core::imp::ConstBuffer = windows_core::imp::ConstBuffer::for_interface::<Self>();
@@ -23909,6 +25010,30 @@ impl windows_core::RuntimeType for MediaPlayerState {
 }
 #[repr(transparent)]
 #[derive(Clone, Debug, Eq, PartialEq)]
+pub struct MediaPlayerSurface(windows_core::IUnknown);
+windows_core::imp::interface_hierarchy!(MediaPlayerSurface, windows_core::IUnknown, windows_core::IInspectable);
+windows_core::imp::required_hierarchy!(MediaPlayerSurface, IClosable);
+impl windows_core::RuntimeType for MediaPlayerSurface {
+    const SIGNATURE: windows_core::imp::ConstBuffer =
+        windows_core::imp::ConstBuffer::for_class::<Self, IMediaPlayerSurface>();
+}
+unsafe impl windows_core::Interface for MediaPlayerSurface {
+    type Vtable = <IMediaPlayerSurface as windows_core::Interface>::Vtable;
+    const IID: windows_core::GUID = <IMediaPlayerSurface as windows_core::Interface>::IID;
+}
+impl core::ops::Deref for MediaPlayerSurface {
+    type Target = IMediaPlayerSurface;
+    fn deref(&self) -> &Self::Target {
+        unsafe { core::mem::transmute(self) }
+    }
+}
+impl windows_core::RuntimeName for MediaPlayerSurface {
+    const NAME: &'static str = "Windows.Media.Playback.MediaPlayerSurface";
+}
+unsafe impl Send for MediaPlayerSurface {}
+unsafe impl Sync for MediaPlayerSurface {}
+#[repr(transparent)]
+#[derive(Clone, Debug, Eq, PartialEq)]
 pub struct MediaSource(windows_core::IUnknown);
 windows_core::imp::interface_hierarchy!(MediaSource, windows_core::IUnknown, windows_core::IInspectable);
 windows_core::imp::required_hierarchy!(MediaSource, IClosable, IMediaPlaybackSource);
@@ -25245,6 +26370,21 @@ impl PropertyValue {
 impl windows_core::RuntimeName for PropertyValue {
     const NAME: &'static str = "Windows.Foundation.PropertyValue";
 }
+#[repr(C)]
+#[derive(Clone, Copy, Debug, Default, PartialEq)]
+pub struct Quaternion {
+    pub x: f32,
+    pub y: f32,
+    pub z: f32,
+    pub w: f32,
+}
+impl windows_core::imp::TypeKind for Quaternion {
+    type TypeKind = windows_core::imp::CopyType;
+}
+impl windows_core::RuntimeType for Quaternion {
+    const SIGNATURE: windows_core::imp::ConstBuffer =
+        windows_core::imp::ConstBuffer::from_slice(b"struct(Windows.Foundation.Numerics.Quaternion;f4;f4;f4;f4)");
+}
 #[repr(transparent)]
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct RandomAccessStreamReference(windows_core::IUnknown);
@@ -25668,6 +26808,37 @@ impl windows_core::RuntimeType for ScrollIntoViewAlignment {
 }
 #[repr(transparent)]
 #[derive(Clone, Debug, Eq, PartialEq)]
+pub struct ScrollViewer(windows_core::IUnknown);
+windows_core::imp::interface_hierarchy!(ScrollViewer, windows_core::IUnknown, windows_core::IInspectable);
+windows_core::imp::required_hierarchy!(
+    ScrollViewer,
+    ContentControl,
+    Control,
+    FrameworkElement,
+    UIElement,
+    DependencyObject
+);
+impl windows_core::RuntimeType for ScrollViewer {
+    const SIGNATURE: windows_core::imp::ConstBuffer =
+        windows_core::imp::ConstBuffer::for_class::<Self, IScrollViewer>();
+}
+unsafe impl windows_core::Interface for ScrollViewer {
+    type Vtable = <IScrollViewer as windows_core::Interface>::Vtable;
+    const IID: windows_core::GUID = <IScrollViewer as windows_core::Interface>::IID;
+}
+impl core::ops::Deref for ScrollViewer {
+    type Target = IScrollViewer;
+    fn deref(&self) -> &Self::Target {
+        unsafe { core::mem::transmute(self) }
+    }
+}
+impl windows_core::RuntimeName for ScrollViewer {
+    const NAME: &'static str = "Windows.UI.Xaml.Controls.ScrollViewer";
+}
+unsafe impl Send for ScrollViewer {}
+unsafe impl Sync for ScrollViewer {}
+#[repr(transparent)]
+#[derive(Clone, Debug, Eq, PartialEq)]
 pub struct SearchActivatedEventArgs(windows_core::IUnknown);
 windows_core::imp::interface_hierarchy!(
     SearchActivatedEventArgs,
@@ -25992,6 +27163,30 @@ impl windows_core::RuntimeName for SolidColorBrush {
 }
 unsafe impl Send for SolidColorBrush {}
 unsafe impl Sync for SolidColorBrush {}
+#[repr(transparent)]
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct SpriteVisual(windows_core::IUnknown);
+windows_core::imp::interface_hierarchy!(SpriteVisual, windows_core::IUnknown, windows_core::IInspectable);
+windows_core::imp::required_hierarchy!(SpriteVisual, IClosable, ContainerVisual, Visual, CompositionObject);
+impl windows_core::RuntimeType for SpriteVisual {
+    const SIGNATURE: windows_core::imp::ConstBuffer =
+        windows_core::imp::ConstBuffer::for_class::<Self, ISpriteVisual>();
+}
+unsafe impl windows_core::Interface for SpriteVisual {
+    type Vtable = <ISpriteVisual as windows_core::Interface>::Vtable;
+    const IID: windows_core::GUID = <ISpriteVisual as windows_core::Interface>::IID;
+}
+impl core::ops::Deref for SpriteVisual {
+    type Target = ISpriteVisual;
+    fn deref(&self) -> &Self::Target {
+        unsafe { core::mem::transmute(self) }
+    }
+}
+impl windows_core::RuntimeName for SpriteVisual {
+    const NAME: &'static str = "Windows.UI.Composition.SpriteVisual";
+}
+unsafe impl Send for SpriteVisual {}
+unsafe impl Sync for SpriteVisual {}
 #[repr(transparent)]
 #[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
 pub struct StereoscopicVideoPackingMode(pub i32);
@@ -27516,6 +28711,29 @@ impl core::ops::Deref for VisibilityChangedEventArgs {
 impl windows_core::RuntimeName for VisibilityChangedEventArgs {
     const NAME: &'static str = "Windows.UI.Core.VisibilityChangedEventArgs";
 }
+#[repr(transparent)]
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct Visual(windows_core::IUnknown);
+windows_core::imp::interface_hierarchy!(Visual, windows_core::IUnknown, windows_core::IInspectable);
+windows_core::imp::required_hierarchy!(Visual, IClosable, CompositionObject);
+impl windows_core::RuntimeType for Visual {
+    const SIGNATURE: windows_core::imp::ConstBuffer = windows_core::imp::ConstBuffer::for_class::<Self, IVisual>();
+}
+unsafe impl windows_core::Interface for Visual {
+    type Vtable = <IVisual as windows_core::Interface>::Vtable;
+    const IID: windows_core::GUID = <IVisual as windows_core::Interface>::IID;
+}
+impl core::ops::Deref for Visual {
+    type Target = IVisual;
+    fn deref(&self) -> &Self::Target {
+        unsafe { core::mem::transmute(self) }
+    }
+}
+impl windows_core::RuntimeName for Visual {
+    const NAME: &'static str = "Windows.UI.Composition.Visual";
+}
+unsafe impl Send for Visual {}
+unsafe impl Sync for Visual {}
 #[repr(transparent)]
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct Window(windows_core::IUnknown);

@@ -4,8 +4,8 @@ use windows_core::{Error, HRESULT, Interface, Result};
 
 use crate::xaml::{
     AdaptiveMediaSource, AdaptiveMediaSourceCreationResult, AdaptiveMediaSourceCreationStatus, HttpClient, IClosable,
-    IMediaPlaybackSession, IMediaPlaybackSource, IMediaPlayer, IMediaPlayer3, IMediaPlayerElement, IMediaPlayerSource2,
-    MediaPlayer, MediaSource, Uri,
+    IMediaPlaybackSession, IMediaPlaybackSource, IMediaPlayer, IMediaPlayer3, IMediaPlayerSource2, MediaPlayer,
+    MediaSource, Uri,
 };
 
 /// An HTTP client sending `headers` with each request.
@@ -34,11 +34,10 @@ pub fn stream_source(url: &str, headers: &[(String, String)]) -> Result<MediaSou
     source_of(&created)
 }
 
-/// Plays `source` in the element `video`.
-pub fn play(video: &IMediaPlayerElement, source: &MediaSource) -> Result<MediaPlayer> {
+/// A player on `source`, for a picture to show.
+pub fn player(source: &MediaSource) -> Result<MediaPlayer> {
     let player = MediaPlayer::new()?;
     player.cast::<IMediaPlayerSource2>()?.SetSource(&source.cast::<IMediaPlaybackSource>()?)?;
-    video.SetMediaPlayer(&player)?;
     Ok(player)
 }
 

@@ -39,8 +39,8 @@ pub const LAYOUT: &str = r##"
       <RowDefinition Height="Auto" />
       <RowDefinition Height="Auto" />
     </Grid.RowDefinitions>
-    <MediaPlayerElement x:Name="Video" Grid.RowSpan="4" AreTransportControlsEnabled="False" Stretch="Uniform" />
-    <MediaPlayerElement Grid.RowSpan="4" <!--second--> />
+    <Grid x:Name="Video" Grid.RowSpan="4" Background="Transparent" />
+    <Grid Grid.RowSpan="4" <!--second--> />
     <Canvas x:Name="Danmaku" Grid.RowSpan="4" IsHitTestVisible="False" />
     <Grid x:Name="TopBar" VerticalAlignment="Top">
       <Grid.ColumnDefinitions>

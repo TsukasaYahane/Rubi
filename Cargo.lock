@@ -1415,6 +1415,7 @@ dependencies = [
  "windows-core",
  "windows-future",
  "windows-link 0.100.0",
+ "windows-numerics",
  "windows-reference",
  "windows-time",
 ]
@@ -2373,6 +2374,15 @@ name = "windows-link"
 version = "0.100.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "9b39de7c7fe78858b0144c50c3fc000bab3be17d5e9b85b1053871693c7f7415"
+
+[[package]]
+name = "windows-numerics"
+version = "0.100.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "d9c5500bf6a9098f27922953422ae7324cdd330c868e945801593455a6832701"
+dependencies = [
+ "windows-core",
+]
 
 [[package]]
 name = "windows-reference"

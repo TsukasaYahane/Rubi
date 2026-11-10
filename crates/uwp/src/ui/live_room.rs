@@ -29,9 +29,9 @@ use crate::ui::up;
 use crate::ui::{keep, load, media, named, on_click, on_enter, post, set_text, soon};
 use crate::xaml::{
     Color, ElementTheme, FocusState, FrameworkElement, Grid, GridLength, GridUnitType, IColumnDefinition,
-    IContentControl, IControl, IFontIcon, IFrameworkElement, IFrameworkElement2, IItemsControl, IMediaPlayer,
-    IMediaPlayerElement, IPanel, IRowDefinition, ITextBlock, ITextBox, IUIElement, MediaPlaybackState, MediaPlayer,
-    MediaSource, PropertyValue, SizeChangedEventArgs, SolidColorBrush, Thickness, VirtualKey, Visibility,
+    IContentControl, IControl, IFontIcon, IFrameworkElement, IFrameworkElement2, IItemsControl, IMediaPlayer, IPanel,
+    IRowDefinition, ITextBlock, ITextBox, IUIElement, MediaPlaybackState, MediaPlayer, MediaSource, PropertyValue,
+    SizeChangedEventArgs, SolidColorBrush, Thickness, VirtualKey, Visibility,
 };
 
 /// Width of the danmaku list beside the picture.
@@ -64,8 +64,8 @@ const LAYOUT: &str = r##"
       <RowDefinition x:Name="VideoRow" Height="*" /><RowDefinition Height="Auto" /><RowDefinition Height="Auto" />
     </Grid.RowDefinitions>
     <Grid x:Name="Stage" Background="Black" RequestedTheme="Dark">
-      <MediaPlayerElement x:Name="Video" AreTransportControlsEnabled="False" Stretch="Uniform" />
-      <MediaPlayerElement <!--second--> />
+      <Grid x:Name="Video" Background="Transparent" />
+      <Grid <!--second--> />
       <Canvas x:Name="Danmaku" IsHitTestVisible="False" />
       <StackPanel x:Name="Notice" Visibility="Collapsed" HorizontalAlignment="Center" VerticalAlignment="Center"
                   IsHitTestVisible="False">
@@ -205,8 +205,7 @@ pub fn take_back(id: u64, player: &MediaPlayer, source: &MediaSource) -> bool {
     if room.player.borrow().is_some() {
         return false;
     }
-    let element = named::<IMediaPlayerElement>(&room.root, room.video.active());
-    if element.and_then(|e| e.SetMediaPlayer(player)).is_err() {
+    if room.video.show(player).is_err() {
         return false;
     }
     *room.player.borrow_mut() = Some(player.clone());
@@ -276,7 +275,7 @@ pub fn open(room_id: u64, title: &str, uploader: &str, uid: u64) -> Result<()> {
         next_danmaku: Cell::new(1),
         full: Cell::new(false),
         bar: ControlBar::attach(&root, "Stage", &["Back"], run, || room().map(|r| r.bar.clone()), set_sound)?,
-        video: TwinVideo::new(&root, run, || room().map(|r| r.video.clone())),
+        video: TwinVideo::new(&root, run, || room().map(|r| r.video.clone()))?,
         standby: RefCell::default(),
         send_bar: Cell::new(SendPlace::BelowVideo),
         offer: RefCell::default(),
@@ -453,7 +452,8 @@ fn playing(source: std::result::Result<(MediaSource, Offer), Stop>) -> Result<()
         media::close_source(Some(source));
         return notice(&room.root, PIP_GLYPH, IN_PIP);
     }
-    let player = media::play(&named::<IMediaPlayerElement>(&room.root, "Video")?, &source)?;
+    let player = media::player(&source)?;
+    room.video.show(&player)?;
     player.cast::<IMediaPlayer>()?.Play()?;
     *room.player.borrow_mut() = Some(player);
     *room.source.borrow_mut() = Some(source);

@@ -36,12 +36,11 @@ use crate::ui::{load, named, on_click, on_enter, post, set_text, soon};
 use crate::xaml::{
     AdaptiveMediaSource, Color, DataWriter, FocusManager, FocusState, FrameworkElement, Grid, GridLength, GridUnitType,
     IButtonBase, IColumnDefinition, IContentControl, IControl, IDataWriter, IFontIcon, IFrameworkElement,
-    IFrameworkElement4, IInputStream, IMediaPlaybackSession, IMediaPlayer, IMediaPlayer3, IMediaPlayerElement,
-    IMediaPlayerFailedEventArgs, IOutputStream, IPanel, IRandomAccessStream, IRangeBase,
-    IRangeBaseValueChangedEventArgs, IRowDefinition, ITextBlock, ITextBox, IUIElement, InMemoryRandomAccessStream,
-    MediaPlaybackSession, MediaPlaybackState, MediaPlayer, MediaPlayerFailedEventArgs, MediaSource, PropertyValue,
-    RangeBaseValueChangedEventArgs, SizeChangedEventArgs, TappedRoutedEventArgs, UIElement, Uri, VirtualKey,
-    Visibility,
+    IFrameworkElement4, IInputStream, IMediaPlaybackSession, IMediaPlayer, IMediaPlayer3, IMediaPlayerFailedEventArgs,
+    IOutputStream, IPanel, IRandomAccessStream, IRangeBase, IRangeBaseValueChangedEventArgs, IRowDefinition,
+    ITextBlock, ITextBox, IUIElement, InMemoryRandomAccessStream, MediaPlaybackSession, MediaPlaybackState,
+    MediaPlayer, MediaPlayerFailedEventArgs, MediaSource, PropertyValue, RangeBaseValueChangedEventArgs,
+    SizeChangedEventArgs, TappedRoutedEventArgs, UIElement, Uri, VirtualKey, Visibility,
 };
 
 /// Quality asked for; the core caps it to what the account may play.
@@ -60,10 +59,6 @@ const HANDOVER_EVERY: Duration = Duration::from_millis(50);
 const SEEK_STEP: i64 = 5 * TICKS_PER_SECOND;
 /// Width of the side pane beside the 竖屏 picture.
 const FEED_PANE: f64 = 340.0;
-/// How long the page must hold still before the video takes its new size.
-const VIDEO_SETTLE: Duration = Duration::from_millis(250);
-/// How long entering or leaving fullscreen goes on changing the window's size.
-const FULLSCREEN_SETTLE: Duration = Duration::from_secs(1);
 
 const LAYOUT: &str = r##"
 <Grid xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
@@ -91,8 +86,8 @@ const LAYOUT: &str = r##"
       </StackPanel>
     </Button>
     <Border Grid.Row="1" Background="Black" />
-    <MediaPlayerElement x:Name="Video" Grid.Row="1" AreTransportControlsEnabled="False" Stretch="Uniform" />
-    <MediaPlayerElement Grid.Row="1" <!--second--> />
+    <Grid x:Name="Video" Grid.Row="1" Background="Transparent" />
+    <Grid Grid.Row="1" <!--second--> />
     <Canvas x:Name="Danmaku" Grid.Row="1" IsHitTestVisible="False" />
     <!--controls-->
     <ContentControl x:Name="SendBelowVideo" Grid.Row="2" IsTabStop="False" HorizontalContentAlignment="Stretch">
@@ -240,12 +235,6 @@ struct Page {
     seeks: Arc<AtomicU64>,
     /// Filling the screen.
     full: Rc<Cell<bool>>,
-    /// The page is being resized: the player gets a fresh surface once that stops.
-    resizing: Rc<Cell<bool>>,
-    /// Bumped by each size change: only the last one lets the video go.
-    resizes: Arc<AtomicU64>,
-    /// Until when size changes are let be: entering or leaving fullscreen is one change.
-    hold_from: Rc<Cell<Instant>>,
 }
 
 fn page() -> Option<Page> {
@@ -298,48 +287,8 @@ fn place_send_bar(root: &IFrameworkElement, full: bool, normally: Color) -> Resu
     control_bar::move_send_bar(root, from, to, color)
 }
 
-/// Notes that the page is being resized. The video follows at once; once the size holds still the
-/// player is handed to the element again, so it draws on a fresh surface: the system player's own
-/// surface could be left blank by many resizes in a row.
-fn note_resize() -> Result<()> {
-    let (Some(page), Some(shell)) = (page(), shell()) else { return Ok(()) };
-    if PLAYING.with(|p| p.borrow().is_none()) || Instant::now() < page.hold_from.get() {
-        return Ok(());
-    }
-    page.resizing.set(true);
-    let turn = page.resizes.fetch_add(1, Ordering::Relaxed) + 1;
-    let (resizes, dispatcher, run) = (page.resizes.clone(), shell.dispatcher.clone(), self::run());
-    let Some(backend) = shell.backend.get().cloned() else { return Ok(()) };
-    backend.spawn(async move {
-        tokio::time::sleep(VIDEO_SETTLE).await;
-        if resizes.load(Ordering::Relaxed) == turn {
-            post(&dispatcher, move || {
-                if run == self::run() {
-                    let _ = refresh_surface();
-                }
-            });
-        }
-    });
-    Ok(())
-}
-
-/// Gives the player to its element again, after a resize.
-fn refresh_surface() -> Result<()> {
-    let Some(page) = page() else { return Ok(()) };
-    if !page.resizing.replace(false) {
-        return Ok(());
-    }
-    let element = named::<IMediaPlayerElement>(&page.root, page.video.active())?;
-    if let Some(player) = PLAYING.with(|p| p.borrow().clone()) {
-        element.SetMediaPlayer(None::<&MediaPlayer>)?;
-        element.SetMediaPlayer(&player)?;
-    }
-    Ok(())
-}
-
 fn drag_side(change: f64) {
     let (Some(page), Some(shell)) = (page(), shell()) else { return };
-    let _ = note_resize();
     let Ok(side) = named::<IFrameworkElement>(&page.root, "Side") else { return };
     let (now, whole) = (side.ActualWidth().unwrap_or(0.0), page.root.ActualWidth().unwrap_or(0.0));
     shell.set_side_width(Some(panes::side_width(now - change, whole)));
@@ -364,8 +313,6 @@ fn set_full(on: bool) -> Result<()> {
     if page.full.replace(on) == on {
         return Ok(());
     }
-    page.hold_from.set(Instant::now() + FULLSCREEN_SETTLE);
-    refresh_surface()?;
     shell.fill_screen(on)?;
     apply_layout(&page.root)?;
     page.bar.set_full(on)
@@ -601,16 +548,13 @@ pub fn open(feed: bool, bvid: &str, title: &str, uploader: &str) -> Result<()> {
             || page().map(|p| p.bar),
             set_sound,
         )?,
-        video: TwinVideo::new(&root, run, || page().map(|p| p.video)),
+        video: TwinVideo::new(&root, run, || page().map(|p| p.video))?,
         standby: Rc::default(),
         send_in_full: Rc::default(),
         seek_held: Rc::new(Cell::new(Instant::now())),
         showing_position: Rc::default(),
         seeks: Arc::default(),
         full: Rc::new(Cell::new(false)),
-        resizing: Rc::default(),
-        resizes: Arc::default(),
-        hold_from: Rc::new(Cell::new(Instant::now())),
     };
     PAGE.with(|p| *p.borrow_mut() = Some(opened));
     on_click(&root, "ActDanmaku", toggle_danmaku)?;
@@ -644,7 +588,6 @@ pub fn open(feed: bool, bvid: &str, title: &str, uploader: &str) -> Result<()> {
     let revoker = root.SizeChanged(move |sender: Ref<windows_core::IInspectable>, _: Ref<SizeChangedEventArgs>| {
         // From the sender: a handler holding its own source would keep the page for good.
         let Ok(root) = sender.ok().and_then(|s| s.cast::<IFrameworkElement>()) else { return };
-        let _ = note_resize();
         soon(&pending, move || {
             let _ = apply_layout(&root);
         });
@@ -887,7 +830,7 @@ fn shown(opened: std::result::Result<Opened, String>, uploader: &str) -> Result<
     let Some(page) = page() else { return Ok(()) };
     match opened {
         Ok(Opened { source, cid, duration_ms, offer }) => {
-            play(&page.root, &source)?;
+            play(&source)?;
             quality::show(&page.root, &offer)?;
             *page.offer.borrow_mut() = offer;
             page.cid.set(cid);
@@ -1075,8 +1018,11 @@ fn report_failures(player: &MediaPlayer) -> Result<()> {
     Ok(())
 }
 
-fn play(root: &IFrameworkElement, source: &MediaSource) -> Result<MediaPlaybackSession> {
-    let player = media::play(&named::<IMediaPlayerElement>(root, "Video")?, source)?;
+fn play(source: &MediaSource) -> Result<MediaPlaybackSession> {
+    let player = media::player(source)?;
+    if let Some(page) = page() {
+        page.video.show(&player)?;
+    }
     report_failures(&player)?;
     report_end(&player)?;
     if page().is_some_and(|p| p.feed) {
