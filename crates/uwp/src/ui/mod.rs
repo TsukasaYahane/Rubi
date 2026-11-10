@@ -16,6 +16,7 @@ pub mod live;
 pub mod live_room;
 pub mod me;
 pub mod media;
+pub mod pip;
 pub mod player;
 pub mod player_actions;
 pub mod player_side;

@@ -20,6 +20,7 @@ use crate::state::live::CHAT_MOST;
 use crate::state::quality::Offer;
 use crate::ui::control_bar::{self, ControlBar};
 use crate::ui::danmaku::{Host, Overlay};
+use crate::ui::pip;
 use crate::ui::quality;
 use crate::ui::rows::{add_rows, on_row};
 use crate::ui::shell::{shell, toast};
@@ -43,6 +44,8 @@ const STANDBY_LOOKS: u32 = 150;
 /// The icons of what is shown over the picture.
 const OFF_AIR_GLYPH: &str = "\u{E93E}";
 const FAILED_GLYPH: &str = "\u{E7BA}";
+const PIP_GLYPH: &str = "\u{E8A7}";
+const IN_PIP: &str = "正在小窗播放 · 再按底栏的「小窗」回到这里";
 
 /// Bumped when a room opens or is left: answers for another are dropped.
 static RUN: AtomicU64 = AtomicU64::new(0);
@@ -129,6 +132,10 @@ const LAYOUT: &str = r##"
 struct Room {
     root: IFrameworkElement,
     room_id: u64,
+    /// What reopens the room from the small window.
+    title: String,
+    uploader: String,
+    uid: u64,
     opened: Instant,
     player: RefCell<Option<MediaPlayer>>,
     source: RefCell<Option<MediaSource>>,
@@ -162,6 +169,51 @@ fn overlay_of(asked: u64) -> Option<Rc<Overlay>> {
         return None;
     }
     room().and_then(|r| r.overlay.borrow().clone())
+}
+
+/// Moves the picture into the small window, or brings it back.
+fn toggle_pip() {
+    let Some(room) = room() else { return };
+    if pip::holds(room.room_id) {
+        pip::back_to_room();
+        return;
+    }
+    if room.player.borrow().is_none() || room.source.borrow().is_none() {
+        return;
+    }
+    if let Some((player, source, _)) = room.standby.borrow_mut().take() {
+        let _ = room.video.clear_next();
+        media::close(Some(player), Some(source));
+    }
+    // The page's elements let go before the small window takes the player.
+    room.video.clear();
+    let (Some(player), Some(source)) = (room.player.borrow_mut().take(), room.source.borrow_mut().take()) else {
+        return;
+    };
+    let _ = set_full(&room, false);
+    let _ = notice(&room.root, PIP_GLYPH, IN_PIP);
+    let shown =
+        pip::Room { id: room.room_id, title: room.title.clone(), uploader: room.uploader.clone(), uid: room.uid };
+    if let Err(problem) = pip::open(shown, player, source) {
+        toast(&format!("小窗打不开：{}", problem.message()));
+    }
+}
+
+/// Takes the picture back from the small window, if room `id` is on show and has none.
+pub fn take_back(id: u64, player: &MediaPlayer, source: &MediaSource) -> bool {
+    let Some(room) = room().filter(|r| r.room_id == id) else { return false };
+    if room.player.borrow().is_some() {
+        return false;
+    }
+    let element = named::<IMediaPlayerElement>(&room.root, room.video.active());
+    if element.and_then(|e| e.SetMediaPlayer(player)).is_err() {
+        return false;
+    }
+    *room.player.borrow_mut() = Some(player.clone());
+    *room.source.borrow_mut() = Some(source.clone());
+    let _ = named::<IUIElement>(&room.root, "Notice").and_then(|n| n.SetVisibility(Visibility::Collapsed));
+    let _ = room.bar.apply_sound();
+    true
 }
 
 /// Leaves the room on show, if there is one.
@@ -212,6 +264,9 @@ pub fn open(room_id: u64, title: &str, uploader: &str, uid: u64) -> Result<()> {
     let shown = Rc::new(Room {
         root: root.clone(),
         room_id,
+        title: title.to_owned(),
+        uploader: uploader.to_owned(),
+        uid,
         opened: Instant::now(),
         player: RefCell::default(),
         source: RefCell::default(),
@@ -231,6 +286,8 @@ pub fn open(room_id: u64, title: &str, uploader: &str, uid: u64) -> Result<()> {
     on_click(&root, "Full", toggle_full)?;
     on_click(&root, "DanmakuSwitch", toggle_danmaku)?;
     on_click(&root, "Quality", choose_quality)?;
+    on_click(&root, "Pip", toggle_pip)?;
+    named::<IUIElement>(&root, "Pip")?.SetVisibility(Visibility::Visible)?;
     on_click(&root, "SendButton", send)?;
     on_enter(&root, "SendText", send)?;
     let chat = named::<IFrameworkElement>(&root, "Chat")?;
@@ -391,6 +448,11 @@ fn playing(source: std::result::Result<(MediaSource, Offer), Stop>) -> Result<()
         Err(Stop::OffAir) => return notice(&room.root, OFF_AIR_GLYPH, "主播现在没有开播"),
         Err(Stop::Failed(problem)) => return notice(&room.root, FAILED_GLYPH, &format!("无法播放：{problem}")),
     };
+    if pip::holds(room.room_id) {
+        // The small window plays this room already.
+        media::close_source(Some(source));
+        return notice(&room.root, PIP_GLYPH, IN_PIP);
+    }
     let player = media::play(&named::<IMediaPlayerElement>(&room.root, "Video")?, &source)?;
     player.cast::<IMediaPlayer>()?.Play()?;
     *room.player.borrow_mut() = Some(player);

@@ -60,8 +60,16 @@ const MARKUP: &str = r##"
                     MaxWidth="560" Margin="12,0" />
     <TextBlock x:Name="Online" Grid.Column="5" VerticalAlignment="Center" FontSize="12" Foreground="White"
                Margin="12,0" />
-    <Button x:Name="Quality" Grid.Column="6" Visibility="Collapsed" Background="Transparent" Foreground="White"
-            BorderThickness="0" Padding="8,6" FontSize="12" VerticalAlignment="Center" />
+    <StackPanel Grid.Column="6" Orientation="Horizontal">
+      <Button x:Name="Quality" Visibility="Collapsed" Background="Transparent" Foreground="White"
+              BorderThickness="0" Padding="8,6" FontSize="12" VerticalAlignment="Center" />
+      <Button x:Name="Pip" Visibility="Collapsed" Background="Transparent" Foreground="White" BorderThickness="0"
+              Padding="8,6" VerticalAlignment="Center">
+        <StackPanel Orientation="Horizontal">
+          <FontIcon Glyph="&#xE8A7;" FontSize="14" /><TextBlock Text="小窗" FontSize="12" Margin="6,0,0,0" />
+        </StackPanel>
+      </Button>
+    </StackPanel>
     <Button x:Name="Full" Grid.Column="7" Background="Transparent" Foreground="White" BorderThickness="0"
             Padding="8,6" VerticalAlignment="Center">
       <FontIcon x:Name="FullIcon" Glyph="&#xE740;" FontSize="16" />

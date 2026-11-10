@@ -324,6 +324,8 @@
 
 直播（2026-11-06）：系统 `AdaptiveMediaSource` 接受 B 站 HLS 地址，经带请求头的 `HttpClient` 下载；FLV 不用。弹幕复用播放页的 `Overlay`，时钟换成进房后的时长。
 
+直播小窗：`CoreApplication::CreateNewViewFromMainView` 建第二个视图（自己的 UI 线程），`ApplicationViewSwitcher::TryShowAsViewModeAsync(CompactOverlay)` 置顶显示。播放器在两个视图间移交，每次都是原来的元素先放手、新元素再接；小窗被手动关闭（`Consolidated`）时，若直播间还在就接回，否则关闭播放器。UI Automation 和 `EnumWindows` 都找不到 CompactOverlay 窗口，自动测试只能从直播间一侧和视图自身的 `Window.Visible / Bounds` 判断。
+
 页面返回：`Shell.returns` 是一个返回栈。从视频或直播间进 UP 主页、从 UP 主页进视频或专栏时压入回到原页的闭包，`back()` 弹出执行，空了就回到当前导航项；从导航切换时清空。UP 主页对象由闭包持有，回来时列表和位置都在；视频和直播间回来时重新打开，视频从头播放。
 
 无缝换清晰度：新源放进第二个不上屏的 `MediaPlayer`。视频暂停在当前位置 4 秒之后缓冲好，旧源走到该点时接管；直播等新源开始播放后接管。超时则直接接管（视频）或放弃（直播）。
