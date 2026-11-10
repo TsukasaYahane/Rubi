@@ -17,9 +17,9 @@ use crate::ui::shell::shell;
 use crate::ui::{keep, media, named, post};
 use crate::xaml::{
     CompositionBrush, CompositionStretch, Compositor, ElementCompositionPreview, IClosable, ICompositionObject,
-    ICompositionSurfaceBrush, ICompositor, IFrameworkElement, IMediaPlayer, IMediaPlayer4, IMediaPlayerSurface,
-    ISpriteVisual, IUIElement, IVisual, MediaPlayer, MediaPlayerSurface, MediaSource, SizeChangedEventArgs,
-    SpriteVisual, UIElement, Visibility,
+    ICompositionSurfaceBrush, ICompositor, IFrameworkElement, IMediaPlaybackSession, IMediaPlayer, IMediaPlayer3,
+    IMediaPlayer4, IMediaPlayerSurface, ISpriteVisual, IUIElement, IVisual, MediaPlaybackSession, MediaPlayer,
+    MediaPlayerSurface, MediaSource, Size, SizeChangedEventArgs, SpriteVisual, UIElement, Visibility,
 };
 
 /// How long the old picture stays under the new one: the new one's first frame must be up.
@@ -65,6 +65,29 @@ fn picture(root: &IFrameworkElement, name: &str, compositor: &Compositor) -> Res
     Ok(Picture { visual, surface: RefCell::default() })
 }
 
+/// The player draws onto a surface of the video's own size, which the brush scales to the
+/// picture: otherwise it picks a size of its own and the picture comes out cut or stretched. The
+/// size is set again when the stream's changes (a new quality, a rotated part).
+fn follow_video_size(player: &MediaPlayer) -> Result<()> {
+    let session = player.cast::<IMediaPlayer3>()?.PlaybackSession()?.cast::<IMediaPlaybackSession>()?;
+    size_surface(player, &session);
+    let sized = player.clone();
+    keep(session.NaturalVideoSizeChanged(move |session: Ref<MediaPlaybackSession>, _: Ref<IInspectable>| {
+        if let Ok(session) = session.ok().and_then(|s| s.cast::<IMediaPlaybackSession>()) {
+            size_surface(&sized, &session);
+        }
+    })?);
+    Ok(())
+}
+
+fn size_surface(player: &MediaPlayer, session: &IMediaPlaybackSession) {
+    let (Ok(width), Ok(height)) = (session.NaturalVideoWidth(), session.NaturalVideoHeight()) else { return };
+    if width > 0 && height > 0 {
+        let size = Size { width: width as f32, height: height as f32 };
+        let _ = player.cast::<IMediaPlayer4>().and_then(|p| p.SetSurfaceSize(size));
+    }
+}
+
 fn fit(visual: &SpriteVisual, width: f64, height: f64) -> Result<()> {
     visual.cast::<IVisual>()?.SetSize(Vector2 { x: width as f32, y: height as f32 })
 }
@@ -98,6 +121,7 @@ impl TwinVideo {
     fn attach(&self, at: usize, player: &MediaPlayer) -> Result<()> {
         self.detach(at);
         let surface = player.cast::<IMediaPlayer4>()?.GetSurface(&self.compositor)?;
+        follow_video_size(player)?;
         let content = surface.cast::<IMediaPlayerSurface>()?.CompositionSurface()?;
         let brush = self.compositor.cast::<ICompositor>()?.CreateSurfaceBrushWithSurface(&content)?;
         brush.cast::<ICompositionSurfaceBrush>()?.SetStretch(CompositionStretch::Uniform)?;
