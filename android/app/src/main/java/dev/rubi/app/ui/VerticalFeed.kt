@@ -331,18 +331,21 @@ private fun FeedPage(deps: VideoPageDeps, nav: Nav, state: VerticalFeedState, ca
         detail = runCatching { videos.videoDetail(card.bvid) }.getOrNull()
         rel = runCatching { if (accountService.account().loggedIn) actionsService.relation(card.bvid) else null }.getOrNull()
     }
-    // The cover stays over the picture until this video's own first frame is drawn: before that
-    // the player may still show the last frame of the video before.
+    // The cover stays over the picture until this video's own first frame is drawn. A frame
+    // drawn before this video is loaded is the last one's: the new view, joining the player
+    // while it still holds the video before, has it drawn again.
     var framed by remember { mutableStateOf(false) }
+    var loaded by remember { mutableStateOf(false) }
     DisposableEffect(active) {
         if (!active) {
             framed = false
+            loaded = false
             return@DisposableEffect onDispose {}
         }
         val player = media.player.get()
         val listener = object : Player.Listener {
             override fun onRenderedFirstFrame() {
-                framed = true
+                if (loaded) framed = true
             }
         }
         player.addListener(listener)
@@ -355,9 +358,11 @@ private fun FeedPage(deps: VideoPageDeps, nav: Nav, state: VerticalFeedState, ca
             return@LaunchedEffect
         }
         framed = false
+        loaded = false
         media.player.clear()
         runCatching {
             val pb = videos.playback(card.bvid, PlaybackPrefs.preferredQuality(settings))
+            loaded = true
             media.player.play(pb, card.title, startMs)
             started = true
             playing = true

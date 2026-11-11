@@ -121,10 +121,6 @@ class MainPlayer(context: Context) {
         bindService()
     }
 
-    /**
-     * Stops and empties the player, so nothing of the previous video keeps playing or stays
-     * on screen while the next one loads. The view then shows its black shutter.
-     */
     /** A live room: HLS or FLV, the first of its streams that plays. */
     fun playLive(play: FfiLivePlay, title: String, artist: String) {
         if (play.streams.isEmpty()) return
@@ -153,6 +149,10 @@ class MainPlayer(context: Context) {
         Log.i(TAG, "live attempt ${l.attempt + 1}/${l.play.streams.size}: ${if (s.hls) "hls" else "flv"} ${host(s.url)}")
     }
 
+    /**
+     * Stops and empties the player, so nothing of the previous video keeps playing or stays
+     * on screen while the next one loads. The view then shows its black shutter.
+     */
     fun clear() {
         current = null
         live = null
