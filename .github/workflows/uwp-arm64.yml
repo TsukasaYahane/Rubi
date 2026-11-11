@@ -1,0 +1,73 @@
+name: UWP ARM64 check
+
+# Run by hand before a release: there is no ARM64 Windows device to try the Surface build on, so this
+# runs the Rust core's tests natively on ARM64 Windows, then builds, installs and starts the ARM64
+# package and checks it is still running a little later. Touch, playback and battery still need a
+# real device.
+on:
+  workflow_dispatch:
+
+env:
+  CARGO_TERM_COLOR: always
+  UWP_TOOLCHAIN: nightly-2026-10-15
+
+jobs:
+  arm64:
+    name: core tests · package · start
+    runs-on: windows-11-arm
+    steps:
+      - uses: actions/checkout@v5
+
+      # The C in the dependencies (ring, SQLite) builds for ARM with clang only.
+      - name: clang
+        shell: pwsh
+        run: |
+          $llvm = Join-Path $env:ProgramFiles 'LLVM\bin'
+          if (-not (Test-Path (Join-Path $llvm 'clang.exe'))) { choco install llvm -y --no-progress }
+          Add-Content $env:GITHUB_PATH $llvm
+      - name: clang version
+        run: clang --version
+
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      - name: Core tests (native ARM64)
+        run: cargo test -p rubi-model -p rubi-filter -p rubi-recommend -p rubi-store -p rubi-api -p rubi-core
+
+      - name: UWP toolchain
+        run: rustup toolchain install ${{ env.UWP_TOOLCHAIN }} --profile minimal --component rust-src
+      - name: Package
+        shell: pwsh
+        env:
+          CARGO_TARGET_DIR: ${{ runner.temp }}\uwp-target
+          CARGO_HOME: ${{ runner.temp }}\cargo-home
+        run: ./scripts/build-uwp.ps1 -Profile release -Arch arm64 -Package
+
+      - name: Install
+        shell: pwsh
+        run: |
+          Import-Certificate -FilePath dist\rubi-uwp.cer -CertStoreLocation Cert:\LocalMachine\TrustedPeople | Out-Null
+          $dependencies = @()
+          if (-not (Get-AppxPackage -Name 'Microsoft.VCLibs.140.00' | Where-Object Architecture -eq 'Arm64')) {
+            $vclibs = Get-ChildItem "${env:ProgramFiles(x86)}\Microsoft SDKs\Windows Kits\10\ExtensionSDKs\Microsoft.VCLibs\14.0\Appx\Retail\arm64\*.appx" -ErrorAction SilentlyContinue | Select-Object -First 1
+            if (-not $vclibs) { throw 'Microsoft.VCLibs.140.00 (arm64) is neither installed nor in the Windows SDK.' }
+            $dependencies += $vclibs.FullName
+          }
+          Add-AppxPackage -Path dist\rubi-uwp-arm64.msix -DependencyPath $dependencies
+          Get-AppxPackage -Name Rubi | Format-List Name, Version, Architecture, PackageFamilyName
+
+      - name: Start and stay up
+        shell: pwsh
+        run: |
+          $family = (Get-AppxPackage -Name Rubi).PackageFamilyName
+          Start-Process "shell:AppsFolder\$family!App"
+          Start-Sleep -Seconds 20
+          $process = Get-Process -Name rubi -ErrorAction SilentlyContinue
+          if (-not $process) { throw 'Rubi is not running 20 s after start.' }
+          $process | Format-Table Id, @{ n = 'MB'; e = { [math]::Round($_.WorkingSet64 / 1MB) } }, CPU, StartTime
+
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: rubi-uwp-arm64
+          path: dist/rubi-uwp-arm64.msix
+          retention-days: 14
