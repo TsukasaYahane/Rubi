@@ -1,10 +1,10 @@
 //! Two pictures, one above the other, so a new stream can come up behind the one on show and take
 //! its place without the picture ever standing empty.
 //!
-//! A picture is a composition visual inside an empty element, painted with the player's own
-//! surface. The surface keeps the video's size and the brush scales it into the visual, so the
-//! picture follows a resize at once: a `MediaPlayerElement` remakes its surface on each new size,
-//! and many in a row could leave it blank.
+//! A picture is a composition visual inside an empty element, painted with a surface the app draws
+//! the player's frames into ([`Frames`]). The surface keeps the video's size and the brush scales it
+//! into the visual, so the picture follows a resize at once: a `MediaPlayerElement` remakes its
+//! surface on each new size, and many in a row could leave it blank.
 
 use std::cell::{Cell, RefCell};
 use std::rc::Rc;
@@ -13,13 +13,14 @@ use std::time::Duration;
 use windows_core::{IInspectable, Interface, Ref, Result};
 use windows_numerics::Vector2;
 
+use crate::ui::frames::Frames;
 use crate::ui::shell::shell;
 use crate::ui::{keep, media, named, post};
 use crate::xaml::{
-    CompositionBrush, CompositionStretch, Compositor, ElementCompositionPreview, IClosable, ICompositionObject,
+    CompositionBrush, CompositionStretch, Compositor, ElementCompositionPreview, ICompositionObject,
     ICompositionSurfaceBrush, ICompositor, IFrameworkElement, IMediaPlaybackSession, IMediaPlayer, IMediaPlayer3,
-    IMediaPlayer4, IMediaPlayerSurface, ISpriteVisual, IUIElement, IVisual, MediaPlaybackSession, MediaPlayer,
-    MediaPlayerSurface, MediaSource, Size, SizeChangedEventArgs, SpriteVisual, UIElement, Visibility,
+    ISpriteVisual, IUIElement, IVisual, MediaPlaybackSession, MediaPlayer, MediaSource, SizeChangedEventArgs,
+    SpriteVisual, UIElement, Visibility,
 };
 
 /// How long the old picture stays under the new one: the new one's first frame must be up.
@@ -30,10 +31,10 @@ const NAMES: [&str; 2] = ["Video", "VideoNext"];
 /// left in place makes the compositor draw the video with the page, and danmaku stutter with it.
 pub const SECOND_ELEMENT: &str = r##"x:Name="VideoNext" Visibility="Collapsed" IsHitTestVisible="False""##;
 
-/// One picture: the visual in its element, and the surface it shows while it has a player.
+/// One picture: the visual in its element, and the frames it shows while it has a player.
 struct Picture {
     visual: SpriteVisual,
-    surface: RefCell<Option<MediaPlayerSurface>>,
+    frames: RefCell<Option<Frames>>,
 }
 
 pub struct TwinVideo {
@@ -62,23 +63,22 @@ fn picture(root: &IFrameworkElement, name: &str, compositor: &Compositor) -> Res
             let _ = fit(&sizing, width, height);
         }
     })?);
-    Ok(Picture { visual, surface: RefCell::default() })
+    Ok(Picture { visual, frames: RefCell::default() })
 }
 
-/// The player draws onto a surface of the video's own size, which the brush scales to the
-/// picture: otherwise it picks a size of its own and the picture comes out cut or stretched. The
-/// size is set again when the stream's changes (a new quality, a rotated part).
-/// Until the size is known the picture stays hidden: the first frames come at a size of the
-/// player's own and would show cut.
-fn follow_video_size(player: &MediaPlayer, visual: &SpriteVisual) -> Result<()> {
+/// The frames are drawn at the video's own size, which the brush scales to the picture. The size
+/// is set again when the stream's changes (a new quality, a rotated part). Until the size is known
+/// the picture stays hidden.
+fn follow_video_size(player: &MediaPlayer, frames: &Frames, visual: &SpriteVisual) -> Result<()> {
     let session = player.cast::<IMediaPlayer3>()?.PlaybackSession()?.cast::<IMediaPlaybackSession>()?;
-    let sized_now = size_surface(player, &session);
+    let resize = frames.resizer();
+    let sized_now = size_surface(&resize, &session);
     visual.cast::<IVisual>()?.SetOpacity(if sized_now { 1.0 } else { 0.0 })?;
     let Some(dispatcher) = shell().map(|s| s.dispatcher.clone()) else { return Ok(()) };
-    let (sized, showing) = (player.clone(), visual.clone());
+    let showing = visual.clone();
     keep(session.NaturalVideoSizeChanged(move |session: Ref<MediaPlaybackSession>, _: Ref<IInspectable>| {
         let Ok(session) = session.ok().and_then(|s| s.cast::<IMediaPlaybackSession>()) else { return };
-        if size_surface(&sized, &session) {
+        if size_surface(&resize, &session) {
             let visual = showing.clone();
             post(&dispatcher, move || {
                 let _ = visual.cast::<IVisual>().and_then(|v| v.SetOpacity(1.0));
@@ -88,14 +88,10 @@ fn follow_video_size(player: &MediaPlayer, visual: &SpriteVisual) -> Result<()> 
     Ok(())
 }
 
-/// Sizes the player's surface to the stream; whether the stream's size was known.
-fn size_surface(player: &MediaPlayer, session: &IMediaPlaybackSession) -> bool {
+/// Sizes the frames to the stream; whether the stream's size was known.
+fn size_surface(resize: &impl Fn(u32, u32) -> Result<()>, session: &IMediaPlaybackSession) -> bool {
     let (Ok(width), Ok(height)) = (session.NaturalVideoWidth(), session.NaturalVideoHeight()) else { return false };
-    if width == 0 || height == 0 {
-        return false;
-    }
-    let size = Size { width: width as f32, height: height as f32 };
-    player.cast::<IMediaPlayer4>().and_then(|p| p.SetSurfaceSize(size)).is_ok()
+    width != 0 && height != 0 && resize(width, height).is_ok()
 }
 
 fn fit(visual: &SpriteVisual, width: f64, height: f64) -> Result<()> {
@@ -130,13 +126,12 @@ impl TwinVideo {
     /// Shows `player` in picture `at`.
     fn attach(&self, at: usize, player: &MediaPlayer) -> Result<()> {
         self.detach(at);
-        let surface = player.cast::<IMediaPlayer4>()?.GetSurface(&self.compositor)?;
-        follow_video_size(player, &self.pictures[at].visual)?;
-        let content = surface.cast::<IMediaPlayerSurface>()?.CompositionSurface()?;
-        let brush = self.compositor.cast::<ICompositor>()?.CreateSurfaceBrushWithSurface(&content)?;
+        let frames = Frames::start(&self.compositor, player)?;
+        follow_video_size(player, &frames, &self.pictures[at].visual)?;
+        let brush = self.compositor.cast::<ICompositor>()?.CreateSurfaceBrushWithSurface(frames.surface())?;
         brush.cast::<ICompositionSurfaceBrush>()?.SetStretch(CompositionStretch::Uniform)?;
         self.pictures[at].visual.cast::<ISpriteVisual>()?.SetBrush(&brush.cast::<CompositionBrush>()?)?;
-        *self.pictures[at].surface.borrow_mut() = Some(surface);
+        *self.pictures[at].frames.borrow_mut() = Some(frames);
         Ok(())
     }
 
@@ -144,9 +139,7 @@ impl TwinVideo {
     fn detach(&self, at: usize) {
         let picture = &self.pictures[at];
         let _ = picture.visual.cast::<ISpriteVisual>().and_then(|v| v.SetBrush(None::<&CompositionBrush>));
-        if let Some(surface) = picture.surface.borrow_mut().take() {
-            let _ = surface.cast::<IClosable>().and_then(|s| s.Close());
-        }
+        picture.frames.borrow_mut().take();
     }
 
     /// Shows `player` in the picture on show.
