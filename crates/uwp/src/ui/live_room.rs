@@ -176,7 +176,7 @@ fn overlay_of(asked: u64) -> Option<Rc<Overlay>> {
 fn toggle_pip() {
     let Some(room) = room() else { return };
     if pip::holds(room.room_id) {
-        pip::back_to_room();
+        pip::back();
         return;
     }
     if room.player.borrow().is_none() || room.source.borrow().is_none() {
@@ -195,7 +195,7 @@ fn toggle_pip() {
     let _ = notice(&room.root, PIP_GLYPH, IN_PIP);
     let shown =
         pip::Room { id: room.room_id, title: room.title.clone(), uploader: room.uploader.clone(), uid: room.uid };
-    if let Err(problem) = pip::open(shown, player, source) {
+    if let Err(problem) = pip::open(pip::Owner::Live(shown), player, source) {
         toast(&format!("小窗打不开：{}", problem.message()));
     }
 }

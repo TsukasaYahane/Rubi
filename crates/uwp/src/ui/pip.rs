@@ -1,5 +1,5 @@
-//! 小窗: a live room's picture alone, in a small window of its own that stays on top while the
-//! main window goes on as usual. The window is a second view with its own UI thread: the player
+//! 小窗: a live room's or a video's picture alone, in a small window of its own that stays on top
+//! while the main window goes on as usual. The window is a second view with its own UI thread: the player
 //! moves there and back, and each element lets go of it before another takes it.
 
 use std::cell::RefCell;
@@ -7,7 +7,7 @@ use std::cell::RefCell;
 use windows_core::{IInspectable, Interface, Ref, Result};
 
 use crate::ui::shell::{shell, toast};
-use crate::ui::{keep, live_room, load, media, named, on_click, post};
+use crate::ui::{keep, live_room, load, media, named, on_click, player, post};
 use crate::xaml::{
     ApplicationView, ApplicationViewConsolidatedEventArgs, ApplicationViewMode, ApplicationViewSwitcher, Color,
     CoreApplication, CoreDispatcher, IApplicationView, IApplicationView3, IApplicationView4, ICoreApplicationView2,
@@ -48,9 +48,9 @@ const LAYOUT: &str = r##"
   <Border x:Name="PipDrag" Height="32" VerticalAlignment="Top" Background="Transparent" />
 </Grid>"##;
 
-/// The room playing in the small window, as the main thread holds it.
+/// What plays in the small window, as the main thread holds it.
 struct Pip {
-    room: Room,
+    owner: Owner,
     player: MediaPlayer,
     source: MediaSource,
     /// The small window's thread, once it is up.
@@ -66,6 +66,21 @@ pub struct Room {
     pub uid: u64,
 }
 
+/// What reopens the video page.
+#[derive(Clone)]
+pub struct Video {
+    pub bvid: String,
+    pub title: String,
+    pub uploader: String,
+}
+
+/// Whose picture the small window shows.
+#[derive(Clone)]
+pub enum Owner {
+    Live(Room),
+    Video(Video),
+}
+
 thread_local! {
     /// On the main thread.
     static PIP: RefCell<Option<Pip>> = const { RefCell::new(None) };
@@ -77,18 +92,23 @@ thread_local! {
 
 /// Whether room `id` plays in the small window.
 pub fn holds(id: u64) -> bool {
-    PIP.with_borrow(|p| p.as_ref().is_some_and(|p| p.room.id == id))
+    PIP.with_borrow(|p| p.as_ref().is_some_and(|p| matches!(&p.owner, Owner::Live(room) if room.id == id)))
+}
+
+/// Whether video `bvid` plays in the small window.
+pub fn holds_video(bvid: &str) -> bool {
+    PIP.with_borrow(|p| p.as_ref().is_some_and(|p| matches!(&p.owner, Owner::Video(video) if video.bvid == bvid)))
 }
 
 /// Moves `player` into a small window of its own. The caller's element has let go of it.
-pub fn open(room: Room, player: MediaPlayer, source: MediaSource) -> Result<()> {
+pub fn open(owner: Owner, player: MediaPlayer, source: MediaSource) -> Result<()> {
     let Some(shell) = shell() else { return Ok(()) };
     if let Some(old) = PIP.with_borrow_mut(Option::take) {
         retire(old);
     }
     let view = CoreApplication::CreateNewViewFromMainView()?;
     let dispatcher = view.cast::<ICoreApplicationView2>()?.Dispatcher()?;
-    PIP.with_borrow_mut(|p| *p = Some(Pip { room, player: player.clone(), source, view: Some(dispatcher.clone()) }));
+    PIP.with_borrow_mut(|p| *p = Some(Pip { owner, player: player.clone(), source, view: Some(dispatcher.clone()) }));
     let main = shell.dispatcher.clone();
     post(&dispatcher, move || {
         let shown = show_window(&player, &main);
@@ -96,14 +116,14 @@ pub fn open(room: Room, player: MediaPlayer, source: MediaSource) -> Result<()> 
             Ok(id) => ask_to_show(id),
             Err(problem) => {
                 toast(&format!("小窗打不开：{}", problem.message()));
-                back_to_room();
+                back();
             }
         });
     });
     Ok(())
 }
 
-/// Asks the system to show view `id` as a small window on top; if it will not, the room takes
+/// Asks the system to show view `id` as a small window on top; if it will not, the page takes
 /// its picture back.
 fn ask_to_show(id: i32) {
     let Some(main) = shell().map(|s| s.dispatcher.clone()) else { return };
@@ -111,7 +131,7 @@ fn ask_to_show(id: i32) {
         Ok(asked) => asked,
         Err(problem) => {
             toast(&format!("小窗打不开：{}", problem.message()));
-            back_to_room();
+            back();
             return;
         }
     };
@@ -120,7 +140,7 @@ fn ask_to_show(id: i32) {
         if !asked.join().unwrap_or(false) {
             post(&main, || {
                 toast("系统没有让小窗打开");
-                back_to_room();
+                back();
             });
         }
     });
@@ -134,7 +154,7 @@ fn show_window(player: &MediaPlayer, main: &CoreDispatcher) -> Result<i32> {
     ELEMENT.with_borrow_mut(|e| *e = Some(element));
     wake_menu_on_mouse(&root)?;
     let asking = main.clone();
-    on_click(&root, "PipBack", move || post(&asking, back_to_room))?;
+    on_click(&root, "PipBack", move || post(&asking, back))?;
     on_click(&root, "PipClose", close_window)?;
     let window = Window::Current()?;
     window.cast::<IWindow>()?.SetContent(&root.cast::<UIElement>()?)?;
@@ -219,19 +239,28 @@ fn let_go() {
     }
 }
 
-/// The small window was closed by hand, and its element has let go: the room takes its picture
+/// Gives the player back to the page of `owner` if that page is on show without a picture.
+fn take_back(owner: &Owner, player: &MediaPlayer, source: &MediaSource) -> bool {
+    match owner {
+        Owner::Live(room) => live_room::take_back(room.id, player, source),
+        Owner::Video(video) => player::take_back(&video.bvid, player, source),
+    }
+}
+
+/// The small window was closed by hand, and its element has let go: the page takes its picture
 /// back if it is on show, and otherwise the player goes.
 fn closed() {
     let Some(pip) = PIP.with_borrow_mut(Option::take) else { return };
-    if !live_room::take_back(pip.room.id, &pip.player, &pip.source) {
+    if !take_back(&pip.owner, &pip.player, &pip.source) {
         media::close(Some(pip.player), Some(pip.source));
     }
 }
 
-/// Ends the small window and goes back to the room, opening it again if it was left.
-pub fn back_to_room() {
+/// Ends the small window and goes back to its page, opening it again if it was left: a video
+/// goes on from where the small window was.
+pub fn back() {
     let Some(pip) = PIP.with_borrow_mut(Option::take) else { return };
-    let room = pip.room.clone();
+    let owner = pip.owner.clone();
     let (view, main) = (pip.view.clone(), shell().map(|s| s.dispatcher.clone()));
     let (Some(view), Some(main)) = (view, main) else {
         media::close(Some(pip.player), Some(pip.source));
@@ -247,15 +276,20 @@ pub fn back_to_room() {
         let held = held.lock().unwrap_or_else(|e| e.into_inner()).take();
         post(&main, move || {
             let Some((player, source)) = held else { return };
-            if !live_room::take_back(room.id, &player, &source) {
-                media::close(Some(player), Some(source));
-                let _ = live_room::open(room.id, &room.title, &room.uploader, room.uid);
+            if take_back(&owner, &player, &source) {
+                return;
             }
+            let at = media::session_of(&player).and_then(|s| s.Position()).map_or(0, |p| p.duration);
+            media::close(Some(player), Some(source));
+            let _ = match &owner {
+                Owner::Live(room) => live_room::open(room.id, &room.title, &room.uploader, room.uid),
+                Owner::Video(video) => player::open_at(&video.bvid, &video.title, &video.uploader, at),
+            };
         });
     });
 }
 
-/// Ends a small window another room replaces: its element lets go, then its player closes.
+/// Ends a small window another one replaces: its element lets go, then its player closes.
 fn retire(pip: Pip) {
     let Some(view) = pip.view else {
         media::close(Some(pip.player), Some(pip.source));

@@ -34,7 +34,7 @@ use crate::ui::splitter;
 use crate::ui::twin_video::{SECOND_ELEMENT, TwinVideo};
 use crate::ui::up;
 use crate::ui::watch;
-use crate::ui::{load, named, on_click, on_enter, post, set_text, soon};
+use crate::ui::{load, named, on_click, on_enter, pip, post, set_text, soon};
 use crate::xaml::{
     AdaptiveMediaSource, Color, DataWriter, FocusManager, FocusState, FrameworkElement, Grid, GridLength, GridUnitType,
     IButtonBase, IColumnDefinition, IContentControl, IControl, IDataWriter, IFontIcon, IFrameworkElement,
@@ -208,6 +208,8 @@ thread_local! {
     static NEXT_EPISODE: Cell<Option<(u64, u64)>> = const { Cell::new(None) };
     /// What `PLAYING` plays: closing it lets go of its connections.
     static SOURCE: RefCell<Option<MediaSource>> = const { RefCell::new(None) };
+    /// Where the next opening of a video starts, in 100 ns ticks: back from the small window.
+    static NEXT_START: RefCell<Option<(String, i64)>> = const { RefCell::new(None) };
     /// The page on show, while there is one.
     static PAGE: RefCell<Option<Page>> = const { RefCell::new(None) };
 }
@@ -221,6 +223,9 @@ struct Page {
     overlay: Rc<RefCell<Option<Rc<Overlay>>>>,
     /// What 发弹幕 needs: the video, and its part once known.
     bvid: String,
+    /// What reopens it from the small window.
+    title: String,
+    uploader: String,
     cid: Rc<Cell<u64>>,
     /// The 竖屏推流 layout, not the ordinary one.
     feed: bool,
@@ -488,6 +493,53 @@ fn apply_layout(root: &IFrameworkElement) -> Result<()> {
     named::<IRowDefinition>(root, "VideoRow")?.SetHeight(video)
 }
 
+/// Moves the picture into the small window, or brings it back.
+fn toggle_pip() {
+    let Some(page) = page() else { return };
+    if pip::holds_video(&page.bvid) {
+        pip::back();
+        return;
+    }
+    if PLAYING.with(|p| p.borrow().is_none()) {
+        return;
+    }
+    if let Some(standby) = page.standby.borrow_mut().take() {
+        let _ = page.video.clear_next();
+        media::close(Some(standby.player), Some(standby.source));
+    }
+    // The page's elements let go before the small window takes the player.
+    page.video.clear();
+    let (Some(player), Some(source)) =
+        (PLAYING.with(|p| p.borrow_mut().take()), SOURCE.with(|s| s.borrow_mut().take()))
+    else {
+        return;
+    };
+    let _ = leave_full();
+    toast("在小窗播放");
+    let video = pip::Video { bvid: page.bvid.clone(), title: page.title.clone(), uploader: page.uploader.clone() };
+    if let Err(problem) = pip::open(pip::Owner::Video(video), player, source) {
+        toast(&format!("小窗打不开：{}", problem.message()));
+    }
+}
+
+/// Takes the picture back from the small window, if video `bvid` is on show and has none.
+pub fn take_back(bvid: &str, player: &MediaPlayer, source: &MediaSource) -> bool {
+    let Some(page) = page().filter(|p| p.bvid == bvid) else { return false };
+    if PLAYING.with(|p| p.borrow().is_some()) || page.video.show(player).is_err() {
+        return false;
+    }
+    PLAYING.with(|p| *p.borrow_mut() = Some(player.clone()));
+    SOURCE.with(|s| *s.borrow_mut() = Some(source.clone()));
+    let _ = page.bar.apply_sound();
+    true
+}
+
+/// Opens video `bvid` again, starting `at` (100 ns ticks) in: back from the small window.
+pub fn open_at(bvid: &str, title: &str, uploader: &str, at: i64) -> Result<()> {
+    NEXT_START.with_borrow_mut(|n| *n = Some((bvid.to_owned(), at)));
+    open(false, bvid, title, uploader)
+}
+
 /// Stops the video and lets its player go.
 pub fn leave() {
     watch::stop();
@@ -567,6 +619,8 @@ pub fn open(feed: bool, bvid: &str, title: &str, uploader: &str) -> Result<()> {
         actions,
         overlay: shown_overlay,
         bvid: bvid.to_owned(),
+        title: title.to_owned(),
+        uploader: uploader.to_owned(),
         cid,
         feed,
         episode,
@@ -594,6 +648,8 @@ pub fn open(feed: bool, bvid: &str, title: &str, uploader: &str) -> Result<()> {
     on_click(&root, "WindowFull", toggle_window_full)?;
     named::<IUIElement>(&root, "WindowFull")?.SetVisibility(Visibility::Visible)?;
     on_click(&root, "Quality", choose_quality)?;
+    on_click(&root, "Pip", toggle_pip)?;
+    named::<IUIElement>(&root, "Pip")?.SetVisibility(Visibility::Visible)?;
     on_click(&root, "UpLink", open_up)?;
     on_click(&root, "PlayPause", toggle_play)?;
     on_click(&root, "Prev", || queue::step(-1))?;
@@ -1081,6 +1137,10 @@ fn play(source: &MediaSource) -> Result<MediaPlaybackSession> {
     }
     player.cast::<IMediaPlayer>()?.Play()?;
     let session = player.cast::<IMediaPlayer3>()?.PlaybackSession()?;
+    let start = NEXT_START.take().filter(|(bvid, _)| page().is_some_and(|p| &p.bvid == bvid));
+    if let Some((_, at)) = start {
+        let _ = session.cast::<IMediaPlaybackSession>()?.SetPosition(windows_time::TimeSpan { duration: at });
+    }
     PLAYING.with(|p| *p.borrow_mut() = Some(player));
     SOURCE.with(|s| *s.borrow_mut() = Some(source.clone()));
     if let Some(page) = page() {
