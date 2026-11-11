@@ -167,10 +167,15 @@ fn save_for_later(bvid: &str) {
 }
 
 fn copy(link: &str) {
+    copy_text(link, "已复制链接");
+}
+
+/// Puts `text` on the clipboard and says `done`, or that it failed.
+pub fn copy_text(text: &str, done: &str) {
     let copied = (|| {
         let package = DataPackage::new()?;
-        package.cast::<IDataPackage>()?.SetText(link)?;
+        package.cast::<IDataPackage>()?.SetText(text)?;
         Clipboard::SetContent(&package)
     })();
-    toast(if copied.is_ok() { "已复制链接" } else { "复制失败" });
+    toast(if copied.is_ok() { done } else { "复制失败" });
 }
