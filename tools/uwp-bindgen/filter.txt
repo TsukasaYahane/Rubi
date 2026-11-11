@@ -140,6 +140,8 @@ Windows.UI.Xaml.Controls.Primitives.Thumb
 Windows.UI.Xaml.Controls.RowDefinition
 Windows.UI.Xaml.Controls.TextBlock
 Windows.UI.Xaml.Controls.TextBlock::CreateInstance
+Windows.UI.Xaml.Controls.TextBlock::ForegroundProperty
+Windows.UI.Xaml.Controls.RichTextBlock::ForegroundProperty
 Windows.UI.Xaml.Controls.TextBox
 Windows.UI.Xaml.Controls.ToggleMenuFlyoutItem
 Windows.UI.Xaml.Controls.UIElementCollection

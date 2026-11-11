@@ -6,12 +6,14 @@ use std::rc::Rc;
 use std::sync::Arc;
 
 use rubi_core::PgcHit;
+use rubi_model::EsportsMatch;
 use windows_collections::IVector;
 use windows_core::{IInspectable, Interface, Ref, Result};
 
 use crate::state::pgc::paid;
 use crate::state::search::hit_line;
 use crate::ui::card_grid::{CardGrid, Source};
+use crate::ui::match_rows;
 use crate::ui::rows::{Covers, add_rows, on_row, on_row_click};
 use crate::ui::shell::shell;
 use crate::ui::{keep, load, named, on_click, on_enter, pgc_season, post, set_text, up};
@@ -36,6 +38,8 @@ const TAB_LABELS: [&str; 3] = ["综合", "视频", "UP 主"];
 const PGC_MOST: usize = 20;
 const PGC_FOLDED: usize = 3;
 const PGC_DECODE_WIDTH: i32 = 120;
+/// Matches shown before the fold.
+const MATCHES_FOLDED: usize = 3;
 const RED: Color = Color { a: 255, r: 0xE8, g: 0x11, b: 0x23 };
 
 const USER_ROW: &str = r##"
@@ -105,6 +109,15 @@ const LAYOUT: &str = r##"
     <Grid.RowDefinitions>
       <RowDefinition Height="Auto" /><RowDefinition Height="Auto" /><RowDefinition Height="*" />
     </Grid.RowDefinitions>
+    <StackPanel>
+    <StackPanel x:Name="MatchPart" Visibility="Collapsed">
+      <Grid Margin="16,2,16,2">
+        <TextBlock Text="赛事" FontSize="15" />
+        <Button x:Name="MatchMore" HorizontalAlignment="Right" Background="Transparent" BorderThickness="0"
+                Padding="0" Foreground="#0050EF" FontSize="12" Visibility="Collapsed" />
+      </Grid>
+      <!--matches-->
+    </StackPanel>
     <StackPanel x:Name="PgcPart" Visibility="Collapsed">
       <TextBlock Text="影视" FontSize="15" Margin="16,2,16,2" />
       <ListView x:Name="Pgc" SelectionMode="None" IsItemClickEnabled="True" ScrollViewer.VerticalScrollMode="Disabled">
@@ -140,6 +153,7 @@ const LAYOUT: &str = r##"
       <Button x:Name="PgcMore" Background="Transparent" BorderThickness="0" Padding="16,2" Foreground="#0050EF"
               FontSize="12" Visibility="Collapsed" />
     </StackPanel>
+    </StackPanel>
     <ListView x:Name="TopUsers" Grid.Row="1" SelectionMode="None" IsItemClickEnabled="True"
               ScrollViewer.VerticalScrollMode="Disabled"><!--users--></ListView>
     <Grid x:Name="Videos" Grid.Row="2" />
@@ -172,11 +186,16 @@ pub struct SearchPage {
     /// 影视 the search found, and whether all of them show.
     pgc: RefCell<Vec<PgcHit>>,
     pgc_all: Cell<bool>,
+    /// Matches the search found, and whether all of them show.
+    matches: RefCell<Vec<EsportsMatch>>,
+    matches_all: Cell<bool>,
 }
 
 impl SearchPage {
     fn new() -> Result<Rc<Self>> {
-        let root = load(&LAYOUT.replace("<!--users-->", USER_ROW))?;
+        let root = load(
+            &LAYOUT.replace("<!--users-->", USER_ROW).replace("<!--matches-->", &match_rows::list("Matches", true)),
+        )?;
         let videos = CardGrid::new(|| {
             if let Some(page) = held() {
                 let _ = page.show_status();
@@ -201,6 +220,8 @@ impl SearchPage {
             covers: Covers::default(),
             pgc: RefCell::default(),
             pgc_all: Cell::new(false),
+            matches: RefCell::default(),
+            matches_all: Cell::new(false),
         });
         let weak = Rc::downgrade(&page);
         let submit = move || {
@@ -221,6 +242,7 @@ impl SearchPage {
         }
         page.wire_hot()?;
         page.wire_pgc()?;
+        page.wire_matches()?;
         for (name, top) in [("TopUsers", true), ("Users", false)] {
             let list = named::<IFrameworkElement>(&page.root, name)?;
             let filling = Rc::downgrade(&page);
@@ -258,6 +280,66 @@ impl SearchPage {
                 let _ = page.show_pgc();
             }
         })
+    }
+
+    fn wire_matches(self: &Rc<Self>) -> Result<()> {
+        let list = named::<IFrameworkElement>(&self.root, "Matches")?;
+        let filling = Rc::downgrade(self);
+        on_row(&list, move |at, parts| {
+            let Some(page) = filling.upgrade() else { return Ok(()) };
+            let matches = page.matches.borrow();
+            let Some(game) = matches.get(at) else { return Ok(()) };
+            match_rows::fill(parts, game, true, &page.covers)
+        })?;
+        on_row_click(&list, |at| {
+            let Some(game) = held().and_then(|p| p.matches.borrow().get(at).cloned()) else { return };
+            let turn = held().map_or(0, |p| p.turn.get());
+            match_rows::open(&game, move |changed| {
+                let Some(page) = held().filter(|p| p.turn.get() == turn) else { return };
+                if let Some(slot) = page.matches.borrow_mut().get_mut(at) {
+                    *slot = changed;
+                }
+                let _ = page.show_matches();
+            });
+        })?;
+        let folding = Rc::downgrade(self);
+        on_click(&self.root, "MatchMore", move || {
+            if let Some(page) = folding.upgrade() {
+                page.matches_all.set(!page.matches_all.get());
+                let _ = page.show_matches();
+            }
+        })
+    }
+
+    fn load_matches(&self) {
+        let Some(shell) = shell() else { return };
+        let Some(backend) = shell.backend.get().cloned() else { return };
+        let (term, turn, dispatcher, core) =
+            (self.term.borrow().clone(), self.turn.get(), shell.dispatcher.clone(), backend.clone());
+        backend.spawn(async move {
+            let found = core.services.esports.related(&term).await.unwrap_or_default();
+            post(&dispatcher, move || {
+                if let Some(page) = held().filter(|p| p.turn.get() == turn) {
+                    *page.matches.borrow_mut() = found;
+                    let _ = page.show_matches();
+                }
+            });
+        });
+    }
+
+    /// The first few matches, or all of them once asked.
+    fn show_matches(&self) -> Result<()> {
+        let total = self.matches.borrow().len();
+        let shown = if self.matches_all.get() { total } else { total.min(MATCHES_FOLDED) };
+        let list = named::<IFrameworkElement>(&self.root, "Matches")?;
+        list.cast::<IItemsControl>()?.Items()?.cast::<IVector<IInspectable>>()?.Clear()?;
+        add_rows(&list, 0, shown)?;
+        let more = named::<IContentControl>(&self.root, "MatchMore")?;
+        let label = if self.matches_all.get() { "收起".to_owned() } else { format!("全部 {total} 场 ›") };
+        more.SetContent(&PropertyValue::CreateString(&label)?)?;
+        let folds = if total > MATCHES_FOLDED { Visibility::Visible } else { Visibility::Collapsed };
+        more.cast::<IUIElement>()?.SetVisibility(folds)?;
+        self.show_tab()
     }
 
     fn load_pgc(&self) {
@@ -401,12 +483,15 @@ impl SearchPage {
         self.hits_page.set(1);
         self.hits_ended.set(false);
         self.hits_loading.set(false);
-        for name in ["TopUsers", "Users", "Pgc"] {
+        for name in ["TopUsers", "Users", "Pgc", "Matches"] {
             named::<IItemsControl>(&self.root, name)?.Items()?.cast::<IVector<IInspectable>>()?.Clear()?;
         }
         self.pgc.borrow_mut().clear();
         self.pgc_all.set(false);
         self.load_pgc();
+        self.matches.borrow_mut().clear();
+        self.matches_all.set(false);
+        self.load_matches();
         self.tab.set(0);
         self.videos.open(Source::Search(Arc::from(term.as_str())))?;
         self.load_hits();
@@ -479,6 +564,8 @@ impl SearchPage {
         let shown = |on| if on { Visibility::Visible } else { Visibility::Collapsed };
         named::<IUIElement>(&self.root, "TopUsers")?.SetVisibility(shown(tab == 0))?;
         named::<IUIElement>(&self.root, "PgcPart")?.SetVisibility(shown(tab == 0 && !self.pgc.borrow().is_empty()))?;
+        named::<IUIElement>(&self.root, "MatchPart")?
+            .SetVisibility(shown(tab == 0 && !self.matches.borrow().is_empty()))?;
         named::<IUIElement>(&self.root, "Videos")?.SetVisibility(shown(tab != 2))?;
         named::<IUIElement>(&self.root, "Users")?.SetVisibility(shown(tab == 2))?;
         for at in 0..TAB_LABELS.len() {

@@ -1018,7 +1018,7 @@ fn open_settings() {
         .as_ref()
         .map(|o| o.look())
         .unwrap_or_else(|| shell().map(|s| s.prefs().danmaku).unwrap_or_default());
-    let _ = crate::ui::play_settings::show(&button, FIT.get(), look, |change| {
+    let _ = crate::ui::play_settings::show(&button, Some(FIT.get()), look, None, |change| {
         let Some(page) = self::page() else { return };
         match change {
             crate::ui::play_settings::Change::Fit(fit) => {

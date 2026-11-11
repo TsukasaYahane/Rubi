@@ -24695,6 +24695,25 @@ pub struct IRichTextBlockOverflow_Vtbl {
     pub base__: windows_core::IInspectable_Vtbl,
 }
 windows_core::imp::define_interface!(
+    IRichTextBlockStatics,
+    IRichTextBlockStatics_Vtbl,
+    0x492d883c_adea_433c_be1c_208a164262be
+);
+impl windows_core::RuntimeType for IRichTextBlockStatics {
+    const SIGNATURE: windows_core::imp::ConstBuffer = windows_core::imp::ConstBuffer::for_interface::<Self>();
+}
+#[repr(C)]
+pub struct IRichTextBlockStatics_Vtbl {
+    pub base__: windows_core::IInspectable_Vtbl,
+    FontSizeProperty: usize,
+    FontFamilyProperty: usize,
+    FontWeightProperty: usize,
+    FontStyleProperty: usize,
+    FontStretchProperty: usize,
+    pub ForegroundProperty:
+        unsafe extern "system" fn(*mut core::ffi::c_void, *mut *mut core::ffi::c_void) -> windows_core::HRESULT,
+}
+windows_core::imp::define_interface!(
     IRightTappedRoutedEventArgs,
     IRightTappedRoutedEventArgs_Vtbl,
     0x6834869d_7bd5_4033_b237_172f79abe393
@@ -26980,6 +26999,22 @@ pub struct ITextBlock_Vtbl {
         *mut core::ffi::c_void,
     ) -> windows_core::HRESULT,
     pub Focus: unsafe extern "system" fn(*mut core::ffi::c_void, FocusState, *mut bool) -> windows_core::HRESULT,
+}
+windows_core::imp::define_interface!(ITextBlockStatics, ITextBlockStatics_Vtbl, 0x193ec042_a847_4552_b4e8_db36655b840a);
+impl windows_core::RuntimeType for ITextBlockStatics {
+    const SIGNATURE: windows_core::imp::ConstBuffer = windows_core::imp::ConstBuffer::for_interface::<Self>();
+}
+#[repr(C)]
+pub struct ITextBlockStatics_Vtbl {
+    pub base__: windows_core::IInspectable_Vtbl,
+    FontSizeProperty: usize,
+    FontFamilyProperty: usize,
+    FontWeightProperty: usize,
+    FontStyleProperty: usize,
+    FontStretchProperty: usize,
+    CharacterSpacingProperty: usize,
+    pub ForegroundProperty:
+        unsafe extern "system" fn(*mut core::ffi::c_void, *mut *mut core::ffi::c_void) -> windows_core::HRESULT,
 }
 windows_core::imp::define_interface!(ITextBox, ITextBox_Vtbl, 0xe48f5a8b_1dff_4352_a1f4_e516514ec882);
 impl windows_core::RuntimeType for ITextBox {
@@ -33850,6 +33885,25 @@ unsafe impl Sync for ResourceDictionary {}
 pub struct RichTextBlock(windows_core::IUnknown);
 windows_core::imp::interface_hierarchy!(RichTextBlock, windows_core::IUnknown, windows_core::IInspectable);
 windows_core::imp::required_hierarchy!(RichTextBlock, FrameworkElement, UIElement, DependencyObject);
+impl RichTextBlock {
+    pub fn ForegroundProperty() -> windows_core::Result<DependencyProperty> {
+        Self::IRichTextBlockStatics(|this| unsafe {
+            let mut result__ = core::mem::zeroed();
+            (windows_core::Interface::vtable(this).ForegroundProperty)(
+                windows_core::Interface::as_raw(this),
+                &mut result__,
+            )
+            .and_then(|| windows_core::imp::Type::from_abi(result__))
+        })
+    }
+    fn IRichTextBlockStatics<R, F: FnOnce(&IRichTextBlockStatics) -> windows_core::Result<R>>(
+        callback: F,
+    ) -> windows_core::Result<R> {
+        static SHARED: windows_core::imp::FactoryCache<RichTextBlock, IRichTextBlockStatics> =
+            windows_core::imp::FactoryCache::new();
+        SHARED.call(callback)
+    }
+}
 impl windows_core::RuntimeType for RichTextBlock {
     const SIGNATURE: windows_core::imp::ConstBuffer =
         windows_core::imp::ConstBuffer::for_class::<Self, IRichTextBlock>();
@@ -34998,6 +35052,23 @@ impl TextBlock {
         callback: F,
     ) -> windows_core::Result<R> {
         static SHARED: windows_core::imp::FactoryCache<TextBlock, windows_core::imp::IGenericFactory> =
+            windows_core::imp::FactoryCache::new();
+        SHARED.call(callback)
+    }
+    pub fn ForegroundProperty() -> windows_core::Result<DependencyProperty> {
+        Self::ITextBlockStatics(|this| unsafe {
+            let mut result__ = core::mem::zeroed();
+            (windows_core::Interface::vtable(this).ForegroundProperty)(
+                windows_core::Interface::as_raw(this),
+                &mut result__,
+            )
+            .and_then(|| windows_core::imp::Type::from_abi(result__))
+        })
+    }
+    fn ITextBlockStatics<R, F: FnOnce(&ITextBlockStatics) -> windows_core::Result<R>>(
+        callback: F,
+    ) -> windows_core::Result<R> {
+        static SHARED: windows_core::imp::FactoryCache<TextBlock, ITextBlockStatics> =
             windows_core::imp::FactoryCache::new();
         SHARED.call(callback)
     }

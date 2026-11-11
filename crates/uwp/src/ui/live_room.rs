@@ -1,5 +1,5 @@
 //! A 直播 room: the picture with danmaku over it and beside it. Gift banners, popups and effects
-//! stay out, as the core's filter holds them back by default.
+//! stay out while the room's switches hold them back (see `live_extras`).
 
 use std::cell::{Cell, RefCell};
 use std::rc::Rc;
@@ -7,7 +7,7 @@ use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
-use rubi_core::{LiveChannel, LiveFilter};
+use rubi_core::{LiveBatch, LiveChannel};
 use rubi_model::{Danmaku, LiveEvent, LiveProtocol};
 use tokio::sync::oneshot::channel as oneshot;
 use windows_collections::IVector;
@@ -18,9 +18,11 @@ use crate::state::layout::WindowClass;
 use crate::state::library::count;
 use crate::state::live::CHAT_MOST;
 use crate::state::quality::Offer;
+use crate::state::settings::Prefs;
 use crate::ui::control_bar::{self, ControlBar};
 use crate::ui::danmaku::{Host, Overlay};
 use crate::ui::filling::Filling;
+use crate::ui::live_extras::Extras;
 use crate::ui::pip;
 use crate::ui::quality;
 use crate::ui::rows::{add_rows, on_row};
@@ -29,12 +31,14 @@ use crate::ui::twin_video::{SECOND_ELEMENT, TwinVideo};
 use crate::ui::up;
 use crate::ui::{keep, load, media, named, on_click, on_enter, post, set_text, soon};
 use crate::xaml::{
-    Color, ElementTheme, FocusState, FrameworkElement, Grid, GridLength, GridUnitType, IColumnDefinition,
+    Color, ElementTheme, IDependencyObject, IRichTextBlock, RichTextBlock, FocusState, FrameworkElement, Grid, GridLength, GridUnitType, IColumnDefinition,
     IContentControl, IControl, IFontIcon, IFrameworkElement, IFrameworkElement2, IItemsControl, IMediaPlayer, IPanel,
     IRowDefinition, ITextBox, IUIElement, MediaPlaybackState, MediaPlayer, MediaSource, PropertyValue,
     SizeChangedEventArgs, SolidColorBrush, Thickness, VirtualKey, Visibility,
 };
 
+/// A gift's line in the chat.
+const GOLD: Color = Color { a: 255, r: 0xC9, g: 0xA2, b: 0x27 };
 /// Width of the danmaku list beside the picture.
 const CHAT_WIDTH: f64 = 320.0;
 /// How far ahead of now a new danmaku starts, so it does not appear mid-way.
@@ -68,6 +72,21 @@ const LAYOUT: &str = r##"
       <Grid x:Name="Video" Background="Transparent" />
       <Grid <!--second--> />
       <Canvas x:Name="Danmaku" IsHitTestVisible="False" />
+      <Border x:Name="GiftLine" Visibility="Collapsed" HorizontalAlignment="Left" VerticalAlignment="Center"
+              Background="#C9A227" Padding="10,4" MaxWidth="520" IsHitTestVisible="False">
+        <TextBlock x:Name="GiftText" FontSize="12" Foreground="White" TextTrimming="CharacterEllipsis" /></Border>
+      <Border x:Name="EffectLine" Visibility="Collapsed" VerticalAlignment="Bottom" Margin="0,0,0,48"
+              Background="#CC0050EF" Padding="10,3" IsHitTestVisible="False">
+        <TextBlock x:Name="EffectText" FontSize="12" Foreground="White" TextTrimming="CharacterEllipsis" /></Border>
+      <StackPanel x:Name="PopupCard" Visibility="Collapsed" HorizontalAlignment="Right" VerticalAlignment="Top"
+                  Margin="0,44,12,0" Width="240" Padding="12,10" Background="White" RequestedTheme="Light">
+        <TextBlock x:Name="PopupText" FontSize="13" Foreground="#111111" TextWrapping="Wrap" />
+        <Grid Margin="0,8,0,0">
+          <TextBlock Text="弹窗只能关闭，不在这里参与" FontSize="11" Foreground="#666666" VerticalAlignment="Center" />
+          <Button x:Name="PopupClose" Content="关闭" HorizontalAlignment="Right" Background="Transparent"
+                  BorderThickness="0" Padding="4,2" Foreground="#0050EF" />
+        </Grid>
+      </StackPanel>
       <StackPanel x:Name="Notice" Visibility="Collapsed" HorizontalAlignment="Center" VerticalAlignment="Center"
                   IsHitTestVisible="False">
         <FontIcon x:Name="NoticeIcon" FontSize="44" Foreground="#CCFFFFFF" HorizontalAlignment="Center" />
@@ -92,13 +111,20 @@ const LAYOUT: &str = r##"
                    Visibility="Collapsed" IsTextSelectionEnabled="True" />
       </Grid>
     </ContentControl>
-    <StackPanel x:Name="Info" Grid.Row="2" Padding="16,10">
-      <TextBlock x:Name="Title" FontSize="18" FontWeight="Light" TextTrimming="CharacterEllipsis" />
-      <Button x:Name="UpLink" Background="Transparent" BorderThickness="0" Padding="0,2"
-              FontSize="13" Foreground="#0050EF" />
-      <TextBlock x:Name="Meta" FontSize="12" TextWrapping="Wrap"
-                 Foreground="{ThemeResource SystemControlForegroundBaseMediumBrush}" />
-    </StackPanel>
+    <Grid x:Name="Info" Grid.Row="2" Padding="16,10">
+      <Grid.ColumnDefinitions><ColumnDefinition Width="*" /><ColumnDefinition Width="Auto" /></Grid.ColumnDefinitions>
+      <StackPanel>
+        <TextBlock x:Name="Title" FontSize="18" FontWeight="Light" TextTrimming="CharacterEllipsis" />
+        <Button x:Name="UpLink" Background="Transparent" BorderThickness="0" Padding="0,2"
+                FontSize="13" Foreground="#0050EF" />
+        <TextBlock x:Name="Meta" FontSize="12" TextWrapping="Wrap"
+                   Foreground="{ThemeResource SystemControlForegroundBaseMediumBrush}" />
+      </StackPanel>
+      <Button x:Name="Follow" Grid.Column="1" Visibility="Collapsed" VerticalAlignment="Center" Margin="12,0,0,0"
+              Padding="16,5" BorderThickness="2" BorderBrush="#0050EF">
+        <Button.Resources><CornerRadius x:Key="ControlCornerRadius">0</CornerRadius></Button.Resources>
+        <TextBlock x:Name="FollowText" FontSize="13" Text="+ 关注" /></Button>
+    </Grid>
   </Grid>
   <Border x:Name="ChatPane" Grid.Column="1" BorderBrush="{ThemeResource SystemControlForegroundBaseLowBrush}"
           Background="{ThemeResource ApplicationPageBackgroundThemeBrush}">
@@ -106,7 +132,11 @@ const LAYOUT: &str = r##"
       <Grid.RowDefinitions>
         <RowDefinition Height="Auto" /><RowDefinition Height="*" /><RowDefinition Height="Auto" />
       </Grid.RowDefinitions>
-      <TextBlock Text="弹幕" FontSize="18" FontWeight="Light" Margin="14,8,14,4" />
+      <Grid Margin="14,8,14,4">
+        <TextBlock Text="弹幕" FontSize="18" FontWeight="Light" />
+        <TextBlock x:Name="Blocked" Text="已拦下 0" FontSize="12" HorizontalAlignment="Right" VerticalAlignment="Bottom"
+                   Foreground="{ThemeResource SystemControlForegroundBaseMediumBrush}" />
+      </Grid>
       <ListView x:Name="Chat" Grid.Row="1" SelectionMode="None" IsItemClickEnabled="False">
         <ListView.ItemContainerTransitions><TransitionCollection /></ListView.ItemContainerTransitions>
         <ListView.ItemsPanel><ItemsPanelTemplate>
@@ -151,6 +181,7 @@ struct Room {
     send_bar: Cell<SendPlace>,
     /// The qualities on offer.
     offer: RefCell<Offer>,
+    extras: Rc<Extras>,
 }
 
 thread_local! {
@@ -280,6 +311,7 @@ pub fn open(room_id: u64, title: &str, uploader: &str, uid: u64) -> Result<()> {
         standby: RefCell::default(),
         send_bar: Cell::new(SendPlace::BelowVideo),
         offer: RefCell::default(),
+        extras: Extras::new(&root, uid, || room().map(|r| r.extras.clone()))?,
     });
     ROOM.with_borrow_mut(|r| *r = Some(shown.clone()));
     on_click(&root, "Back", go_back)?;
@@ -289,7 +321,10 @@ pub fn open(room_id: u64, title: &str, uploader: &str, uid: u64) -> Result<()> {
     on_click(&root, "DanmakuSwitch", toggle_danmaku)?;
     on_click(&root, "Quality", choose_quality)?;
     on_click(&root, "Pip", toggle_pip)?;
-    named::<IUIElement>(&root, "Pip")?.SetVisibility(Visibility::Visible)?;
+    on_click(&root, "PlaySettings", open_settings)?;
+    for name in ["Pip", "PlaySettings"] {
+        named::<IUIElement>(&root, name)?.SetVisibility(Visibility::Visible)?;
+    }
     on_click(&root, "SendButton", send)?;
     on_enter(&root, "SendText", send)?;
     let chat = named::<IFrameworkElement>(&root, "Chat")?;
@@ -297,7 +332,14 @@ pub fn open(room_id: u64, title: &str, uploader: &str, uid: u64) -> Result<()> {
         let Some(room) = room() else { return Ok(()) };
         let lines = room.chat.borrow();
         let Some(line) = lines.get(at) else { return Ok(()) };
-        crate::ui::emote_text::show(&parts.GetAt(0)?.cast()?, &line.text, &line.emotes, line.emote_size)
+        let text = parts.GetAt(0)?;
+        // Rows are reused: a gift's colour comes off again.
+        if line.gift {
+            text.cast::<IRichTextBlock>()?.SetForeground(&SolidColorBrush::CreateInstanceWithColor(GOLD)?)?;
+        } else {
+            text.cast::<IDependencyObject>()?.ClearValue(&RichTextBlock::ForegroundProperty()?)?;
+        }
+        crate::ui::emote_text::show(&text.cast()?, &line.text, &line.emotes, line.emote_size)
     })?;
     keep(root.SizeChanged(|sender: Ref<windows_core::IInspectable>, _: Ref<SizeChangedEventArgs>| {
         if let Ok(root) = sender.ok().and_then(|s| s.cast::<IFrameworkElement>()) {
@@ -479,8 +521,9 @@ fn listen(room_id: u64, opening: u64) {
     let Some(backend) = shell.backend.get().cloned() else { return };
     let Some(shown) = room() else { return };
     let (dispatcher, core, held) = (shell.dispatcher.clone(), backend.clone(), shown.channel.clone());
+    let filter = shell.prefs().live_filter;
     backend.spawn(async move {
-        let Ok(channel) = core.services.live.channel(room_id, LiveFilter::default()).await else {
+        let Ok(channel) = core.services.live.channel(room_id, filter).await else {
             post(&dispatcher, move || {
                 if opening == run()
                     && let Some(room) = room()
@@ -499,7 +542,7 @@ fn listen(room_id: u64, opening: u64) {
         while let Ok(Some(batch)) = channel.next().await {
             post(&dispatcher, move || {
                 if opening == run() {
-                    let _ = heard(batch.events);
+                    let _ = heard(batch);
                 }
             });
         }
@@ -515,6 +558,8 @@ struct ChatLine {
     text: String,
     emotes: std::collections::BTreeMap<String, String>,
     emote_size: f64,
+    /// A gift let through, in gold.
+    gift: bool,
 }
 
 impl ChatLine {
@@ -527,15 +572,21 @@ impl ChatLine {
         match sticker {
             Some(url) => {
                 emotes.insert(STICKER.to_owned(), url);
-                Self { text: format!("{uname}：{STICKER}"), emotes, emote_size: 48.0 }
+                Self { text: format!("{uname}：{STICKER}"), emotes, emote_size: 48.0, gift: false }
             }
-            None => Self { text: format!("{uname}：{text}"), emotes, emote_size: 18.0 },
+            None => Self { text: format!("{uname}：{text}"), emotes, emote_size: 18.0, gift: false },
         }
+    }
+
+    fn gift(text: &str) -> Self {
+        Self { text: format!("🎁 {text}"), emotes: Default::default(), emote_size: 18.0, gift: true }
     }
 }
 
-fn heard(events: Vec<LiveEvent>) -> Result<()> {
+fn heard(batch: LiveBatch) -> Result<()> {
     let Some(room) = room() else { return Ok(()) };
+    room.extras.held_back(batch.blocked_gifts, batch.blocked_popups, batch.blocked_effects)?;
+    let events = batch.events;
     let list = named::<IFrameworkElement>(&room.root, "Chat")?;
     let now = room.opened.elapsed().as_millis() as u32 + DANMAKU_LEAD_MS;
     let mut fresh = Vec::new();
@@ -570,6 +621,11 @@ fn heard(events: Vec<LiveEvent>) -> Result<()> {
                 set_text(&room.root, "Online", &format!("{} 人气", count(viewers)))?
             }
             LiveEvent::Status { live: false } => notice(&room.root, OFF_AIR_GLYPH, "直播已结束")?,
+            LiveEvent::Gift { text } => {
+                room.chat.borrow_mut().push(ChatLine::gift(&text));
+                room.extras.heard(&LiveEvent::Gift { text })?;
+            }
+            LiveEvent::Effect { .. } | LiveEvent::Popup { .. } => room.extras.heard(&event)?,
             _ => {}
         }
     }
@@ -698,6 +754,33 @@ fn filled(room: &Room, changed: bool) -> Result<()> {
     apply_layout(&room.root)?;
     room.bar.set_full(room.filling.screen())?;
     room.bar.wake()
+}
+
+/// 直播设置: how danmaku show, and the room's switches.
+fn open_settings() {
+    let (Some(shown), Some(app)) = (room(), shell()) else { return };
+    let Ok(button) = named::<FrameworkElement>(&shown.root, "PlaySettings") else { return };
+    let look = shown.overlay.borrow().as_ref().map_or_else(|| app.prefs().danmaku, |o| o.look());
+    let Ok(switches) = shown.extras.switches(app.prefs().live_filter, |filter| {
+        let Some(room) = room() else { return };
+        if let Some(channel) = room.channel.lock().unwrap_or_else(|e| e.into_inner()).as_ref() {
+            channel.set_filter(filter);
+        }
+        if let Some(shell) = shell() {
+            let _ = shell.set_prefs(Prefs { live_filter: filter, ..shell.prefs() });
+        }
+    }) else {
+        return;
+    };
+    let _ = crate::ui::play_settings::show(&button, None, look, Some(switches), |change| {
+        let crate::ui::play_settings::Change::Look(look) = change else { return };
+        if let Some(overlay) = room().and_then(|r| r.overlay.borrow().clone()) {
+            let _ = overlay.set_look(look);
+        }
+        if let Some(shell) = shell() {
+            let _ = shell.set_prefs(Prefs { danmaku: look, ..shell.prefs() });
+        }
+    });
 }
 
 fn toggle_danmaku() {

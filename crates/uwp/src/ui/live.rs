@@ -252,6 +252,14 @@ impl LivePage {
         self.schedule.took(turn, answer)
     }
 
+    pub fn schedule_match(&self, at: usize) -> Option<rubi_model::EsportsMatch> {
+        self.schedule.at(at)
+    }
+
+    pub fn schedule_changed(&self, at: usize, game: rubi_model::EsportsMatch) {
+        let _ = self.schedule.changed(at, game);
+    }
+
     pub fn schedule_games(&self, games: Vec<rubi_model::EsportsGame>) -> Result<()> {
         self.schedule.took_games(games)
     }

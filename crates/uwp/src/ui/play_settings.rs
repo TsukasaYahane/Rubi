@@ -1,4 +1,4 @@
-//! 播放设置: the gear on the video page's bar. Picture fit, and how danmaku show: area, speed,
+//! 播放设置: the gear on the video page's and the live room's bar. Picture fit, and how danmaku show: area, speed,
 //! size, kinds and opacity. A choice takes at once and is kept for next time (fit for this run).
 
 use std::rc::Rc;
@@ -68,20 +68,24 @@ fn paint(button: &UIElement, on: bool) -> Result<()> {
     Ok(())
 }
 
-/// Shows the settings under `button`: `fit` and `look` as they are now; `apply` takes each change.
+/// Shows the settings under `button`: `fit` (when the picture has one to choose) and `look` as they
+/// are now, then `extra` below them; `apply` takes each change.
 pub fn show(
     button: &FrameworkElement,
-    fit: CompositionStretch,
+    fit: Option<CompositionStretch>,
     look: Look,
+    extra: Option<UIElement>,
     apply: impl Fn(Change) + 'static,
 ) -> Result<()> {
+    let fit_row = fit.map(|fit| Row {
+        title: "画面比例",
+        labels: FITS.map(|f| f.0).to_vec(),
+        several: false,
+        chosen: FITS.map(|f| f.1 == fit).to_vec(),
+    });
+    // Rows after the fit are numbered as if it were there.
+    let skipped = usize::from(fit_row.is_none());
     let rows = [
-        Row {
-            title: "画面比例",
-            labels: FITS.map(|f| f.0).to_vec(),
-            several: false,
-            chosen: FITS.map(|f| f.1 == fit).to_vec(),
-        },
         Row {
             title: "弹幕 · 显示区域",
             labels: AREAS.map(|a| a.0).to_vec(),
@@ -107,6 +111,7 @@ pub fn show(
             chosen: vec![look.scroll, look.top, look.bottom, look.colored],
         },
     ];
+    let rows: Vec<Row> = fit_row.into_iter().chain(rows).collect();
     let body: String = rows.iter().map(row_xaml).collect();
     let percent = (look.opacity * 100.0).round();
     let flyout = load_object(&format!(
@@ -149,7 +154,7 @@ pub fn show(
                     }
                     let chosen = state.borrow().clone();
                     let now = look.get();
-                    let change = match index {
+                    let change = match index + skipped {
                         0 => Change::Fit(FITS[at].1),
                         1 => Change::Look(Look { area: AREAS[at].1, ..now }),
                         2 => Change::Look(Look { speed: SPEEDS[at].1, ..now }),
@@ -171,6 +176,9 @@ pub fn show(
         }
     }
     let slider = parts.GetAt(parts.Size()? - 1)?.cast::<IRangeBase>()?;
+    if let Some(extra) = extra {
+        parts.Append(&extra)?;
+    }
     keep(slider.ValueChanged(move |_: Ref<IInspectable>, args: Ref<RangeBaseValueChangedEventArgs>| {
         let value = args.ok().and_then(|a| a.cast::<crate::xaml::IRangeBaseValueChangedEventArgs>()?.NewValue());
         if let Ok(value) = value {

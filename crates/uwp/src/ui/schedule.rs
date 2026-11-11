@@ -1,54 +1,24 @@
-//! 赛事: matches from yesterday to a week ahead, by game. Only to read for now.
+//! 赛事: matches from yesterday to a week ahead, by game. A click opens the room or the replay, or
+//! changes the 预约 (see `match_rows`).
 
 use std::cell::{Cell, RefCell};
 use std::rc::Rc;
-use std::time::{SystemTime, UNIX_EPOCH};
 
 use rubi_model::EsportsMatch;
 use windows_collections::IVector;
 use windows_core::{IInspectable, Interface, Result};
 
 use crate::state::layout::WindowClass;
-use crate::state::live::{score, state_text, when};
 use crate::ui::live::{chips, held, mark_chip};
-use crate::ui::rows::{Covers, add_rows, on_row};
+use crate::ui::match_rows;
+use crate::ui::rows::{Covers, add_rows, on_row, on_row_click};
 use crate::ui::shell::shell;
 use crate::ui::{load, on_click, post};
-use crate::xaml::{IFrameworkElement, IImage, IItemsControl, ITextBlock, IUIElement, UIElement, Visibility};
+use crate::xaml::{IFrameworkElement, IItemsControl, UIElement};
 
 /// Rows from the end at which more load.
 const LOAD_AHEAD: usize = 6;
-const LOGO_DECODE_WIDTH: i32 = 56;
 
-const LIST: &str = r##"
-<ListView xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation" SelectionMode="None">
-  <ListView.ItemContainerTransitions><TransitionCollection /></ListView.ItemContainerTransitions>
-  <ListView.ItemContainerStyle>
-    <Style TargetType="ListViewItem">
-      <Setter Property="Padding" Value="16,8" />
-      <Setter Property="HorizontalContentAlignment" Value="Stretch" />
-    </Style>
-  </ListView.ItemContainerStyle>
-  <ListView.ItemTemplate><DataTemplate>
-    <Grid>
-      <Grid.ColumnDefinitions>
-        <ColumnDefinition Width="104" /><ColumnDefinition Width="*" /><ColumnDefinition Width="Auto" />
-        <ColumnDefinition Width="64" /><ColumnDefinition Width="Auto" /><ColumnDefinition Width="*" />
-      </Grid.ColumnDefinitions>
-      <Grid.RowDefinitions><RowDefinition Height="Auto" /><RowDefinition Height="Auto" /></Grid.RowDefinitions>
-      <TextBlock FontSize="13" />
-      <TextBlock Grid.Row="1" FontSize="11"
-                 Foreground="{ThemeResource SystemControlForegroundBaseMediumBrush}" />
-      <TextBlock Grid.Column="1" Grid.RowSpan="2" FontSize="14" VerticalAlignment="Center"
-                 TextAlignment="Right" TextTrimming="CharacterEllipsis" />
-      <TextBlock Grid.Column="3" Grid.RowSpan="2" FontSize="15" VerticalAlignment="Center" TextAlignment="Center" />
-      <TextBlock Grid.Column="5" Grid.RowSpan="2" FontSize="14" VerticalAlignment="Center"
-                 TextTrimming="CharacterEllipsis" />
-      <Image Grid.Column="2" Grid.RowSpan="2" Width="28" Height="28" Margin="8,0,0,0" VerticalAlignment="Center" />
-      <Image Grid.Column="4" Grid.RowSpan="2" Width="28" Height="28" Margin="0,0,8,0" VerticalAlignment="Center" />
-    </Grid>
-  </DataTemplate></ListView.ItemTemplate>
-</ListView>"##;
 
 pub struct Schedule {
     list: IFrameworkElement,
@@ -70,13 +40,10 @@ fn wide() -> bool {
     shell().is_some_and(|s| s.class() == WindowClass::Wide)
 }
 
-fn now() -> i64 {
-    SystemTime::now().duration_since(UNIX_EPOCH).map_or(0, |t| t.as_secs() as i64)
-}
 
 impl Schedule {
     pub fn new() -> Result<Rc<Self>> {
-        let list = load(LIST)?;
+        let list = load(&match_rows::list("Schedule", false))?;
         let shown = Rc::new(Self {
             list: list.clone(),
             matches: RefCell::default(),
@@ -93,6 +60,14 @@ impl Schedule {
         });
         let filling = Rc::downgrade(&shown);
         on_row(&list, move |at, parts| filling.upgrade().map_or(Ok(()), |s| s.fill(at, parts)))?;
+        on_row_click(&list, |at| {
+            let Some(game) = held().and_then(|p| p.schedule_match(at)) else { return };
+            match_rows::open(&game, move |changed| {
+                if let Some(page) = held() {
+                    page.schedule_changed(at, changed);
+                }
+            });
+        })?;
         Ok(shown)
     }
 
@@ -235,28 +210,25 @@ impl Schedule {
         add_rows(&self.list, 0, self.matches.borrow().len())
     }
 
+    /// Match `at`, to act on.
+    pub fn at(&self, at: usize) -> Option<EsportsMatch> {
+        self.matches.borrow().get(at).cloned()
+    }
+
+    /// Match `at` came back changed: its row shows it again.
+    pub fn changed(&self, at: usize, game: EsportsMatch) -> Result<()> {
+        match self.matches.borrow_mut().get_mut(at) {
+            Some(slot) => *slot = game,
+            None => return Ok(()),
+        }
+        let items = self.list.cast::<IItemsControl>()?.Items()?.cast::<IVector<IInspectable>>()?;
+        items.SetAt(at as u32, &crate::xaml::PropertyValue::CreateInt32(at as i32)?)
+    }
+
     fn fill(&self, at: usize, parts: &IVector<UIElement>) -> Result<()> {
         let matches = self.matches.borrow();
         let Some(game) = matches.get(at) else { return Ok(()) };
-        let texts = [
-            when(game.start_at, now()),
-            state_text(game.state).to_owned(),
-            game.home.name.clone(),
-            score(game),
-            game.away.name.clone(),
-        ];
-        for (part, text) in texts.iter().enumerate() {
-            parts.GetAt(part as u32)?.cast::<ITextBlock>()?.SetText(text)?;
-        }
-        let logos = self.logos.get();
-        for (part, team) in [(5, &game.home), (6, &game.away)] {
-            let on = logos && !team.logo.is_empty();
-            let logo = parts.GetAt(part)?;
-            logo.cast::<IUIElement>()?.SetVisibility(if on { Visibility::Visible } else { Visibility::Collapsed })?;
-            if on {
-                self.covers.show(&logo.cast::<IImage>()?, &team.logo, LOGO_DECODE_WIDTH)?;
-            }
-        }
+        match_rows::fill(parts, game, self.logos.get(), &self.covers)?;
         let near_end = at + LOAD_AHEAD >= matches.len();
         drop(matches);
         if near_end {

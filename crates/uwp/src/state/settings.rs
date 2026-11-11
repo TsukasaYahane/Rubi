@@ -1,6 +1,8 @@
 //! What the settings page offers, and what changing it writes. The core owns its settings as one
 //! JSON object and takes patches of just what changed; a few belong to this app alone.
 
+use rubi_core::LiveFilter;
+
 use crate::state::danmaku::Look;
 use serde_json::{Value, json};
 
@@ -85,11 +87,17 @@ pub struct Prefs {
     /// Volume of the players, 0 to 100.
     pub volume: u8,
     pub danmaku: Look,
+    /// What live rooms hold back.
+    pub live_filter: LiveFilter,
 }
 
 impl Default for Prefs {
     fn default() -> Self {
-        Self { words: false, pause_on_blur: true, shortcuts: true, volume: DEFAULT_VOLUME, danmaku: Look::default() }
+        Self {
+            words: false, pause_on_blur: true, shortcuts: true, volume: DEFAULT_VOLUME,
+            danmaku: Look::default(),
+            live_filter: LiveFilter::default(),
+        }
     }
 }
 
@@ -115,6 +123,12 @@ impl Prefs {
                 "dm_opacity" => {
                     prefs.danmaku.opacity = value.parse().map_or(prefs.danmaku.opacity, |v: f64| v.clamp(0.2, 1.0));
                 }
+                "live_filter" => {
+                    if let Ok(bits) = value.parse::<u8>() {
+                        prefs.live_filter =
+                            LiveFilter { gifts: bits & 1 != 0, popups: bits & 2 != 0, effects: bits & 4 != 0 };
+                    }
+                }
                 "dm_kinds" => {
                     if let Ok(bits) = value.parse() {
                         prefs.danmaku = prefs.danmaku.with_kinds(bits);
@@ -129,7 +143,7 @@ impl Prefs {
     pub fn to_text(self) -> String {
         let dm = self.danmaku;
         format!(
-            "words={} pause_on_blur={} shortcuts={} volume={} dm_area={} dm_speed={} dm_size={} dm_opacity={} dm_kinds={}",
+            "words={} pause_on_blur={} shortcuts={} volume={} dm_area={} dm_speed={} dm_size={} dm_opacity={} dm_kinds={} live_filter={}",
             u8::from(self.words),
             u8::from(self.pause_on_blur),
             u8::from(self.shortcuts),
@@ -138,7 +152,8 @@ impl Prefs {
             dm.speed,
             dm.size,
             dm.opacity,
-            dm.kinds()
+            dm.kinds(),
+            u8::from(self.live_filter.gifts) | u8::from(self.live_filter.popups) << 1 | u8::from(self.live_filter.effects) << 2
         )
     }
 }
@@ -177,7 +192,8 @@ mod tests {
     #[test]
     fn prefs_survive_a_round_trip() {
         let danmaku = Look { area: 1.0, speed: 1.5, size: 26.0, opacity: 0.6, top: false, ..Look::default() };
-        let prefs = Prefs { words: true, pause_on_blur: false, shortcuts: true, volume: 35, danmaku };
+        let live_filter = LiveFilter { gifts: false, popups: true, effects: false };
+        let prefs = Prefs { words: true, pause_on_blur: false, shortcuts: true, volume: 35, danmaku, live_filter };
         assert_eq!(Prefs::parse(&prefs.to_text()), prefs);
         assert_eq!(Prefs::parse("live_volume=250").volume, 100);
         assert_eq!(Prefs::parse("live_volume=loud").volume, DEFAULT_VOLUME);

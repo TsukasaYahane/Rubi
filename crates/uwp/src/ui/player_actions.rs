@@ -100,6 +100,9 @@ impl Actions {
             &format!("{}{favorites}", if relation.favorited { "已藏 " } else { "藏 " }),
         );
         let _ = set_text(&self.root, "FollowText", if relation.following_up { "已关注" } else { "关注" });
+        for (name, on) in [("LikeText", relation.liked), ("CoinText", relation.coins > 0), ("FavText", relation.favorited)] {
+            let _ = tint(&self.root, name, on);
+        }
     }
 
     /// The relation, if someone is signed in; a guest goes to sign in.
@@ -331,4 +334,16 @@ type Result2 = std::result::Result<(), String>;
 
 fn escape(text: &str) -> String {
     text.replace('&', "&amp;").replace('<', "&lt;").replace('>', "&gt;").replace('"', "&quot;")
+}
+
+const COBALT: crate::xaml::Color = crate::xaml::Color { a: 255, r: 0, g: 0x50, b: 0xEF };
+
+/// What has been done shows in blue; otherwise the text keeps the theme's colour.
+fn tint(root: &IFrameworkElement, name: &str, on: bool) -> Result<()> {
+    let text = named::<crate::xaml::ITextBlock>(root, name)?;
+    if on {
+        text.SetForeground(&crate::xaml::SolidColorBrush::CreateInstanceWithColor(COBALT)?)
+    } else {
+        text.cast::<crate::xaml::IDependencyObject>()?.ClearValue(&crate::xaml::TextBlock::ForegroundProperty()?)
+    }
 }
