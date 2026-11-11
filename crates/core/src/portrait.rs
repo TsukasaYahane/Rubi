@@ -99,6 +99,10 @@ pub struct PortraitFeed {
     rules: Arc<dyn RuleSource>,
     kv: Arc<dyn KvRepo + Send + Sync>,
     state: Mutex<State>,
+    /// One pick at a time: two at once would both find the same video not served yet.
+    picking: tokio::sync::Mutex<()>,
+    /// One sort at a time, so lookups stay two at once and none is asked twice.
+    sorting: tokio::sync::Mutex<()>,
 }
 
 fn lock<T>(m: &Mutex<T>) -> std::sync::MutexGuard<'_, T> {
@@ -113,7 +117,16 @@ impl PortraitFeed {
         rules: Arc<dyn RuleSource>,
         kv: Arc<dyn KvRepo + Send + Sync>,
     ) -> Self {
-        Self { pool, shapes, related, rules, kv, state: Mutex::default() }
+        Self {
+            pool,
+            shapes,
+            related,
+            rules,
+            kv,
+            state: Mutex::default(),
+            picking: tokio::sync::Mutex::new(()),
+            sorting: tokio::sync::Mutex::new(()),
+        }
     }
 
     /// Starts a new run of the feed: what was played before may come again.
@@ -151,6 +164,8 @@ impl PortraitFeed {
 
     /// Sorts up to `budget` pooled videos whose shape is not known yet, best ranked first.
     pub async fn sort(&self, budget: usize) -> Result<Sorted> {
+        // What is unknown is read only once the sort before has kept what it learned.
+        let _sorting = self.sorting.lock().await;
         let mut sorted = Sorted::default();
         if self.paused() {
             sorted.limited = true;
@@ -225,6 +240,7 @@ impl PortraitFeed {
     /// Up to `want` portrait videos to play next: from the pool first, sorting more of it and
     /// fetching a new batch when it runs short, then videos related to the ones played.
     pub async fn next(&self, want: usize) -> Result<Picked> {
+        let _picking = self.picking.lock().await;
         let mut picked = Picked::default();
         let mut fetched = false;
         for _ in 0..ROUNDS {
@@ -431,6 +447,158 @@ mod tests {
         let asked = lookup.asked.load(Ordering::Relaxed);
         assert!(feed.sort(10).await.unwrap().limited);
         assert_eq!(lookup.asked.load(Ordering::Relaxed), asked);
+    }
+
+    /// Answers after a short wait, counting how many are asked at once and how often each video is.
+    struct SlowLookup {
+        portrait_every: usize,
+        in_flight: AtomicUsize,
+        most_at_once: AtomicUsize,
+        asked: AtomicUsize,
+        per_video: Mutex<HashMap<String, usize>>,
+        refuse_after: usize,
+    }
+
+    #[async_trait]
+    impl ShapeLookup for SlowLookup {
+        fn known_portrait(&self, _: &str) -> Option<bool> {
+            None
+        }
+        async fn look_up_portrait(&self, bvid: &str) -> Result<bool> {
+            let now = self.in_flight.fetch_add(1, Ordering::SeqCst) + 1;
+            self.most_at_once.fetch_max(now, Ordering::SeqCst);
+            *lock(&self.per_video).entry(bvid.to_owned()).or_default() += 1;
+            tokio::time::sleep(Duration::from_millis(2)).await;
+            self.in_flight.fetch_sub(1, Ordering::SeqCst);
+            if self.asked.fetch_add(1, Ordering::SeqCst) >= self.refuse_after {
+                return Err(ApiError::RiskControl { code: -412, message: "no".into() }.into());
+            }
+            let n: usize = bvid.trim_start_matches('v').parse().unwrap_or(1);
+            Ok(n.is_multiple_of(self.portrait_every))
+        }
+    }
+
+    fn slow_feed(unknown: usize, refuse_after: usize) -> (Arc<PortraitFeed>, Arc<SlowLookup>, Arc<SqliteStore>) {
+        let cards = (0..unknown).map(|n| card(&format!("v{n}"), None)).collect();
+        let pool = Arc::new(Pool { cards: Mutex::new(cards), batch: Mutex::default(), fetches: AtomicUsize::new(0) });
+        let lookup = Arc::new(SlowLookup {
+            portrait_every: 3,
+            in_flight: AtomicUsize::new(0),
+            most_at_once: AtomicUsize::new(0),
+            asked: AtomicUsize::new(0),
+            per_video: Mutex::default(),
+            refuse_after,
+        });
+        let store = Arc::new(SqliteStore::in_memory().unwrap());
+        let rules = Arc::new(SettingsService::open(Arc::new(SqliteStore::in_memory().unwrap())).unwrap());
+        let feed =
+            Arc::new(PortraitFeed::new(pool, lookup.clone(), Arc::new(Related(Vec::new())), rules, store.clone()));
+        (feed, lookup, store)
+    }
+
+    const STRESS_LIMIT: Duration = Duration::from_secs(30);
+
+    #[tokio::test(flavor = "multi_thread", worker_threads = 8)]
+    #[ignore = "stress"]
+    async fn racing_pickers_never_share_a_video() {
+        let (feed, _, _) = slow_feed(LOOK_AHEAD, usize::MAX);
+        let tasks: Vec<_> = (0..16)
+            .map(|_| {
+                let feed = feed.clone();
+                tokio::spawn(async move {
+                    let mut mine = Vec::new();
+                    for _ in 0..6 {
+                        mine.extend(feed.next(2).await.unwrap().cards.into_iter().map(|c| c.bvid));
+                    }
+                    mine
+                })
+            })
+            .collect();
+        let all: Vec<String> = tokio::time::timeout(STRESS_LIMIT, join_all(tasks))
+            .await
+            .expect("pickers stalled")
+            .into_iter()
+            .flat_map(|r| r.unwrap())
+            .collect();
+        let unique: HashSet<&String> = all.iter().collect();
+        println!("picked {} videos, {} different", all.len(), unique.len());
+        assert_eq!(unique.len(), all.len(), "a video was handed out twice in one run");
+    }
+
+    #[tokio::test(flavor = "multi_thread", worker_threads = 8)]
+    #[ignore = "stress"]
+    async fn racing_sorts_keep_to_two_lookups_at_once() {
+        let (feed, lookup, _) = slow_feed(LOOK_AHEAD, usize::MAX);
+        let tasks: Vec<_> = (0..8)
+            .map(|_| {
+                let feed = feed.clone();
+                tokio::spawn(async move { feed.sort(PER_ROUND).await.unwrap() })
+            })
+            .collect();
+        tokio::time::timeout(STRESS_LIMIT, join_all(tasks)).await.expect("sorting stalled");
+        let most = lookup.most_at_once.load(Ordering::SeqCst);
+        let twice = lock(&lookup.per_video).values().filter(|n| **n > 1).count();
+        println!("most lookups at once: {most}; videos looked up more than once: {twice}");
+        assert!(most <= AT_ONCE, "{most} lookups ran at once");
+        assert_eq!(twice, 0, "{twice} videos were looked up more than once");
+    }
+
+    #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+    #[ignore = "stress"]
+    async fn risk_control_mid_sort_stops_promptly() {
+        let (feed, lookup, _) = slow_feed(LOOK_AHEAD, 40);
+        let sorted = tokio::time::timeout(STRESS_LIMIT, feed.sort(LOOK_AHEAD)).await.expect("sorting stalled").unwrap();
+        assert!(sorted.limited);
+        let asked = lookup.asked.load(Ordering::SeqCst);
+        assert!(asked <= 40 + AT_ONCE, "{asked} lookups after the refusal began");
+        for _ in 0..50 {
+            assert!(feed.sort(LOOK_AHEAD).await.unwrap().limited);
+        }
+        assert_eq!(lookup.asked.load(Ordering::SeqCst), asked, "paused sorting still asked");
+        let picked = feed.next(100).await.unwrap();
+        assert!(picked.limited);
+        assert!(!picked.cards.is_empty(), "what was sorted before the refusal is still served");
+    }
+
+    #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+    #[ignore = "stress"]
+    async fn a_dry_pool_answers_at_once() {
+        let (feed, lookup, _) = slow_feed(LOOK_AHEAD, usize::MAX);
+        let started = Instant::now();
+        let mut served = 0;
+        for _ in 0..200 {
+            let picked = tokio::time::timeout(STRESS_LIMIT, feed.next(5)).await.expect("picking stalled").unwrap();
+            served += picked.cards.len();
+            if picked.cards.is_empty() {
+                break;
+            }
+        }
+        let empty = Instant::now();
+        assert!(feed.next(5).await.unwrap().cards.is_empty());
+        println!("served {served}, emptied in {:?}, an empty pick took {:?}", started.elapsed(), empty.elapsed());
+        assert_eq!(served, LOOK_AHEAD.div_ceil(3));
+        assert!(empty.elapsed() < Duration::from_millis(200));
+        assert_eq!(lookup.asked.load(Ordering::SeqCst), LOOK_AHEAD, "each video looked up once");
+    }
+
+    #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+    #[ignore = "stress"]
+    async fn many_shapes_keep_to_the_limit_and_the_newest() {
+        let (feed, _, store) = slow_feed(0, usize::MAX);
+        let seed: Vec<(String, bool)> = (0..SHAPES_KEPT + 5000).map(|n| (format!("old{n}"), false)).collect();
+        store.put_raw(KEY_SHAPES, &serde_json::to_string(&seed).unwrap()).unwrap();
+        let started = Instant::now();
+        feed.with_shapes(|s| {
+            for n in 0..10_000 {
+                s.put(format!("new{n}"), true);
+            }
+        });
+        let list = feed.with_shapes(|s| s.list());
+        store.put_raw(KEY_SHAPES, &serde_json::to_string(&list).unwrap()).unwrap();
+        println!("kept {} shapes in {:?}", list.len(), started.elapsed());
+        assert_eq!(list.len(), SHAPES_KEPT);
+        assert_eq!(list.last().map(|(b, _)| b.as_str()), Some("new9999"));
+        assert_eq!(list.iter().filter(|(b, _)| b.starts_with("new")).count(), 10_000);
     }
 
     #[test]
