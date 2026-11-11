@@ -270,7 +270,7 @@ impl FollowPage {
             shown(parts.GetAt(0), false)?;
         } else {
             shown(parts.GetAt(0), true)?;
-            parts.GetAt(0)?.cast::<IImage>()?.SetSource(&self.covers.get(&up.face, FACE_DECODE_WIDTH)?)?;
+            self.covers.show(&parts.GetAt(0)?.cast::<IImage>()?, &up.face, FACE_DECODE_WIDTH)?;
         }
         parts.GetAt(1)?.cast::<ITextBlock>()?.SetText(&up.name)
     }

@@ -376,7 +376,7 @@ impl VideoList {
         let wants_more = {
             let rows = self.rows.borrow();
             let Some(row) = rows.get(at) else { return Ok(()) };
-            parts.GetAt(0)?.cast::<IImage>()?.SetSource(&self.covers.get(&row.cover, COVER_DECODE_WIDTH)?)?;
+            self.covers.show(&parts.GetAt(0)?.cast::<IImage>()?, &row.cover, COVER_DECODE_WIDTH)?;
             parts.GetAt(1)?.cast::<ITextBlock>()?.SetText(&row.title)?;
             parts.GetAt(2)?.cast::<ITextBlock>()?.SetText(&row.owner)?;
             parts.GetAt(3)?.cast::<ITextBlock>()?.SetText(&row.line)?;

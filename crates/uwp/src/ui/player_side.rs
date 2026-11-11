@@ -232,7 +232,7 @@ impl Side {
         }
         let cards = self.related.borrow();
         let Some(card) = cards.get(at) else { return Ok(()) };
-        parts.GetAt(0)?.cast::<IImage>()?.SetSource(&self.covers.get(&card.cover, COVER_DECODE_WIDTH)?)?;
+        self.covers.show(&parts.GetAt(0)?.cast::<IImage>()?, &card.cover, COVER_DECODE_WIDTH)?;
         parts.GetAt(1)?.cast::<ITextBlock>()?.SetText(&card.title)?;
         parts.GetAt(2)?.cast::<ITextBlock>()?.SetText(&card.owner.name)
     }

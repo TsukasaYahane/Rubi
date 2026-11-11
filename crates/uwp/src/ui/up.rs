@@ -465,9 +465,7 @@ impl UpPage {
             parts.GetAt(0)?.cast::<ITextBlock>()?.SetText(&row.title)?;
             parts.GetAt(1)?.cast::<ITextBlock>()?.SetText(&row.summary)?;
             parts.GetAt(2)?.cast::<ITextBlock>()?.SetText(&row.line)?;
-            if let Ok(cover) = self.covers.get(&row.cover, COVER_DECODE_WIDTH) {
-                parts.GetAt(3)?.cast::<IImage>()?.SetSource(&cover)?;
-            }
+            let _ = self.covers.show(&parts.GetAt(3)?.cast::<IImage>()?, &row.cover, COVER_DECODE_WIDTH);
             at + 6 >= rows.len()
         };
         if wants_more {

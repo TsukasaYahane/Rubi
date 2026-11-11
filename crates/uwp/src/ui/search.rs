@@ -9,7 +9,7 @@ use rubi_core::PgcHit;
 use windows_collections::IVector;
 use windows_core::{IInspectable, Interface, Ref, Result};
 
-use crate::state::pgc::{paid, poster_url};
+use crate::state::pgc::paid;
 use crate::state::search::hit_line;
 use crate::ui::card_grid::{CardGrid, Source};
 use crate::ui::rows::{Covers, add_rows, on_row, on_row_click};
@@ -295,9 +295,7 @@ impl SearchPage {
         let hits = self.pgc.borrow();
         let Some(hit) = hits.get(at) else { return Ok(()) };
         let poster = parts.GetAt(0)?.cast::<IPanel>()?.Children()?.cast::<IVector<UIElement>>()?;
-        if let Ok(cover) = self.covers.get(&poster_url(&hit.cover, PGC_DECODE_WIDTH as u32), PGC_DECODE_WIDTH) {
-            poster.GetAt(0)?.cast::<IImage>()?.SetSource(&cover)?;
-        }
+        let _ = self.covers.show(&poster.GetAt(0)?.cast::<IImage>()?, &hit.cover, PGC_DECODE_WIDTH);
         let badge = poster.GetAt(1)?.cast::<IBorder>()?;
         let tint = if paid(&hit.badge) { RED } else { COBALT };
         badge.SetBackground(&SolidColorBrush::CreateInstanceWithColor(tint)?)?;
@@ -458,9 +456,7 @@ impl SearchPage {
         let wants_more = {
             let hits = self.hits.borrow();
             let Some(hit) = hits.get(at) else { return Ok(()) };
-            if let Ok(face) = self.covers.get(&hit.face, FACE_DECODE_WIDTH) {
-                parts.GetAt(0)?.cast::<IImage>()?.SetSource(&face)?;
-            }
+            let _ = self.covers.show(&parts.GetAt(0)?.cast::<IImage>()?, &hit.face, FACE_DECODE_WIDTH);
             parts.GetAt(1)?.cast::<ITextBlock>()?.SetText(&hit.name)?;
             parts.GetAt(2)?.cast::<ITextBlock>()?.SetText(&hit.line)?;
             !top && at + 6 >= hits.len()

@@ -447,7 +447,7 @@ impl PgcZone {
             let Some(season) = seasons.get(at) else { return Ok(()) };
             let poster = parts.GetAt(0)?.cast::<IPanel>()?.Children()?.cast::<IVector<UIElement>>()?;
             let url = poster_url(&season.cover, POSTER_DECODE_WIDTH as u32);
-            poster.GetAt(0)?.cast::<IImage>()?.SetSource(&self.covers.get(&url, POSTER_DECODE_WIDTH)?)?;
+            self.covers.show(&poster.GetAt(0)?.cast::<IImage>()?, &url, POSTER_DECODE_WIDTH)?;
             let badge = poster.GetAt(1)?.cast::<IBorder>()?;
             badge.cast::<IUIElement>()?.SetVisibility(if season.badge.is_empty() {
                 Visibility::Collapsed

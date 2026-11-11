@@ -254,7 +254,7 @@ impl Schedule {
             let logo = parts.GetAt(part)?;
             logo.cast::<IUIElement>()?.SetVisibility(if on { Visibility::Visible } else { Visibility::Collapsed })?;
             if on {
-                logo.cast::<IImage>()?.SetSource(&self.covers.get(&team.logo, LOGO_DECODE_WIDTH)?)?;
+                self.covers.show(&logo.cast::<IImage>()?, &team.logo, LOGO_DECODE_WIDTH)?;
             }
         }
         let near_end = at + LOAD_AHEAD >= matches.len();

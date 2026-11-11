@@ -424,9 +424,7 @@ impl CardGrid {
         let fit = if card.live.is_some() { Stretch::Uniform } else { Stretch::UniformToFill };
         cover.cast::<IImage>()?.SetStretch(fit)?;
         // A card without a picture still has its words.
-        if let Ok(picture) = self.covers.get(&card.cover, COVER_DECODE_WIDTH) {
-            cover.cast::<IImage>()?.SetSource(&picture)?;
-        }
+        let _ = self.covers.show(&cover.cast::<IImage>()?, &card.cover, COVER_DECODE_WIDTH);
 
         parts.GetAt(1)?.cast::<ITextBlock>()?.SetText(&card.title)?;
         parts.GetAt(2)?.cast::<ITextBlock>()?.SetText(&card.line)?;

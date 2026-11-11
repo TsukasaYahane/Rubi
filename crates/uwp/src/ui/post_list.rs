@@ -51,8 +51,8 @@ const LIST: &str = r##"
         <TextBlock Grid.Column="1" FontSize="13" TextTrimming="CharacterEllipsis" />
         <TextBlock Grid.Column="1" Grid.Row="1" FontSize="11"
                    Foreground="{ThemeResource SystemControlForegroundBaseMediumBrush}" />
-        <TextBlock Grid.Column="1" Grid.Row="2" FontSize="13" Margin="0,8,0,0" TextWrapping="Wrap" MaxLines="6"
-                   TextTrimming="CharacterEllipsis" />
+        <RichTextBlock Grid.Column="1" Grid.Row="2" FontSize="13" Margin="0,8,0,0" TextWrapping="Wrap" MaxLines="6"
+                       TextTrimming="CharacterEllipsis" IsTextSelectionEnabled="False" />
         <Grid Grid.Column="1" Grid.Row="3" Margin="0,8,0,0" Height="90"
               Background="{ThemeResource SystemControlBackgroundBaseLowBrush}">
           <Grid.ColumnDefinitions><ColumnDefinition Width="170" /><ColumnDefinition Width="*" /></Grid.ColumnDefinitions>
@@ -72,8 +72,9 @@ const LIST: &str = r##"
         </StackPanel>
         <Border Grid.Column="1" Grid.Row="5" Margin="0,6,0,0" Padding="10,4,0,4" BorderThickness="3,0,0,0"
                 BorderBrush="{ThemeResource SystemControlForegroundBaseLowBrush}">
-          <TextBlock FontSize="12" TextWrapping="Wrap" MaxLines="3" TextTrimming="CharacterEllipsis"
-                     Foreground="{ThemeResource SystemControlForegroundBaseMediumBrush}" />
+          <RichTextBlock FontSize="12" TextWrapping="Wrap" MaxLines="3" TextTrimming="CharacterEllipsis"
+                         IsTextSelectionEnabled="False"
+                         Foreground="{ThemeResource SystemControlForegroundBaseMediumBrush}" />
         </Border>
         <Button Grid.Column="1" Grid.Row="6" Margin="0,6,0,0" Padding="0,2" Background="Transparent"
                 BorderThickness="0" FontSize="12" Foreground="#0050EF" />
@@ -236,16 +237,16 @@ impl PostList {
     fn fill_post(&self, at: usize, parts: &IVector<UIElement>) -> Result<()> {
         let posts = self.posts.borrow();
         let Some(post) = posts.get(at) else { return Ok(()) };
-        parts.GetAt(0)?.cast::<IImage>()?.SetSource(&self.covers.get(&post.face, FACE_DECODE_WIDTH)?)?;
+        self.covers.show(&parts.GetAt(0)?.cast::<IImage>()?, &post.face, FACE_DECODE_WIDTH)?;
         parts.GetAt(1)?.cast::<ITextBlock>()?.SetText(&post.name)?;
         parts.GetAt(2)?.cast::<ITextBlock>()?.SetText(&post.line)?;
-        parts.GetAt(3)?.cast::<ITextBlock>()?.SetText(&post.text)?;
+        crate::ui::emote_text::show(&parts.GetAt(3)?.cast()?, &post.text, &post.emotes, 18.0)?;
         shown(parts.GetAt(3), !post.text.is_empty())?;
 
         shown(parts.GetAt(4), post.clip.is_some())?;
         if let Some(clip) = &post.clip {
             let inside = parts.GetAt(4)?.cast::<IPanel>()?.Children()?.cast::<IVector<UIElement>>()?;
-            inside.GetAt(0)?.cast::<IImage>()?.SetSource(&self.covers.get(&clip.cover, COVER_DECODE_WIDTH)?)?;
+            self.covers.show(&inside.GetAt(0)?.cast::<IImage>()?, &clip.cover, COVER_DECODE_WIDTH)?;
             inside.GetAt(1)?.cast::<ITextBlock>()?.SetText(&clip.title)?;
             inside.GetAt(2)?.cast::<ITextBlock>()?.SetText(&clip.line)?;
         }
@@ -258,8 +259,7 @@ impl PostList {
                 match post.pictures.get(slot) {
                     Some(url) => {
                         shown(inside.GetAt(slot as u32), true)?;
-                        let picture = self.covers.get(url, PICTURE_DECODE_WIDTH)?;
-                        inside.GetAt(slot as u32)?.cast::<IImage>()?.SetSource(&picture)?;
+                        self.covers.show(&inside.GetAt(slot as u32)?.cast::<IImage>()?, url, PICTURE_DECODE_WIDTH)?;
                     }
                     None => shown(inside.GetAt(slot as u32), false)?,
                 }
@@ -271,7 +271,7 @@ impl PostList {
         shown(parts.GetAt(6), !post.quote.is_empty())?;
         if !post.quote.is_empty() {
             let border = parts.GetAt(6)?.cast::<IBorder>()?;
-            border.Child()?.cast::<ITextBlock>()?.SetText(&post.quote)?;
+            crate::ui::emote_text::show(&border.Child()?.cast()?, &post.quote, &post.emotes, 16.0)?;
         }
         let button = parts.GetAt(7)?.cast::<IFrameworkElement>()?;
         shown(parts.GetAt(7), post.comments.is_some())?;
