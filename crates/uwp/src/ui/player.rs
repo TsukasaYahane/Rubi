@@ -18,7 +18,7 @@ use crate::state::library::count;
 use crate::state::manifest::dash_manifest;
 use crate::state::panes;
 use crate::state::quality::Offer;
-use crate::state::settings::quality_patch;
+use crate::state::settings::{Prefs, quality_patch};
 use crate::ui::control_bar::{self, ControlBar};
 use crate::ui::danmaku::{Host, Overlay};
 use crate::ui::feed;
@@ -34,7 +34,7 @@ use crate::ui::splitter;
 use crate::ui::twin_video::{SECOND_ELEMENT, TwinVideo};
 use crate::ui::up;
 use crate::ui::watch;
-use crate::ui::{load, named, on_click, on_enter, pip, post, set_text, soon};
+use crate::ui::{load, named, on_click, on_enter, pip, post, series, set_text, soon};
 use crate::xaml::{
     AdaptiveMediaSource, Color, DataWriter, FocusManager, FocusState, FrameworkElement, Grid, GridLength, GridUnitType,
     IButtonBase, IColumnDefinition, IContentControl, IControl, IDataWriter, IFontIcon, IFrameworkElement,
@@ -44,6 +44,11 @@ use crate::xaml::{
     MediaPlayer, MediaPlayerFailedEventArgs, MediaSource, PropertyValue, RangeBaseValueChangedEventArgs,
     SizeChangedEventArgs, TappedRoutedEventArgs, Thickness, UIElement, Uri, VirtualKey, Visibility,
 };
+use crate::xaml::{
+    CompositionStretch, HoldingRoutedEventArgs, HoldingState, IBorder, IHoldingRoutedEventArgs, IPointer,
+    IPointerRoutedEventArgs, PointerDeviceType, PointerRoutedEventArgs, SolidColorBrush,
+};
+use rubi_core::{Season, VideoPart};
 
 /// Quality asked for; the core caps it to what the account may play.
 const DASH_TYPE: &str = "application/dash+xml";
@@ -76,10 +81,13 @@ const LAYOUT: &str = r##"
     <RowDefinition x:Name="MainRow" Height="*" />
     <RowDefinition x:Name="SideRow" Height="0" />
   </Grid.RowDefinitions>
+  <ScrollViewer x:Name="MainScroll" VerticalScrollMode="Auto" VerticalScrollBarVisibility="Auto"
+                HorizontalScrollMode="Disabled" HorizontalScrollBarVisibility="Disabled">
   <Grid x:Name="Main">
     <Grid.RowDefinitions>
       <RowDefinition Height="Auto" />
-      <RowDefinition x:Name="VideoRow" Height="*" />
+      <RowDefinition x:Name="VideoRow" Height="360" />
+      <RowDefinition Height="Auto" />
       <RowDefinition Height="Auto" />
       <RowDefinition Height="Auto" />
       <RowDefinition Height="Auto" />
@@ -93,27 +101,49 @@ const LAYOUT: &str = r##"
     <Grid x:Name="Video" Grid.Row="1" Background="Transparent" />
     <Grid Grid.Row="1" <!--second--> />
     <Canvas x:Name="Danmaku" Grid.Row="1" IsHitTestVisible="False" />
+    <Button x:Name="ResumeHint" Grid.Row="1" Visibility="Collapsed" HorizontalAlignment="Left" VerticalAlignment="Bottom"
+            Margin="12,0,0,76" Background="#99000000" Foreground="White" BorderThickness="0" Padding="12,6" FontSize="13" />
     <!--controls-->
     <ContentControl x:Name="SendBelowVideo" Grid.Row="2" IsTabStop="False" HorizontalContentAlignment="Stretch">
     <Grid x:Name="SendBar" Background="#111111" Padding="12,6" RequestedTheme="Dark">
       <Grid.ColumnDefinitions>
+        <ColumnDefinition Width="Auto" />
         <ColumnDefinition Width="*" />
         <ColumnDefinition Width="Auto" />
       </Grid.ColumnDefinitions>
-      <TextBox x:Name="SendText" PlaceholderText="发个友善的弹幕…" MaxLength="100" BorderThickness="0,0,0,1"
+            <Button x:Name="SendStyle" Background="Transparent" BorderThickness="0" Margin="0,0,8,0" Padding="6,4"
+              Foreground="White" VerticalAlignment="Center" AutomationProperties.Name="弹幕样式">
+        <StackPanel Orientation="Horizontal">
+          <Border x:Name="SendSwatch" Width="12" Height="12" Background="White" BorderBrush="#80FFFFFF" BorderThickness="1"
+                  VerticalAlignment="Center" />
+          <TextBlock x:Name="SendStyleText" Text="滚动" FontSize="12" Margin="6,0,0,0" VerticalAlignment="Center" />
+        </StackPanel>
+      </Button>
+      <TextBox x:Name="SendText" Grid.Column="1" PlaceholderText="发个友善的弹幕…" MaxLength="100" BorderThickness="0,0,0,1"
                Background="Transparent" Foreground="White" />
-      <Button x:Name="SendButton" Grid.Column="1" Background="Transparent" BorderThickness="0" Margin="8,0,0,0"
+      <Button x:Name="SendButton" Grid.Column="2" Background="Transparent" BorderThickness="0" Margin="8,0,0,0"
               Foreground="White">
         <FontIcon Glyph="&#xE724;" FontSize="18" />
       </Button>
     </Grid>
     </ContentControl>
+    <StackPanel x:Name="Below" Grid.Row="3">
     <StackPanel x:Name="Info" Grid.Row="3" Margin="16,10,16,6">
       <TextBlock x:Name="Title" FontSize="20" FontWeight="Light" TextWrapping="Wrap" MaxLines="2" />
       <Button x:Name="UpLink" Visibility="Collapsed" Background="Transparent" BorderThickness="0" Padding="0,2"
               FontSize="13" Foreground="#0050EF" />
       <TextBlock x:Name="Meta" FontSize="12" Margin="0,4,0,0" TextWrapping="Wrap" MaxLines="3"
                  Foreground="{ThemeResource SystemControlForegroundBaseMediumBrush}" />
+      <Button x:Name="MoreDetail" Visibility="Collapsed" Content="展开详情 ▾" Background="Transparent"
+              BorderThickness="0" Padding="0,2" FontSize="12" Foreground="#0050EF" />
+      <StackPanel x:Name="Detail" Visibility="Collapsed" Padding="10,8" Margin="0,4,0,0"
+                  Background="{ThemeResource SystemControlBackgroundBaseLowBrush}">
+        <TextBlock x:Name="DetailDesc" FontSize="13" TextWrapping="Wrap" IsTextSelectionEnabled="True" />
+        <TextBlock x:Name="DetailIds" FontSize="12" Margin="0,6,0,0" IsTextSelectionEnabled="True"
+                   Foreground="{ThemeResource SystemControlForegroundBaseMediumBrush}" />
+        <TextBlock x:Name="DetailCounts" FontSize="12" Margin="0,2,0,0"
+                   Foreground="{ThemeResource SystemControlForegroundBaseMediumBrush}" />
+      </StackPanel>
     </StackPanel>
     <ScrollViewer x:Name="ActionRow" Grid.Row="4" HorizontalScrollMode="Auto" VerticalScrollMode="Disabled"
                   HorizontalScrollBarVisibility="Hidden" VerticalScrollBarVisibility="Disabled">
@@ -126,15 +156,18 @@ const LAYOUT: &str = r##"
             <Setter Property="MinWidth" Value="64" />
           </Style>
         </StackPanel.Resources>
-        <Button x:Name="ActLike"><StackPanel>
+        <Button x:Name="ActLike" ToolTipService.ToolTip="长按或右键：一键三连"><StackPanel>
           <FontIcon Glyph="&#xE8E1;" FontSize="20" /><TextBlock x:Name="LikeText" Text="赞" FontSize="12" Margin="0,3,0,0" HorizontalAlignment="Center" /></StackPanel></Button>
         <Button x:Name="ActCoin"><StackPanel>
           <FontIcon Glyph="&#xE8C7;" FontSize="20" /><TextBlock x:Name="CoinText" Text="币" FontSize="12" Margin="0,3,0,0" HorizontalAlignment="Center" /></StackPanel>
           <Button.Flyout><MenuFlyout>
             <MenuFlyoutItem x:Name="Coin1" Text="投 1 枚" /><MenuFlyoutItem x:Name="Coin2" Text="投 2 枚" />
+          <MenuFlyoutSeparator /><ToggleMenuFlyoutItem x:Name="CoinLike" Text="同时点赞" IsChecked="True" />
           </MenuFlyout></Button.Flyout></Button>
         <Button x:Name="ActFav"><StackPanel>
           <FontIcon Glyph="&#xE734;" FontSize="20" /><TextBlock x:Name="FavText" Text="藏" FontSize="12" Margin="0,3,0,0" HorizontalAlignment="Center" /></StackPanel></Button>
+        <Button x:Name="ActShare"><StackPanel>
+          <FontIcon Glyph="&#xE72D;" FontSize="20" /><TextBlock Text="分享" FontSize="12" Margin="0,3,0,0" HorizontalAlignment="Center" /></StackPanel></Button>
         <Button x:Name="ActLater"><StackPanel>
           <FontIcon Glyph="&#xE823;" FontSize="20" /><TextBlock x:Name="LaterText" Text="稍后" FontSize="12" Margin="0,3,0,0" HorizontalAlignment="Center" /></StackPanel></Button>
         <Button x:Name="ActDanmaku"><StackPanel>
@@ -143,7 +176,49 @@ const LAYOUT: &str = r##"
           <FontIcon Glyph="&#xE8FA;" FontSize="20" /><TextBlock x:Name="FollowText" Text="关注" FontSize="12" Margin="0,3,0,0" HorizontalAlignment="Center" /></StackPanel></Button>
       </StackPanel>
     </ScrollViewer>
+    <StackPanel x:Name="Series" Grid.Row="5" Margin="16,2,16,8">
+      <StackPanel x:Name="PartsBlock" Visibility="Collapsed" Margin="0,6,0,0">
+        <Grid>
+          <Grid.ColumnDefinitions>
+            <ColumnDefinition Width="Auto" /><ColumnDefinition Width="Auto" /><ColumnDefinition Width="*" />
+            <ColumnDefinition Width="Auto" /><ColumnDefinition Width="Auto" />
+          </Grid.ColumnDefinitions>
+          <TextBlock Text="分 P" FontSize="13" FontWeight="SemiBold" VerticalAlignment="Center" />
+          <TextBlock x:Name="PartCount" Grid.Column="1" FontSize="12" Margin="10,0,0,0" VerticalAlignment="Center"
+                     Foreground="{ThemeResource SystemControlForegroundBaseMediumBrush}" />
+          <Button x:Name="AutoNext" Grid.Column="3" Background="Transparent" BorderThickness="0" Padding="8,2" FontSize="12" />
+          <Button x:Name="PartsExpand" Grid.Column="4" Background="Transparent" BorderThickness="0" Padding="8,2" FontSize="12"
+                  Foreground="#0050EF" />
+        </Grid>
+        <ScrollViewer x:Name="PartsScroll" Margin="0,6,0,0" VerticalScrollMode="Disabled" VerticalScrollBarVisibility="Disabled"
+                      HorizontalScrollMode="Auto" HorizontalScrollBarVisibility="Auto" />
+        <ContentControl x:Name="PartsAll" Margin="0,6,0,0" Visibility="Collapsed" IsTabStop="False"
+                        HorizontalContentAlignment="Stretch" />
+      </StackPanel>
+      <StackPanel x:Name="SeasonBlock" Visibility="Collapsed" Margin="0,10,0,0">
+        <Grid>
+          <Grid.ColumnDefinitions>
+            <ColumnDefinition Width="Auto" /><ColumnDefinition Width="Auto" /><ColumnDefinition Width="*" />
+            <ColumnDefinition Width="Auto" /><ColumnDefinition Width="Auto" />
+          </Grid.ColumnDefinitions>
+          <TextBlock x:Name="SeasonTitle" FontSize="13" FontWeight="SemiBold" VerticalAlignment="Center"
+                     TextTrimming="CharacterEllipsis" MaxWidth="360" />
+          <TextBlock x:Name="SeasonCount" Grid.Column="1" FontSize="12" Margin="10,0,0,0" VerticalAlignment="Center"
+                     Foreground="{ThemeResource SystemControlForegroundBaseMediumBrush}" />
+          <Button x:Name="SeasonSub" Grid.Column="3" Visibility="Collapsed" Background="Transparent" BorderBrush="#0050EF"
+                  BorderThickness="1" Padding="10,2" FontSize="12" Foreground="#0050EF" Margin="0,0,6,0" />
+          <Button x:Name="SeasonExpand" Grid.Column="4" Background="Transparent" BorderThickness="0" Padding="8,2"
+                  FontSize="12" Foreground="#0050EF" />
+        </Grid>
+        <Button x:Name="SeasonNext" Background="Transparent" BorderThickness="0" Padding="0,4" FontSize="12"
+                Foreground="{ThemeResource SystemControlForegroundBaseMediumBrush}" />
+        <ScrollViewer x:Name="SeasonList" Visibility="Collapsed" MaxHeight="220" HorizontalScrollMode="Disabled"
+                      VerticalScrollMode="Auto" VerticalScrollBarVisibility="Auto" />
+      </StackPanel>
+    </StackPanel>
+    </StackPanel>
   </Grid>
+  </ScrollViewer>
   <Thumb x:Name="SideBar" Grid.Column="1" <!--bar-attrs-->><!--bar--></Thumb>
   <Grid x:Name="Side" Grid.Column="2" Background="{ThemeResource ApplicationPageBackgroundThemeBrush}">
     <Grid.RowDefinitions>
@@ -210,6 +285,25 @@ thread_local! {
     static SOURCE: RefCell<Option<MediaSource>> = const { RefCell::new(None) };
     /// Where the next opening of a video starts, in 100 ns ticks: back from the small window.
     static NEXT_START: RefCell<Option<(String, i64)>> = const { RefCell::new(None) };
+    /// The speed chosen, kept from video to video this run.
+    static SPEED: Cell<f64> = const { Cell::new(1.0) };
+    /// How the picture fits, kept this run.
+    static FIT: Cell<CompositionStretch> = const { Cell::new(CompositionStretch::Uniform) };
+    /// A held press plays faster while it lasts; the click that ends it does not pause.
+    static HOLD_TURN: Cell<u64> = const { Cell::new(0) };
+    static HELD: Cell<bool> = const { Cell::new(false) };
+    static SKIP_TAP: Cell<bool> = const { Cell::new(false) };
+    /// How a danmaku sent goes: mode (1 scroll, 5 top, 4 bottom) and colour.
+    static SEND_MODE: Cell<u8> = const { Cell::new(1) };
+    static SEND_COLOR: Cell<u32> = const { Cell::new(0xFF_FFFF) };
+    /// Where the video was left, as (part, ms), while the hint offers it.
+    static RESUME: Cell<Option<(u64, u64)>> = const { Cell::new(None) };
+    /// 播完自动连播下一个, this run.
+    static AUTO_NEXT: Cell<bool> = const { Cell::new(true) };
+    /// How far each part was watched this run (ms), by cid.
+    static PART_PROGRESS: RefCell<std::collections::HashMap<u64, u64>> = RefCell::default();
+    static PARTS_OPEN: Cell<bool> = const { Cell::new(false) };
+    static SEASON_OPEN: Cell<bool> = const { Cell::new(false) };
     /// The page on show, while there is one.
     static PAGE: RefCell<Option<Page>> = const { RefCell::new(None) };
 }
@@ -226,6 +320,12 @@ struct Page {
     /// What reopens it from the small window.
     title: String,
     uploader: String,
+    /// Its parts and its 合集, once known; whether the 合集 is subscribed, once asked.
+    parts: Rc<RefCell<Vec<VideoPart>>>,
+    /// The video's card, once its details have come.
+    card: Rc<RefCell<Option<rubi_model::VideoCard>>>,
+    season: Rc<RefCell<Option<Season>>>,
+    subscribed: Rc<Cell<Option<bool>>>,
     cid: Rc<Cell<u64>>,
     /// The 竖屏推流 layout, not the ordinary one.
     feed: bool,
@@ -478,7 +578,7 @@ fn apply_layout(root: &IFrameworkElement) -> Result<()> {
         pixels(0.0)
     })?;
     place_send_bar(root, full, Color { a: 255, r: 0x11, g: 0x11, b: 0x11 })?;
-    for part in ["Back", "Info", "ActionRow", "Side"] {
+    for part in ["Back", "Below", "Side"] {
         let shown = if full { Visibility::Collapsed } else { Visibility::Visible };
         named::<IUIElement>(root, part)?.SetVisibility(shown)?;
     }
@@ -489,8 +589,475 @@ fn apply_layout(root: &IFrameworkElement) -> Result<()> {
     let side = named::<FrameworkElement>(root, "Side")?;
     Grid::SetColumn(&side, if wide { 2 } else { 0 })?;
     Grid::SetRow(&side, if wide { 0 } else { 1 })?;
-    let video = if wide { star(1.0) } else { pixels((root.ActualWidth()? * 9.0 / 16.0).floor().max(1.0)) };
-    named::<IRowDefinition>(root, "VideoRow")?.SetHeight(video)
+    fit_video(root)
+}
+
+/// The picture's height, fixed whatever opens under it: in fullscreen the whole column; on a wide
+/// window what the column leaves beside the back button, the send bar, the title and the actions;
+/// on a narrow one 16:9 of its width. The page scrolls to whatever goes further.
+fn fit_video(root: &IFrameworkElement) -> Result<()> {
+    let Some(shell) = shell() else { return Ok(()) };
+    let full = page().is_some_and(|p| p.filling.on());
+    let wide = shell.class() == WindowClass::Wide || full;
+    let height = |name: &str| named::<IFrameworkElement>(root, name).and_then(|e| e.ActualHeight()).unwrap_or(0.0);
+    let scroll = named::<crate::xaml::IScrollViewer>(root, "MainScroll")?;
+    let viewport = scroll.cast::<IFrameworkElement>()?.ActualHeight()?;
+    let video = if full {
+        viewport
+    } else if wide {
+        let detail_open =
+            named::<IUIElement>(root, "Detail").and_then(|d| d.Visibility()).is_ok_and(|v| v == Visibility::Visible);
+        // Title and actions as they are with nothing opened under the title.
+        let detail = if detail_open { height("Detail") + 4.0 } else { 0.0 };
+        let under = height("Back") + height("SendBelowVideo") + height("Info") - detail + height("ActionRow");
+        (viewport - under).max(200.0)
+    } else {
+        (root.ActualWidth()? * 9.0 / 16.0).floor()
+    };
+    let row = named::<IRowDefinition>(root, "VideoRow")?;
+    if (row.ActualHeight().unwrap_or(0.0) - video).abs() > 0.5 {
+        row.SetHeight(GridLength { value: video.max(1.0), grid_unit_type: GridUnitType::Pixel })?;
+    }
+    let mode = if full { crate::xaml::ScrollMode::Disabled } else { crate::xaml::ScrollMode::Auto };
+    scroll.SetVerticalScrollMode(mode)?;
+    if full {
+        scroll.cast::<crate::xaml::IScrollViewer2>()?.ChangeViewWithOptionalAnimation(None, Some(0.0), None, true)?;
+    }
+    Ok(())
+}
+
+/// Draws the parts and the 合集.
+fn show_series(page: &Page) {
+    let parts = page.parts.borrow();
+    let progress = PART_PROGRESS.with_borrow(Clone::clone);
+    let _ = series::show_parts(&page.root, &parts, page.cid.get(), &progress, PARTS_OPEN.get(), AUTO_NEXT.get());
+    let season = page.season.borrow();
+    let _ = series::show_season(&page.root, season.as_ref(), &page.bvid, SEASON_OPEN.get(), page.subscribed.get());
+}
+
+/// Whether the 合集 is subscribed, when signed in.
+fn ask_subscribed(page: &Page) {
+    let Some(id) = page.season.borrow().as_ref().map(|s| s.id) else { return };
+    let (Some(shell), Some(backend)) = (shell(), shell().and_then(|s| s.backend.get().cloned())) else { return };
+    if !backend.services.account.is_logged_in() {
+        return;
+    }
+    let (dispatcher, core, run) = (shell.dispatcher.clone(), backend.clone(), self::run());
+    backend.spawn(async move {
+        let on = core.services.seasons.is_subscribed(id).await.ok();
+        post(&dispatcher, move || {
+            if let Some(page) = (run == self::run()).then(self::page).flatten() {
+                page.subscribed.set(on);
+                show_series(&page);
+            }
+        });
+    });
+}
+
+fn toggle_subscribe() {
+    let Some(page) = page() else { return };
+    let (Some(id), Some(was)) = (page.season.borrow().as_ref().map(|s| s.id), page.subscribed.get()) else { return };
+    let (Some(shell), Some(backend)) = (shell(), shell().and_then(|s| s.backend.get().cloned())) else { return };
+    page.subscribed.set(Some(!was));
+    show_series(&page);
+    let (dispatcher, core, run) = (shell.dispatcher.clone(), backend.clone(), self::run());
+    backend.spawn(async move {
+        let done = core.services.seasons.subscribe(id, !was).await;
+        post(&dispatcher, move || {
+            let Some(page) = (run == self::run()).then(self::page).flatten() else { return };
+            match done {
+                Ok(()) => toast(if was { "已取消订阅" } else { "已订阅合集" }),
+                Err(problem) => {
+                    page.subscribed.set(Some(was));
+                    show_series(&page);
+                    toast(&format!("订阅失败：{problem}"));
+                }
+            }
+        });
+    });
+}
+
+/// Opens the 合集's video after this one; false when there is none.
+fn season_step() -> bool {
+    let Some(page) = page() else { return false };
+    let next = page.season.borrow().as_ref().and_then(|season| {
+        let all = series::episodes(season);
+        let at = all.iter().position(|e| e.bvid == page.bvid)?;
+        all.get(at + 1).map(|e| (e.bvid.clone(), e.title.clone()))
+    });
+    match next {
+        Some((bvid, title)) => {
+            let _ = open(false, &bvid, &title, &page.uploader);
+            true
+        }
+        None => false,
+    }
+}
+
+/// A video of this 合集, chosen from its list.
+pub fn open_episode_of_season(bvid: &str, title: &str) {
+    let uploader = page().map(|p| p.uploader.clone()).unwrap_or_default();
+    let _ = open(false, bvid, title, &uploader);
+}
+
+/// 播完自动连播下一个: the next part, else the 合集's next video.
+fn auto_next() {
+    if !AUTO_NEXT.get() {
+        return;
+    }
+    let Some(page) = page() else { return };
+    let next_part = {
+        let parts = page.parts.borrow();
+        parts.iter().position(|p| p.cid == page.cid.get()).and_then(|at| parts.get(at + 1)).map(|p| p.cid)
+    };
+    match next_part {
+        Some(cid) => play_part(cid, Some(0)),
+        None => {
+            season_step();
+        }
+    }
+}
+
+/// Plays part `cid` of the video on show, from `start_ms` or, when `None`, from where it was left
+/// this run.
+pub fn play_part(cid: u64, start_ms: Option<u64>) {
+    let Some(page) = page() else { return };
+    let (Some(shell), Some(backend)) = (shell(), shell().and_then(|s| s.backend.get().cloned())) else { return };
+    if cid == page.cid.get() && start_ms.is_none() {
+        return;
+    }
+    hide_resume();
+    // Where this part got to, for coming back to it.
+    if let Some((_, at_s)) = progress() {
+        PART_PROGRESS.with_borrow_mut(|m| m.insert(page.cid.get(), at_s * 1000));
+    }
+    let start = start_ms.or_else(|| PART_PROGRESS.with_borrow(|m| m.get(&cid).copied())).unwrap_or(0);
+    // The page lets go of this part: picture, player, danmaku.
+    if let Some(standby) = page.standby.borrow_mut().take() {
+        let _ = page.video.clear_next();
+        media::close(Some(standby.player), Some(standby.source));
+    }
+    page.video.clear();
+    media::close(PLAYING.with(|p| p.borrow_mut().take()), SOURCE.with(|s| s.borrow_mut().take()));
+    page.overlay.borrow_mut().take();
+    if let Ok(canvas) = named::<IPanel>(&page.root, "Danmaku") {
+        let _ = canvas.Children().and_then(|c| c.Clear());
+    }
+    let _ = page.bar.set_marks(Vec::new());
+    page.cid.set(cid);
+    show_series(&page);
+    if start > 0 {
+        NEXT_START.with_borrow_mut(|n| *n = Some((page.bvid.clone(), start as i64 * 10_000)));
+    }
+    let (dispatcher, core, run, bvid, uploader) =
+        (shell.dispatcher.clone(), backend.clone(), self::run(), page.bvid.clone(), page.uploader.clone());
+    backend.spawn(async move {
+        let quality = core.services.preferences.settings().playback.preferred_quality.min(MAX_FREE_QN);
+        let source = match core.services.videos.playback_part(&bvid, cid, quality).await {
+            Ok(playback) => open_source(&playback)
+                .map(|source| Opened {
+                    source,
+                    cid: playback.cid,
+                    duration_ms: playback.url.duration_ms as u32,
+                    offer: offer_of(&playback),
+                })
+                .map_err(|e| e.message()),
+            Err(e) => Err(e.to_string()),
+        };
+        post(&dispatcher, move || {
+            if run == self::run() {
+                let _ = shown(source, &uploader);
+            }
+        });
+    });
+}
+
+/// 分享: links, the share card, or the system's sheet.
+fn choose_share() {
+    let Some(page) = page() else { return };
+    let Ok(button) = named::<FrameworkElement>(&page.root, "ActShare") else { return };
+    let card = page.card.borrow().clone();
+    let title = card.as_ref().map_or_else(|| page.title.clone(), |c| c.title.clone());
+    let url = format!("https://www.bilibili.com/video/{}", page.bvid);
+    let titled = format!("【{title}】 {url}");
+    let (link, shared) = (url.clone(), crate::ui::sharing::Shared::Link { title: title.clone(), url });
+    let mut choices: Vec<crate::ui::card_menu::Choice> = vec![
+        ("复制链接".to_owned(), Rc::new(move || crate::ui::card_menu::copy_text(&link, "已复制链接"))),
+        ("复制标题和链接".to_owned(), Rc::new(move || crate::ui::card_menu::copy_text(&titled, "已复制标题和链接"))),
+    ];
+    if let Some(card) = card {
+        let made = crate::ui::share_card::Card {
+            bvid: card.bvid.clone(),
+            title: card.title.clone(),
+            uploader: card.owner.name.clone(),
+            plays: count(card.stats.view),
+            cover: card.cover.clone(),
+        };
+        let made = RefCell::new(Some(made));
+        choices.push((
+            "分享卡片…".to_owned(),
+            Rc::new(move || {
+                if let Some(made) = made.borrow_mut().take() {
+                    let _ = crate::ui::share_card::open(made);
+                }
+            }),
+        ));
+    }
+    choices.push(("系统分享…".to_owned(), Rc::new(move || crate::ui::sharing::share(shared.clone()))));
+    let _ = crate::ui::card_menu::show_under(&button, choices);
+}
+
+/// The line under the title, and what 展开详情 shows.
+fn show_detail(root: &IFrameworkElement, card: &rubi_model::VideoCard) -> Result<()> {
+    let now = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map_or(0, |d| d.as_secs() as i64);
+    let age = crate::state::library::age(card.pubdate, now);
+    let line = if age.is_empty() {
+        format!("{} 播放", count(card.stats.view))
+    } else {
+        format!("{} 播放 · {age}", count(card.stats.view))
+    };
+    set_text(root, "Meta", &line)?;
+    set_text(root, "DetailDesc", if card.desc.trim().is_empty() { "（没有简介）" } else { card.desc.trim() })?;
+    set_text(root, "DetailIds", &format!("{} · av{}", card.bvid, card.aid))?;
+    set_text(root, "DetailCounts", &format!("评论 {} · 弹幕 {}", count(card.stats.reply), count(card.stats.danmaku)))?;
+    named::<IUIElement>(root, "MoreDetail")?.SetVisibility(Visibility::Visible)
+}
+
+fn toggle_detail() {
+    let Some(page) = page() else { return };
+    let Ok(detail) = named::<IUIElement>(&page.root, "Detail") else { return };
+    let open = detail.Visibility().is_ok_and(|v| v == Visibility::Collapsed);
+    let _ = detail.SetVisibility(if open { Visibility::Visible } else { Visibility::Collapsed });
+    if let Ok(button) = named::<IContentControl>(&page.root, "MoreDetail") {
+        let label = if open { "收起详情 ▴" } else { "展开详情 ▾" };
+        let _ = PropertyValue::CreateString(label).and_then(|l| button.SetContent(&l));
+    }
+}
+
+/// How long the 上次看到 hint stays, in seconds.
+const RESUME_FOR: u32 = 5;
+
+/// Offers to pick up where the video was left: `at_ms` into part `cid`.
+fn offer_resume(cid: u64, at_ms: u64) {
+    let Some(page) = page() else { return };
+    RESUME.with(|r| r.set(Some((cid, at_ms))));
+    let _ = named::<IUIElement>(&page.root, "ResumeHint").and_then(|h| h.SetVisibility(Visibility::Visible));
+    count_resume(RESUME_FOR, self::run());
+}
+
+fn count_resume(left: u32, run: u64) {
+    let Some(page) = page().filter(|_| run == self::run()) else { return };
+    let Some((_, at_ms)) = RESUME.with(Cell::get) else { return };
+    if left == 0 {
+        hide_resume();
+        return;
+    }
+    let text = format!("上次看到 {} · 点此继续　{left} 秒后隐藏", clock((at_ms / 1000) as i64));
+    if let Ok(button) = named::<IContentControl>(&page.root, "ResumeHint") {
+        let _ = PropertyValue::CreateString(&text).and_then(|t| button.SetContent(&t));
+    }
+    let (Some(shell), Some(backend)) = (shell(), shell().and_then(|s| s.backend.get().cloned())) else { return };
+    let dispatcher = shell.dispatcher.clone();
+    backend.spawn(async move {
+        tokio::time::sleep(std::time::Duration::from_secs(1)).await;
+        post(&dispatcher, move || count_resume(left - 1, run));
+    });
+}
+
+fn hide_resume() {
+    RESUME.with(|r| r.set(None));
+    if let Some(page) = page() {
+        let _ = named::<IUIElement>(&page.root, "ResumeHint").and_then(|h| h.SetVisibility(Visibility::Collapsed));
+    }
+}
+
+/// 点此继续: goes to where the video was left, in its part.
+fn resume() {
+    let Some((cid, at_ms)) = RESUME.with(Cell::get) else { return };
+    hide_resume();
+    let Some(page) = page() else { return };
+    if cid == page.cid.get() || cid == 0 {
+        if let Some(session) = playing_session() {
+            let _ = session.SetPosition(windows_time::TimeSpan { duration: at_ms as i64 * 10_000 });
+        }
+    } else {
+        play_part(cid, Some(at_ms));
+    }
+}
+
+/// The speed a player plays at: the chosen one, or faster while a press is held.
+fn rate() -> f64 {
+    let chosen = SPEED.get();
+    if HELD.get() { if chosen >= 2.0 { 3.0 } else { 2.0 } } else { chosen }
+}
+
+fn apply_speed(player: &MediaPlayer) {
+    let _ = media::session_of(player).and_then(|s| s.SetPlaybackRate(rate()));
+}
+
+fn apply_speed_now() {
+    PLAYING.with(|p| {
+        if let Some(player) = p.borrow().as_ref() {
+            apply_speed(player);
+        }
+    });
+}
+
+fn speed_label(rate: f64) -> String {
+    if rate.fract() == 0.0 { format!("{rate:.1}×") } else { format!("{rate}×") }
+}
+
+fn set_speed_label(root: &IFrameworkElement) {
+    if let Ok(button) = named::<IContentControl>(root, "Speed") {
+        let _ = PropertyValue::CreateString(&speed_label(SPEED.get())).and_then(|l| button.SetContent(&l));
+    }
+}
+
+/// 倍速: a menu under the button.
+fn choose_speed() {
+    let Some(page) = page() else { return };
+    let Ok(button) = named::<FrameworkElement>(&page.root, "Speed") else { return };
+    let choices: Vec<crate::ui::card_menu::Choice> = [0.5, 0.75, 1.0, 1.25, 1.5, 2.0, 3.0]
+        .into_iter()
+        .map(|r| {
+            let mark = if r == SPEED.get() { "● " } else { "" };
+            let pick: Rc<dyn Fn()> = Rc::new(move || {
+                SPEED.set(r);
+                apply_speed_now();
+                if let Some(page) = self::page() {
+                    set_speed_label(&page.root);
+                }
+            });
+            (format!("{mark}{}", speed_label(r)), pick)
+        })
+        .collect();
+    let _ = crate::ui::card_menu::show_under(&button, choices);
+}
+
+/// Plays faster while a press on the picture is held: the mouse after a moment, a finger or pen
+/// held.
+fn hold_for_speed(video: &IUIElement) -> Result<()> {
+    keep(video.PointerPressed(|sender: Ref<windows_core::IInspectable>, args: Ref<PointerRoutedEventArgs>| {
+        let (Ok(sender), Ok(args)) = (sender.ok(), args.ok()) else { return };
+        let _ = start_hold(sender, args);
+    })?);
+    for event in [0, 1] {
+        let ended = move |sender: Ref<windows_core::IInspectable>, args: Ref<PointerRoutedEventArgs>| {
+            let (Ok(sender), Ok(args)) = (sender.ok(), args.ok()) else { return };
+            end_hold();
+            let pointer = args.cast::<IPointerRoutedEventArgs>().and_then(|a| a.Pointer());
+            if let (Ok(element), Ok(pointer)) = (sender.cast::<IUIElement>(), pointer) {
+                let _ = element.ReleasePointerCapture(&pointer);
+            }
+        };
+        keep(if event == 0 { video.PointerReleased(ended)? } else { video.PointerCaptureLost(ended)? });
+    }
+    keep(video.Holding(|_: Ref<windows_core::IInspectable>, args: Ref<HoldingRoutedEventArgs>| {
+        let state = args.ok().and_then(|a| a.cast::<IHoldingRoutedEventArgs>()?.HoldingState());
+        match state {
+            Ok(HoldingState::Started) => held(),
+            Ok(_) => end_hold(),
+            Err(_) => {}
+        }
+    })?);
+    Ok(())
+}
+
+/// How long a mouse press is held before it plays faster.
+const HOLD_AFTER: std::time::Duration = std::time::Duration::from_millis(400);
+
+fn start_hold(sender: &windows_core::IInspectable, args: &PointerRoutedEventArgs) -> Result<()> {
+    SKIP_TAP.set(false);
+    let pointer = args.cast::<IPointerRoutedEventArgs>()?.Pointer()?;
+    if pointer.cast::<IPointer>()?.PointerDeviceType()? != PointerDeviceType::Mouse
+        || !args.GetCurrentPoint(None::<&UIElement>)?.Properties()?.IsLeftButtonPressed()?
+    {
+        return Ok(());
+    }
+    sender.cast::<IUIElement>()?.CapturePointer(&pointer)?;
+    let turn = HOLD_TURN.get() + 1;
+    HOLD_TURN.set(turn);
+    let Some(shell) = shell() else { return Ok(()) };
+    let Some(backend) = shell.backend.get().cloned() else { return Ok(()) };
+    let dispatcher = shell.dispatcher.clone();
+    backend.spawn(async move {
+        tokio::time::sleep(HOLD_AFTER).await;
+        post(&dispatcher, move || {
+            if HOLD_TURN.get() == turn {
+                held();
+            }
+        });
+    });
+    Ok(())
+}
+
+fn held() {
+    if HELD.replace(true) {
+        return;
+    }
+    apply_speed_now();
+    toast(&format!("▶▶ {} 倍速中", speed_label(rate())));
+}
+
+fn end_hold() {
+    HOLD_TURN.set(HOLD_TURN.get() + 1);
+    if HELD.replace(false) {
+        SKIP_TAP.set(true);
+        apply_speed_now();
+        toast(&format!("恢复 {}", speed_label(SPEED.get())));
+    }
+}
+
+/// 播放设置: the picture's fit and how danmaku show.
+fn open_settings() {
+    let Some(page) = page() else { return };
+    let Ok(button) = named::<FrameworkElement>(&page.root, "PlaySettings") else { return };
+    let look = page
+        .overlay
+        .borrow()
+        .as_ref()
+        .map(|o| o.look())
+        .unwrap_or_else(|| shell().map(|s| s.prefs().danmaku).unwrap_or_default());
+    let _ = crate::ui::play_settings::show(&button, FIT.get(), look, |change| {
+        let Some(page) = self::page() else { return };
+        match change {
+            crate::ui::play_settings::Change::Fit(fit) => {
+                FIT.set(fit);
+                page.video.set_stretch(fit);
+            }
+            crate::ui::play_settings::Change::Look(look) => {
+                if let Some(overlay) = page.overlay.borrow().as_ref() {
+                    let _ = overlay.set_look(look);
+                }
+                if let Some(shell) = shell() {
+                    let _ = shell.set_prefs(Prefs { danmaku: look, ..shell.prefs() });
+                }
+            }
+        }
+    });
+}
+
+/// The 样式 button: the colour and where a danmaku sent goes.
+fn show_send_style(root: &IFrameworkElement) {
+    let color = SEND_COLOR.get();
+    let color = Color { a: 255, r: (color >> 16) as u8, g: (color >> 8) as u8, b: color as u8 };
+    if let Ok(swatch) = named::<IBorder>(root, "SendSwatch") {
+        let _ = SolidColorBrush::CreateInstanceWithColor(color).and_then(|b| swatch.SetBackground(&b));
+    }
+    let label = crate::ui::play_settings::SEND_MODES.iter().find(|m| m.1 == SEND_MODE.get()).map_or("滚动", |m| m.0);
+    let _ = set_text(root, "SendStyleText", label);
+}
+
+fn choose_send_style() {
+    let Some(page) = page() else { return };
+    let Ok(button) = named::<FrameworkElement>(&page.root, "SendStyle") else { return };
+    let _ = crate::ui::play_settings::show_send_style(&button, SEND_MODE.get(), SEND_COLOR.get(), |mode, color| {
+        SEND_MODE.set(mode);
+        SEND_COLOR.set(color);
+        if let Some(page) = self::page() {
+            show_send_style(&page.root);
+        }
+    });
 }
 
 /// Moves the picture into the small window, or brings it back.
@@ -531,6 +1098,7 @@ pub fn take_back(bvid: &str, player: &MediaPlayer, source: &MediaSource) -> bool
     PLAYING.with(|p| *p.borrow_mut() = Some(player.clone()));
     SOURCE.with(|s| *s.borrow_mut() = Some(source.clone()));
     let _ = page.bar.apply_sound();
+    apply_speed(player);
     true
 }
 
@@ -585,6 +1153,13 @@ pub fn show(bvid: &str, title: &str, uploader: &str) -> Result<()> {
 /// Opens a video, in the 竖屏推流 layout when `feed`.
 pub fn open(feed: bool, bvid: &str, title: &str, uploader: &str) -> Result<()> {
     let Some(shell) = shell() else { return Ok(()) };
+    // An opened video feeds the local recommendation, as on Android.
+    if let Some(backend) = shell.backend.get().cloned() {
+        let (core, clicked) = (backend.clone(), bvid.to_owned());
+        backend.spawn(async move {
+            let _ = core.services.home.record(&clicked, rubi_model::Signal::Click).await;
+        });
+    }
     let episode = NEXT_EPISODE.take();
     queue::opening(bvid);
     leave();
@@ -621,6 +1196,10 @@ pub fn open(feed: bool, bvid: &str, title: &str, uploader: &str) -> Result<()> {
         bvid: bvid.to_owned(),
         title: title.to_owned(),
         uploader: uploader.to_owned(),
+        parts: Rc::default(),
+        card: Rc::default(),
+        season: Rc::default(),
+        subscribed: Rc::default(),
         cid,
         feed,
         episode,
@@ -649,6 +1228,54 @@ pub fn open(feed: bool, bvid: &str, title: &str, uploader: &str) -> Result<()> {
     named::<IUIElement>(&root, "WindowFull")?.SetVisibility(Visibility::Visible)?;
     on_click(&root, "Quality", choose_quality)?;
     on_click(&root, "Pip", toggle_pip)?;
+    if !feed {
+        for name in ["Info", "ActionRow", "MainScroll"] {
+            keep(named::<IFrameworkElement>(&root, name)?.SizeChanged(
+                |_: Ref<windows_core::IInspectable>, _: Ref<SizeChangedEventArgs>| {
+                    if let Some(page) = page() {
+                        let _ = fit_video(&page.root);
+                    }
+                },
+            )?);
+        }
+        on_click(&root, "ActShare", choose_share)?;
+        on_click(&root, "MoreDetail", toggle_detail)?;
+        on_click(&root, "ResumeHint", resume)?;
+        on_click(&root, "AutoNext", || {
+            AUTO_NEXT.set(!AUTO_NEXT.get());
+            if let Some(page) = page() {
+                show_series(&page);
+            }
+        })?;
+        on_click(&root, "PartsExpand", || {
+            PARTS_OPEN.set(!PARTS_OPEN.get());
+            if let Some(page) = page() {
+                show_series(&page);
+            }
+        })?;
+        on_click(&root, "SeasonExpand", || {
+            SEASON_OPEN.set(!SEASON_OPEN.get());
+            if let Some(page) = page() {
+                show_series(&page);
+            }
+        })?;
+        on_click(&root, "SeasonNext", || {
+            let _ = season_step();
+        })?;
+        on_click(&root, "SeasonSub", toggle_subscribe)?;
+    }
+    on_click(&root, "Speed", choose_speed)?;
+    on_click(&root, "PlaySettings", open_settings)?;
+    on_click(&root, "SendStyle", choose_send_style)?;
+    for name in ["Speed", "PlaySettings"] {
+        named::<IUIElement>(&root, name)?.SetVisibility(Visibility::Visible)?;
+    }
+    set_speed_label(&root);
+    show_send_style(&root);
+    if let Some(page) = page() {
+        page.video.set_stretch(FIT.get());
+    }
+    hold_for_speed(&named::<IUIElement>(&root, "Video")?)?;
     named::<IUIElement>(&root, "Pip")?.SetVisibility(Visibility::Visible)?;
     on_click(&root, "UpLink", open_up)?;
     on_click(&root, "PlayPause", toggle_play)?;
@@ -662,8 +1289,9 @@ pub fn open(feed: bool, bvid: &str, title: &str, uploader: &str) -> Result<()> {
     on_click(&root, "DanmakuSwitch", toggle_danmaku)?;
     keep(named::<IUIElement>(&root, "Video")?.Tapped(
         |_: Ref<windows_core::IInspectable>, args: Ref<TappedRoutedEventArgs>| {
-            // A finger's tap is the bar's: it shows or hides it.
-            if !crate::ui::control_bar::is_touch(&args) {
+            // A finger's tap is the bar's: it shows or hides it. The click ending a held press
+            // does not pause either.
+            if !crate::ui::control_bar::is_touch(&args) && !SKIP_TAP.take() {
                 toggle_play();
             }
         },
@@ -699,21 +1327,31 @@ pub fn open(feed: bool, bvid: &str, title: &str, uploader: &str) -> Result<()> {
     backend.spawn(async move {
         let services = &info_core.services;
         let (detail, related) = tokio::join!(services.videos.detail(&info_bvid), services.discover.related(&info_bvid));
-        let detail = detail.ok().map(|d| d.card);
+        let detail = detail.ok();
         let related = related.unwrap_or_default();
+        let resume = if episode.is_none() && !feed { services.videos.resume_point(&info_bvid).await } else { None };
         let relation =
             if services.account.is_logged_in() { services.actions.relation(&info_bvid).await.ok() } else { None };
         post(&info_dispatcher, move || {
             let Some(page) = (run == self::run()).then(page).flatten() else { return };
-            if let Some(card) = detail {
+            if let Some(info) = detail {
+                let card = info.card;
+                *page.parts.borrow_mut() = info.parts;
+                *page.season.borrow_mut() = info.season;
+                show_series(&page);
+                ask_subscribed(&page);
+                *page.card.borrow_mut() = Some(card.clone());
                 page.side.set_aid(card.aid, card.stats.reply);
                 page.actions.set_counts(card.stats.like, card.stats.coin, card.stats.favorite);
                 let _ = set_text(&page.root, "Title", &card.title);
                 let _ = show_up_link(&page, card.owner.mid, &card.owner.name);
-                let _ = set_text(&page.root, "Meta", &format!("{} 播放 · {}", count(card.stats.view), card.desc));
+                let _ = show_detail(&page.root, &card);
             }
             if let Some(relation) = relation {
                 page.actions.set_relation(relation);
+            }
+            if let Some(point) = resume {
+                offer_resume(point.cid, point.position_ms);
             }
             let _ = page.side.set_related(related);
         });
@@ -749,7 +1387,7 @@ pub fn open(feed: bool, bvid: &str, title: &str, uploader: &str) -> Result<()> {
 fn settle_buttons(root: &IFrameworkElement) -> Result<()> {
     let words = shell().is_some_and(|s| s.prefs().words);
     let plain = ["Back", "Full", "SendButton", "Prev", "Next", "Normal", "TabComments", "TabRelated", "TabQueue"];
-    let acting = ["ActLike", "ActCoin", "ActFav", "ActLater", "ActDanmaku", "ActFollow", "ActComment"];
+    let acting = ["ActLike", "ActCoin", "ActFav", "ActShare", "ActLater", "ActDanmaku", "ActFollow", "ActComment"];
     for name in plain.into_iter().chain(acting) {
         if let Ok(button) = named::<IFrameworkElement4>(root, name) {
             button.SetAllowFocusOnInteraction(false)?;
@@ -955,6 +1593,13 @@ fn shown(opened: std::result::Result<Opened, String>, uploader: &str) -> Result<
             {
                 overlay.load(backend, shell.dispatcher.clone(), cid, duration_ms);
             }
+            let whole_ms = f64::from(duration_ms.max(1));
+            overlay.watch_marks(move |marks| {
+                if let Some(page) = self::page() {
+                    let marks = marks.iter().map(|m| (f64::from(m.target_ms) / whole_ms, m.label.clone())).collect();
+                    let _ = page.bar.set_marks(marks);
+                }
+            });
             *page.overlay.borrow_mut() = Some(overlay);
             Ok(())
         }
@@ -1067,7 +1712,8 @@ fn send_typed() -> Result<()> {
     });
     let progress_ms = position.map_or(0, |t| (t.duration / 10_000) as u32);
     field.SetText("")?;
-    let request = SendDanmaku { bvid: page.bvid.clone(), cid, progress_ms, text, mode: 1, color: 0xFF_FFFF };
+    let request =
+        SendDanmaku { bvid: page.bvid.clone(), cid, progress_ms, text, mode: SEND_MODE.get(), color: SEND_COLOR.get() };
     let (dispatcher, run, core) = (shell.dispatcher.clone(), self::run(), backend.clone());
     backend.spawn(async move {
         let sent = core.services.danmaku.send(request).await.map_err(|e| e.to_string());
@@ -1092,7 +1738,11 @@ fn report_end(player: &MediaPlayer) -> Result<()> {
         player.cast::<IMediaPlayer>()?.MediaEnded(move |_: Ref<MediaPlayer>, _: Ref<windows_core::IInspectable>| {
             post(&dispatcher, move || {
                 if RUN.load(Ordering::Relaxed) == run {
-                    queue::ended();
+                    if queue::view().is_some() {
+                        queue::ended();
+                    } else {
+                        auto_next();
+                    }
                 }
             });
         })?;
@@ -1137,6 +1787,7 @@ fn play(source: &MediaSource) -> Result<MediaPlaybackSession> {
     }
     player.cast::<IMediaPlayer>()?.Play()?;
     let session = player.cast::<IMediaPlayer3>()?.PlaybackSession()?;
+    apply_speed(&player);
     let start = NEXT_START.take().filter(|(bvid, _)| page().is_some_and(|p| &p.bvid == bvid));
     if let Some((_, at)) = start {
         let _ = session.cast::<IMediaPlaybackSession>()?.SetPosition(windows_time::TimeSpan { duration: at });

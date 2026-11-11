@@ -16,14 +16,12 @@ use crate::ui::card_menu::{self, Choice, copy_text};
 use crate::ui::shell::{shell, toast};
 use crate::ui::{keep, load, named, on_click, post};
 use crate::xaml::{
-    BitmapImage, Clipboard, CreationCollisionOption, DataPackage, DataRequestedEventArgs, DataTransferManager,
-    DoubleTappedRoutedEventArgs, FileIO, FileSavePicker, FocusState, HttpClient, IBitmapImage, IBitmapSource, IControl,
-    IDataPackage, IDataPackage2, IDataPackagePropertySet, IDataRequest, IDataRequestedEventArgs, IDataTransferManager,
-    IDoubleTappedRoutedEventArgs, IFileSavePicker, IFrameworkElement, IHttpClient, IImage, IKeyRoutedEventArgs,
-    IPointer, IPointerRoutedEventArgs, IRoutedEventArgs, IScrollViewer, IScrollViewer2, IStorageFolder, IStorageItem,
-    IUIElement, KeyRoutedEventArgs, KnownFolders, PickerLocationId, PointerDeviceType, PointerRoutedEventArgs,
-    RandomAccessStreamReference, RoutedEventArgs, SizeChangedEventArgs, StorageFile, UIElement, Uri, VirtualKey,
-    Visibility,
+    BitmapImage, Clipboard, CreationCollisionOption, DataPackage, DoubleTappedRoutedEventArgs, FileIO, FileSavePicker,
+    FocusState, HttpClient, IBitmapImage, IBitmapSource, IControl, IDataPackage, IDoubleTappedRoutedEventArgs,
+    IFileSavePicker, IFrameworkElement, IHttpClient, IImage, IKeyRoutedEventArgs, IPointer, IPointerRoutedEventArgs,
+    IRoutedEventArgs, IScrollViewer, IScrollViewer2, IStorageFolder, IStorageItem, IUIElement, KeyRoutedEventArgs,
+    KnownFolders, PickerLocationId, PointerDeviceType, PointerRoutedEventArgs, RandomAccessStreamReference,
+    RoutedEventArgs, SizeChangedEventArgs, StorageFile, UIElement, Uri, VirtualKey, Visibility,
 };
 
 /// Width of the rough copy shown while the original comes.
@@ -102,9 +100,6 @@ struct Viewer {
 
 thread_local! {
     static VIEWER: RefCell<Option<Rc<Viewer>>> = const { RefCell::new(None) };
-    /// What the system share sheet asks for; the handler is set once a run.
-    static SHARING: RefCell<Option<String>> = const { RefCell::new(None) };
-    static SHARE_HOOKED: Cell<bool> = const { Cell::new(false) };
 }
 
 fn viewer() -> Option<Rc<Viewer>> {
@@ -534,36 +529,5 @@ fn copy_picture(url: &str) {
 
 /// Offers the picture at `url` to the system share sheet.
 fn share(url: &str) {
-    SHARING.with_borrow_mut(|s| *s = Some(original(url).to_owned()));
-    if !SHARE_HOOKED.get() {
-        let hooked = (|| -> Result<()> {
-            let manager = DataTransferManager::GetForCurrentView()?;
-            let revoker = manager.cast::<IDataTransferManager>()?.DataRequested(
-                |_: Ref<DataTransferManager>, args: Ref<DataRequestedEventArgs>| {
-                    let _ = args.ok().map(fill_share);
-                },
-            )?;
-            keep(revoker);
-            Ok(())
-        })();
-        if hooked.is_err() {
-            toast("分享不可用");
-            return;
-        }
-        SHARE_HOOKED.set(true);
-    }
-    if DataTransferManager::ShowShareUI().is_err() {
-        toast("分享不可用");
-    }
-}
-
-fn fill_share(args: &DataRequestedEventArgs) -> Result<()> {
-    let Some(url) = SHARING.with_borrow(Clone::clone) else { return Ok(()) };
-    let data = args.cast::<IDataRequestedEventArgs>()?.Request()?.cast::<IDataRequest>()?.Data()?;
-    let package = data.cast::<IDataPackage>()?;
-    package.Properties()?.cast::<IDataPackagePropertySet>()?.SetTitle("分享图片")?;
-    let uri = Uri::CreateUri(&url)?;
-    package.SetText(&url)?;
-    data.cast::<IDataPackage2>()?.SetWebLink(&uri)?;
-    package.SetBitmap(&RandomAccessStreamReference::CreateFromUri(&uri)?)
+    crate::ui::sharing::share(crate::ui::sharing::Shared::Picture { url: original(url).to_owned() });
 }

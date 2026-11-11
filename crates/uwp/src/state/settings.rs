@@ -1,6 +1,7 @@
 //! What the settings page offers, and what changing it writes. The core owns its settings as one
 //! JSON object and takes patches of just what changed; a few belong to this app alone.
 
+use crate::state::danmaku::Look;
 use serde_json::{Value, json};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -75,7 +76,7 @@ pub const QUALITIES: [(u32, &str); 3] = [(80, "1080P"), (64, "720P"), (32, "480P
 const DEFAULT_VOLUME: u8 = 70;
 
 /// This app's own preferences, kept in a small file beside the panes' widths.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq)]
 pub struct Prefs {
     /// Words alone, without line icons.
     pub words: bool,
@@ -83,11 +84,12 @@ pub struct Prefs {
     pub shortcuts: bool,
     /// Volume of the players, 0 to 100.
     pub volume: u8,
+    pub danmaku: Look,
 }
 
 impl Default for Prefs {
     fn default() -> Self {
-        Self { words: false, pause_on_blur: true, shortcuts: true, volume: DEFAULT_VOLUME }
+        Self { words: false, pause_on_blur: true, shortcuts: true, volume: DEFAULT_VOLUME, danmaku: Look::default() }
     }
 }
 
@@ -103,6 +105,21 @@ impl Prefs {
                 "pause_on_blur" => prefs.pause_on_blur = on,
                 "shortcuts" => prefs.shortcuts = on,
                 "volume" | "live_volume" => prefs.volume = value.parse().map_or(DEFAULT_VOLUME, |v: u8| v.min(100)),
+                "dm_area" => prefs.danmaku.area = value.parse().map_or(prefs.danmaku.area, |v: f64| v.clamp(0.1, 1.0)),
+                "dm_speed" => {
+                    prefs.danmaku.speed = value.parse().map_or(prefs.danmaku.speed, |v: f64| v.clamp(0.3, 3.0))
+                }
+                "dm_size" => {
+                    prefs.danmaku.size = value.parse().map_or(prefs.danmaku.size, |v: f64| v.clamp(12.0, 40.0))
+                }
+                "dm_opacity" => {
+                    prefs.danmaku.opacity = value.parse().map_or(prefs.danmaku.opacity, |v: f64| v.clamp(0.2, 1.0));
+                }
+                "dm_kinds" => {
+                    if let Ok(bits) = value.parse() {
+                        prefs.danmaku = prefs.danmaku.with_kinds(bits);
+                    }
+                }
                 _ => {}
             }
         }
@@ -110,12 +127,18 @@ impl Prefs {
     }
 
     pub fn to_text(self) -> String {
+        let dm = self.danmaku;
         format!(
-            "words={} pause_on_blur={} shortcuts={} volume={}",
+            "words={} pause_on_blur={} shortcuts={} volume={} dm_area={} dm_speed={} dm_size={} dm_opacity={} dm_kinds={}",
             u8::from(self.words),
             u8::from(self.pause_on_blur),
             u8::from(self.shortcuts),
-            self.volume
+            self.volume,
+            dm.area,
+            dm.speed,
+            dm.size,
+            dm.opacity,
+            dm.kinds()
         )
     }
 }
@@ -153,7 +176,8 @@ mod tests {
 
     #[test]
     fn prefs_survive_a_round_trip() {
-        let prefs = Prefs { words: true, pause_on_blur: false, shortcuts: true, volume: 35 };
+        let danmaku = Look { area: 1.0, speed: 1.5, size: 26.0, opacity: 0.6, top: false, ..Look::default() };
+        let prefs = Prefs { words: true, pause_on_blur: false, shortcuts: true, volume: 35, danmaku };
         assert_eq!(Prefs::parse(&prefs.to_text()), prefs);
         assert_eq!(Prefs::parse("live_volume=250").volume, 100);
         assert_eq!(Prefs::parse("live_volume=loud").volume, DEFAULT_VOLUME);

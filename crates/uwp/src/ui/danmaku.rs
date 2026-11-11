@@ -14,7 +14,7 @@ use windows_collections::IVector;
 use windows_core::{EventRevoker, IInspectable, Interface, Ref, Result};
 
 use crate::backend::Backend;
-use crate::state::danmaku::{FONT_SIZE, Item, SCROLL_MS, items, on_screen, tracks};
+use crate::state::danmaku::{Item, Look, items, on_screen, tracks};
 use crate::state::emotes::has_emotes;
 use crate::ui::emote_text;
 use crate::ui::shell::shell;
@@ -53,7 +53,7 @@ const SLOT: &str = r##"
   <RichTextBlock Foreground="White" />
 </Grid>"##;
 /// Emotes in a danmaku, square, a little over the text's height.
-const EMOTE_SIZE: f64 = 28.0;
+const EMOTE_PER_FONT: f64 = 1.27;
 /// Copies of the text in a slot; the last is the coloured one on top.
 const LAYERS: u32 = 5;
 
@@ -103,6 +103,11 @@ pub struct Overlay {
     placing: Cell<bool>,
     placed_stale: Cell<bool>,
     on: Cell<bool>,
+    /// Size, speed, area and kinds, as the viewer set them.
+    look: Cell<Look>,
+    /// The 空降点 found so far, and who wants to know of them.
+    marks: RefCell<Vec<rubi_model::JumpMark>>,
+    on_marks: RefCell<Option<Box<dyn Fn(&[rubi_model::JumpMark])>>>,
     /// Emotes the danmaku use beyond the common set: a live room's own.
     emotes: RefCell<BTreeMap<String, String>>,
     /// Itself, for the frame handler it starts again after stopping.
@@ -116,6 +121,8 @@ pub struct Overlay {
     looking: Cell<bool>,
     sizing: RefCell<Option<EventRevoker>>,
     clip_pending: Rc<Cell<bool>>,
+    /// The size the clip was last set for: a frame at another size sets it again.
+    clipped: Cell<(f64, f64)>,
     /// Bumped by each size change: only the last one places the danmaku again.
     resizes: Arc<AtomicU64>,
 }
@@ -154,6 +161,9 @@ impl Overlay {
             items: RefCell::default(),
             danmaku: RefCell::default(),
             on: Cell::new(true),
+            look: Cell::new(shell().map(|s| s.prefs().danmaku).unwrap_or_default()),
+            marks: RefCell::default(),
+            on_marks: RefCell::default(),
             emotes: RefCell::default(),
             me: me.clone(),
             frames: RefCell::new(None),
@@ -162,6 +172,7 @@ impl Overlay {
             looking: Cell::new(false),
             sizing: RefCell::new(None),
             clip_pending: Rc::default(),
+            clipped: Cell::new((0.0, 0.0)),
             resizes: Arc::default(),
         });
         overlay.wake();
@@ -179,6 +190,7 @@ impl Overlay {
         })?;
         *overlay.sizing.borrow_mut() = Some(sizing);
         overlay.clip()?;
+        overlay.dress_all()?;
         Ok(overlay)
     }
 
@@ -251,19 +263,21 @@ impl Overlay {
     pub fn load(&self, backend: Arc<Backend>, dispatcher: CoreDispatcher, cid: u64, duration_ms: u32) {
         let (run, find) = ((self.host.run)(), self.host.find);
         let core = backend.clone();
-        let size = self.size();
+        let (size, look) = (self.size(), self.look.get());
         backend.spawn(async move {
             let services = &core.services;
             let Ok(session) = services.danmaku.session(cid, duration_ms) else { return };
             let segments: Vec<u32> = (1..=session.segment_count()).collect();
             let (first, rest) = segments.split_at(1.min(segments.len()));
             for batch in std::iter::once(first).chain(rest.chunks(BATCH)) {
-                let Ok(output) = session.load(batch).await else { continue };
-                let placed = place(services, &output.kept, size);
+                let Ok(mut output) = session.load(batch).await else { continue };
+                let placed = place(services, &output.kept, size, look);
+                let marks = std::mem::take(&mut output.jump_marks);
                 let danmaku = Arc::new(output.kept);
                 post(&dispatcher, move || {
                     if let Some(overlay) = find(run) {
                         overlay.set(danmaku, placed);
+                        overlay.add_marks(marks);
                     }
                 });
             }
@@ -332,7 +346,8 @@ impl Overlay {
     fn place(&self) {
         let Some(shell) = shell() else { return };
         let Some(backend) = shell.backend.get().cloned() else { return };
-        let (danmaku, size, run) = (self.danmaku.borrow().clone(), self.size(), (self.host.run)());
+        let (danmaku, size, run, look) =
+            (self.danmaku.borrow().clone(), self.size(), (self.host.run)(), self.look.get());
         if danmaku.is_empty() {
             return;
         }
@@ -344,7 +359,7 @@ impl Overlay {
         let dispatcher = shell.dispatcher.clone();
         let core = backend.clone();
         backend.spawn(async move {
-            let placed = place(&core.services, &danmaku, size);
+            let placed = place(&core.services, &danmaku, size, look);
             post(&dispatcher, move || {
                 if let Some(overlay) = find(run) {
                     overlay.set(danmaku, placed);
@@ -360,6 +375,7 @@ impl Overlay {
     /// Keeps danmaku inside the picture.
     fn clip(&self) -> Result<()> {
         let (width, height) = self.size();
+        self.clipped.set((width, height));
         let geometry = RectangleGeometry::new()?;
         geometry.cast::<IRectangleGeometry>()?.SetRect(crate::xaml::Rect {
             x: 0.0,
@@ -373,10 +389,16 @@ impl Overlay {
     fn draw(&self) -> Result<()> {
         let now_ms = (self.clock)();
         let (width, height) = self.size();
+        // A size change can come without its event (into fullscreen inside the scrolling page):
+        // the clip and the placing follow the size seen here.
+        if self.clipped.get() != (width, height) {
+            self.clip()?;
+            self.place_when_settled();
+        }
         let items = self.items.borrow();
         let mut used = 0;
         if self.on.get() {
-            for (at, (x, y)) in on_screen(&items, now_ms, width, height) {
+            for (at, (x, y)) in on_screen(&items, now_ms, width, height, self.look.get()) {
                 let Some(slot) = self.slots.get(used) else { break };
                 used += 1;
                 if slot.shows.replace(Some(at)) != Some(at) {
@@ -399,6 +421,59 @@ impl Overlay {
 }
 
 impl Overlay {
+    /// Calls `show` with the 空降点 found, now and as more come.
+    pub fn watch_marks(&self, show: impl Fn(&[rubi_model::JumpMark]) + 'static) {
+        show(&self.marks.borrow());
+        *self.on_marks.borrow_mut() = Some(Box::new(show));
+    }
+
+    fn add_marks(&self, more: Vec<rubi_model::JumpMark>) {
+        if more.is_empty() {
+            return;
+        }
+        let mut marks = self.marks.borrow_mut();
+        for mark in more {
+            if !marks.iter().any(|m| m.target_ms == mark.target_ms) {
+                marks.push(mark);
+            }
+        }
+        marks.sort_by_key(|m| m.target_ms);
+        let marks = marks.clone();
+        if let Some(show) = self.on_marks.borrow().as_ref() {
+            show(&marks);
+        }
+    }
+
+    /// The size, speed, area and kinds on show.
+    pub fn look(&self) -> Look {
+        self.look.get()
+    }
+
+    /// Shows the danmaku as `look` says, at once.
+    pub fn set_look(&self, look: Look) -> Result<()> {
+        self.look.set(look);
+        self.dress_all()?;
+        self.forget_slots();
+        self.place();
+        self.wake();
+        Ok(())
+    }
+
+    /// The opacity and text size of every slot.
+    fn dress_all(&self) -> Result<()> {
+        let look = self.look.get();
+        self.canvas.cast::<IUIElement>()?.SetOpacity(look.opacity)?;
+        for slot in &self.slots {
+            for layer in &slot.layers {
+                layer.SetFontSize(look.size)?;
+            }
+            for layer in &slot.rich {
+                layer.SetFontSize(look.size)?;
+            }
+        }
+        Ok(())
+    }
+
     /// Adds emotes a live room's danmaku use, by token.
     pub fn add_emotes(&self, more: BTreeMap<String, String>) {
         self.emotes.borrow_mut().extend(more);
@@ -423,7 +498,7 @@ impl Overlay {
         }
         if rich {
             for layer in &slot.rich {
-                emote_text::show(layer, &item.text, &own, EMOTE_SIZE)?;
+                emote_text::show(layer, &item.text, &own, self.look.get().size * EMOTE_PER_FONT)?;
             }
             if let Some(top) = slot.rich.last() {
                 top.SetForeground(&brush(item.color)?)?;
@@ -444,8 +519,15 @@ fn brush(rgb: u32) -> Result<SolidColorBrush> {
     SolidColorBrush::CreateInstanceWithColor(Color { a: 255, r: (rgb >> 16) as u8, g: (rgb >> 8) as u8, b: rgb as u8 })
 }
 
-fn place(services: &Services, danmaku: &[Danmaku], (width, height): (f64, f64)) -> Vec<Item> {
-    let placements =
-        services.danmaku.layout(danmaku, Vec::new(), width as f32, FONT_SIZE as f32, tracks(height), SCROLL_MS);
-    items(danmaku, &placements)
+fn place(services: &Services, danmaku: &[Danmaku], (width, height): (f64, f64), look: Look) -> Vec<Item> {
+    let shown: Vec<Danmaku> = danmaku.iter().filter(|d| look.shows(d)).cloned().collect();
+    let placements = services.danmaku.layout(
+        &shown,
+        Vec::new(),
+        width as f32,
+        look.size as f32,
+        tracks(height, &look),
+        look.scroll_ms(),
+    );
+    items(&shown, &placements)
 }

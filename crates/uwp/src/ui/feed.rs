@@ -80,10 +80,11 @@ pub const LAYOUT: &str = r##"
         </Style>
       </StackPanel.Resources>
       <Button x:Name="Prev"><FontIcon Glyph="&#xE70E;" FontSize="20" /></Button>
-      <Button x:Name="ActLike"><StackPanel><FontIcon Glyph="&#xE8E1;" FontSize="24" /><TextBlock x:Name="LikeText" Text="赞" /></StackPanel></Button>
+      <Button x:Name="ActLike" ToolTipService.ToolTip="长按或右键：一键三连"><StackPanel><FontIcon Glyph="&#xE8E1;" FontSize="24" /><TextBlock x:Name="LikeText" Text="赞" /></StackPanel></Button>
       <Button x:Name="ActCoin"><StackPanel><FontIcon Glyph="&#xE8C7;" FontSize="24" /><TextBlock x:Name="CoinText" Text="币" /></StackPanel>
         <Button.Flyout><MenuFlyout>
           <MenuFlyoutItem x:Name="Coin1" Text="投 1 枚" /><MenuFlyoutItem x:Name="Coin2" Text="投 2 枚" />
+          <MenuFlyoutSeparator /><ToggleMenuFlyoutItem x:Name="CoinLike" Text="同时点赞" IsChecked="True" />
         </MenuFlyout></Button.Flyout></Button>
       <Button x:Name="ActFav"><StackPanel><FontIcon Glyph="&#xE734;" FontSize="24" /><TextBlock x:Name="FavText" Text="藏" /></StackPanel></Button>
       <Button x:Name="ActComment"><StackPanel><FontIcon Glyph="&#xE90A;" FontSize="24" /><TextBlock Text="评论" /></StackPanel></Button>
@@ -102,12 +103,21 @@ pub const LAYOUT: &str = r##"
                     VerticalAlignment="Bottom">
     <Grid x:Name="SendBar" Background="#66000000" Padding="12,6">
       <Grid.ColumnDefinitions>
+        <ColumnDefinition Width="Auto" />
         <ColumnDefinition Width="*" />
         <ColumnDefinition Width="Auto" />
       </Grid.ColumnDefinitions>
-      <TextBox x:Name="SendText" PlaceholderText="发个友善的弹幕…" MaxLength="100" BorderThickness="0,0,0,1"
+            <Button x:Name="SendStyle" Background="Transparent" BorderThickness="0" Margin="0,0,8,0" Padding="6,4"
+              Foreground="White" VerticalAlignment="Center" AutomationProperties.Name="弹幕样式">
+        <StackPanel Orientation="Horizontal">
+          <Border x:Name="SendSwatch" Width="12" Height="12" Background="White" BorderBrush="#80FFFFFF" BorderThickness="1"
+                  VerticalAlignment="Center" />
+          <TextBlock x:Name="SendStyleText" Text="滚动" FontSize="12" Margin="6,0,0,0" VerticalAlignment="Center" />
+        </StackPanel>
+      </Button>
+      <TextBox x:Name="SendText" Grid.Column="1" PlaceholderText="发个友善的弹幕…" MaxLength="100" BorderThickness="0,0,0,1"
                Background="Transparent" Foreground="White" />
-      <Button x:Name="SendButton" Grid.Column="1" Background="Transparent" BorderThickness="0" Margin="8,0,0,0"
+      <Button x:Name="SendButton" Grid.Column="2" Background="Transparent" BorderThickness="0" Margin="8,0,0,0"
               Foreground="White">
         <FontIcon Glyph="&#xE724;" FontSize="18" />
       </Button>

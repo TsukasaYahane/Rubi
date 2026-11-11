@@ -35,6 +35,7 @@ const MARKUP: &str = r##"
     <Grid.ColumnDefinitions><ColumnDefinition Width="*" /><ColumnDefinition Width="Auto" /></Grid.ColumnDefinitions>
     <Slider x:Name="Seek" Minimum="0" Maximum="1" StepFrequency="1" VerticalAlignment="Center"
             IsThumbToolTipEnabled="False" />
+    <Canvas x:Name="SeekMarks" Height="12" VerticalAlignment="Center" Margin="8,0" />
     <TextBlock x:Name="Time" Grid.Column="1" FontSize="12" Foreground="White" Margin="12,0,0,0"
                VerticalAlignment="Center" />
   </Grid>
@@ -65,6 +66,12 @@ const MARKUP: &str = r##"
     <TextBlock x:Name="Online" Grid.Column="5" VerticalAlignment="Center" FontSize="12" Foreground="White"
                Margin="12,0" />
     <StackPanel Grid.Column="6" Orientation="Horizontal">
+      <Button x:Name="Speed" Visibility="Collapsed" Background="Transparent" Foreground="White"
+              BorderThickness="0" Padding="8,6" FontSize="12" VerticalAlignment="Center" Content="1.0×" />
+      <Button x:Name="PlaySettings" Visibility="Collapsed" Background="Transparent" Foreground="White"
+              BorderThickness="0" Padding="8,6" VerticalAlignment="Center" AutomationProperties.Name="播放设置">
+        <FontIcon Glyph="&#xE713;" FontSize="16" />
+      </Button>
       <Button x:Name="Quality" Visibility="Collapsed" Background="Transparent" Foreground="White"
               BorderThickness="0" Padding="8,6" FontSize="12" VerticalAlignment="Center" />
       <Button x:Name="Pip" Visibility="Collapsed" Background="Transparent" Foreground="White" BorderThickness="0"
@@ -110,6 +117,8 @@ pub struct ControlBar {
     over_bar: Cell<bool>,
     /// Bumped by each sign of life: only the last one may hide the bar.
     turn: Arc<AtomicU64>,
+    /// 空降点 on the seek bar: where (0 to 1) and what.
+    marks: std::cell::RefCell<Vec<(f64, String)>>,
 }
 
 impl ControlBar {
@@ -135,6 +144,7 @@ impl ControlBar {
             pointer: Cell::default(),
             over_bar: Cell::new(false),
             turn: Arc::default(),
+            marks: std::cell::RefCell::default(),
         });
         bar.wake()?;
         let volume = named::<IRangeBase>(root, "Volume")?;
@@ -170,6 +180,14 @@ impl ControlBar {
             move |_: Ref<IInspectable>, args: Ref<TappedRoutedEventArgs>| {
                 if let (Some(bar), true) = (weak.upgrade(), is_touch(&args)) {
                     let _ = bar.touched();
+                }
+            },
+        )?);
+        let weak = Rc::downgrade(&bar);
+        keep(named::<IFrameworkElement>(root, "SeekMarks")?.SizeChanged(
+            move |_: Ref<IInspectable>, _: Ref<crate::xaml::SizeChangedEventArgs>| {
+                if let Some(bar) = weak.upgrade() {
+                    let _ = bar.lay_marks();
                 }
             },
         )?);
@@ -230,6 +248,38 @@ impl ControlBar {
         self.set_idle(false)?;
         let turn = self.turn.fetch_add(1, Ordering::Relaxed) + 1;
         self.hide_after(turn);
+        Ok(())
+    }
+
+    /// Puts 空降点 on the seek bar, `at` from 0 to 1 of the video; a click on one goes there.
+    pub fn set_marks(&self, marks: Vec<(f64, String)>) -> Result<()> {
+        *self.marks.borrow_mut() = marks;
+        self.lay_marks()
+    }
+
+    fn lay_marks(&self) -> Result<()> {
+        let canvas = named::<IFrameworkElement>(&self.root, "SeekMarks")?;
+        let width = canvas.ActualWidth()?;
+        let children = canvas.cast::<IPanel>()?.Children()?.cast::<windows_collections::IVector<UIElement>>()?;
+        children.Clear()?;
+        for (at, label) in self.marks.borrow().iter() {
+            let mark = crate::ui::load(&format!(
+                r##"<Border xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation" Width="9" Height="12"
+                     Background="Transparent" ToolTipService.ToolTip="{}">
+                  <Rectangle Width="3" Height="10" Fill="#FFD34D" HorizontalAlignment="Center" /></Border>"##,
+                crate::state::settings::escape(&format!("空降 · {label}"))
+            ))?;
+            crate::xaml::Canvas::SetLeft(&mark.cast::<UIElement>()?, (width * at - 4.5).max(0.0))?;
+            let (root, at) = (self.root.clone(), *at);
+            keep(mark.cast::<IUIElement>()?.Tapped(
+                move |_: Ref<IInspectable>, _: Ref<crate::xaml::TappedRoutedEventArgs>| {
+                    if let Ok(seek) = named::<IRangeBase>(&root, "Seek") {
+                        let _ = seek.Maximum().and_then(|whole| seek.SetValue(whole * at));
+                    }
+                },
+            )?);
+            children.Append(&mark.cast::<UIElement>()?)?;
+        }
         Ok(())
     }
 

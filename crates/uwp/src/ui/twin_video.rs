@@ -43,6 +43,8 @@ pub struct TwinVideo {
     pictures: [Picture; 2],
     /// Which of the two is on show.
     active: Cell<usize>,
+    /// How the picture fits its place: 适应, 拉伸 or 填充.
+    stretch: Cell<CompositionStretch>,
     retiring: RefCell<Option<(usize, MediaPlayer, MediaSource)>>,
     /// The page's run, and the pair on show: a timer may outlive this one.
     run: fn() -> u64,
@@ -109,6 +111,7 @@ impl TwinVideo {
             compositor,
             pictures,
             active: Cell::new(0),
+            stretch: Cell::new(CompositionStretch::Uniform),
             retiring: RefCell::default(),
             run,
             find,
@@ -129,7 +132,7 @@ impl TwinVideo {
         let frames = Frames::start(&self.compositor, player)?;
         follow_video_size(player, &frames, &self.pictures[at].visual)?;
         let brush = self.compositor.cast::<ICompositor>()?.CreateSurfaceBrushWithSurface(frames.surface())?;
-        brush.cast::<ICompositionSurfaceBrush>()?.SetStretch(CompositionStretch::Uniform)?;
+        brush.cast::<ICompositionSurfaceBrush>()?.SetStretch(self.stretch.get())?;
         self.pictures[at].visual.cast::<ISpriteVisual>()?.SetBrush(&brush.cast::<CompositionBrush>()?)?;
         *self.pictures[at].frames.borrow_mut() = Some(frames);
         Ok(())
@@ -140,6 +143,17 @@ impl TwinVideo {
         let picture = &self.pictures[at];
         let _ = picture.visual.cast::<ISpriteVisual>().and_then(|v| v.SetBrush(None::<&CompositionBrush>));
         picture.frames.borrow_mut().take();
+    }
+
+    /// Fits both pictures as `stretch` says, from now on.
+    pub fn set_stretch(&self, stretch: CompositionStretch) {
+        self.stretch.set(stretch);
+        for picture in &self.pictures {
+            let brush = picture.visual.cast::<ISpriteVisual>().and_then(|v| v.Brush());
+            if let Ok(brush) = brush.and_then(|b| b.cast::<ICompositionSurfaceBrush>()) {
+                let _ = brush.SetStretch(stretch);
+            }
+        }
     }
 
     /// Shows `player` in the picture on show.

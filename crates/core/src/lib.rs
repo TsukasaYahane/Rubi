@@ -71,10 +71,12 @@ pub use seasons::{Seasons, Subscription};
 pub use settings::{DanmakuDisplay, FeedSettings, PlaybackSettings, PreviewSettings, Settings};
 pub use watch_later::WatchLater;
 // The lower crates' types the app-facing layer converts; it depends on this crate only.
+/// One part (分P) of a video.
+pub use rubi_api::Page as VideoPart;
 pub use rubi_api::{
     ApiError, CommentArea, PgcConditions, PgcDay, PgcEpisode, PgcFilter, PgcHit, PgcRelease, PgcSeason,
-    PgcSeasonDetail, QrState, SegmentRanges, SendDanmaku, Session, SolvedCaptcha, SteinNode, Stream, Triple, UpOrder,
-    https_image, plain_letters,
+    PgcSeasonDetail, QrState, Season, SeasonEpisode, SeasonSection, SegmentRanges, SendDanmaku, Session, SolvedCaptcha,
+    SteinNode, Stream, Triple, UpOrder, https_image, plain_letters,
 };
 pub use rubi_filter::danmaku::DanmakuOutput;
 pub use rubi_filter::danmaku::layout::{Lane, Placement};

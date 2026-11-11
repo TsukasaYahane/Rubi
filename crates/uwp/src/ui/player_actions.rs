@@ -12,8 +12,9 @@ use crate::ui::keep;
 use crate::ui::shell::{Tab, shell, show_tab};
 use crate::ui::{load_object, named, on_click, player, post, set_text};
 use crate::xaml::{
-    FrameworkElement, IFlyoutBase, IFrameworkElement, IMenuFlyout, IMenuFlyoutItem, IToggleMenuFlyoutItem,
-    RoutedEventArgs, ToggleMenuFlyoutItem,
+    FrameworkElement, HoldingRoutedEventArgs, HoldingState, IFlyoutBase, IFrameworkElement, IHoldingRoutedEventArgs,
+    IMenuFlyout, IMenuFlyoutItem, IToggleMenuFlyoutItem, IUIElement, RightTappedRoutedEventArgs, RoutedEventArgs,
+    ToggleMenuFlyoutItem,
 };
 
 pub struct Actions {
@@ -40,6 +41,24 @@ impl Actions {
             })
         };
         on("ActLike", Self::toggle_like)?;
+        // 一键三连: a right click, or a press held with a finger or pen.
+        let like = named::<IUIElement>(root, "ActLike")?;
+        let weak = Rc::downgrade(&actions);
+        keep(like.RightTapped(move |_: Ref<IInspectable>, _: Ref<RightTappedRoutedEventArgs>| {
+            if let Some(a) = weak.upgrade() {
+                a.triple();
+            }
+        })?);
+        let weak = Rc::downgrade(&actions);
+        keep(like.Holding(move |_: Ref<IInspectable>, args: Ref<HoldingRoutedEventArgs>| {
+            let started = args
+                .ok()
+                .and_then(|a| a.cast::<IHoldingRoutedEventArgs>()?.HoldingState())
+                .is_ok_and(|s| s == HoldingState::Started);
+            if let (true, Some(a)) = (started, weak.upgrade()) {
+                a.triple();
+            }
+        })?);
         on("ActFav", Self::open_folders)?;
         on("ActLater", Self::watch_later)?;
         on("ActFollow", Self::toggle_follow)?;
@@ -145,20 +164,75 @@ impl Actions {
             player::say("每个视频最多投 2 枚硬币");
             return;
         }
-        self.counts.borrow_mut().1 += coins as u64;
-        self.set_relation(VideoRelation { coins: relation.coins + coins, ..relation });
+        // 同时点赞, unless it is liked already.
+        let also_like = !relation.liked
+            && named::<IToggleMenuFlyoutItem>(&self.root, "CoinLike").and_then(|i| i.IsChecked()).unwrap_or(false);
+        {
+            let mut counts = self.counts.borrow_mut();
+            counts.1 += coins as u64;
+            counts.0 += u64::from(also_like);
+        }
+        self.set_relation(VideoRelation {
+            coins: relation.coins + coins,
+            liked: relation.liked || also_like,
+            ..relation
+        });
         self.write(
             "投币",
             move |core, bvid| async move {
-                core.services.actions.coin(&bvid, coins, false).await.map_err(|e| e.to_string())
+                core.services.actions.coin(&bvid, coins, also_like).await.map_err(|e| e.to_string())
             },
             move |a| {
                 let mut counts = a.counts.borrow_mut();
                 counts.1 = counts.1.saturating_sub(coins as u64);
+                counts.0 = counts.0.saturating_sub(u64::from(also_like));
                 drop(counts);
                 a.set_relation(relation);
             },
         );
+    }
+
+    /// 一键三连: like, two coins and the default folder at once. What B站 did shows when it answers.
+    fn triple(&self) {
+        let Some(relation) = self.signed_in() else { return };
+        if relation.liked && relation.coins >= 2 && relation.favorited {
+            player::say("已经三连过了");
+            return;
+        }
+        let Some(shell) = shell() else { return };
+        let Some(backend) = shell.backend.get().cloned() else { return };
+        let (dispatcher, bvid, run, core) =
+            (shell.dispatcher.clone(), self.bvid.clone(), player::run(), backend.clone());
+        player::say("正在三连…");
+        backend.spawn(async move {
+            let done = core.services.actions.triple(&bvid).await.map_err(|e| e.to_string());
+            post(&dispatcher, move || {
+                let Some(actions) = player::actions(run) else { return };
+                match done {
+                    Ok(t) => {
+                        let Some(now) = actions.relation.get() else { return };
+                        {
+                            let mut counts = actions.counts.borrow_mut();
+                            counts.0 += u64::from(t.liked && !now.liked);
+                            counts.1 += u64::from(t.coins);
+                            counts.2 += u64::from(t.favorited && !now.favorited);
+                        }
+                        actions.set_relation(VideoRelation {
+                            liked: now.liked || t.liked,
+                            coins: (now.coins + t.coins).min(2),
+                            favorited: now.favorited || t.favorited,
+                            ..now
+                        });
+                        player::say(if t.liked && t.coined && t.favorited {
+                            "三连成功"
+                        } else {
+                            "三连完成（部分已做过）"
+                        });
+                    }
+                    Err(problem) => player::say(&format!("三连失败：{problem}")),
+                }
+            });
+        });
     }
 
     fn watch_later(&self) {
