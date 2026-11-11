@@ -62,6 +62,8 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.viewinterop.AndroidView
 import androidx.media3.ui.PlayerView
+import androidx.compose.runtime.DisposableEffect
+import androidx.media3.common.Player
 import coil3.compose.AsyncImage
 import dev.rubi.app.R
 import dev.rubi.app.data.DanmakuDisplay
@@ -329,12 +331,30 @@ private fun FeedPage(deps: VideoPageDeps, nav: Nav, state: VerticalFeedState, ca
         detail = runCatching { videos.videoDetail(card.bvid) }.getOrNull()
         rel = runCatching { if (accountService.account().loggedIn) actionsService.relation(card.bvid) else null }.getOrNull()
     }
+    // The cover stays over the picture until this video's own first frame is drawn: before that
+    // the player may still show the last frame of the video before.
+    var framed by remember { mutableStateOf(false) }
+    DisposableEffect(active) {
+        if (!active) {
+            framed = false
+            return@DisposableEffect onDispose {}
+        }
+        val player = media.player.get()
+        val listener = object : Player.Listener {
+            override fun onRenderedFirstFrame() {
+                framed = true
+            }
+        }
+        player.addListener(listener)
+        onDispose { player.removeListener(listener) }
+    }
     // Only the video shown plays; the next one waits with its cover.
     LaunchedEffect(active) {
         if (!active) {
             started = false
             return@LaunchedEffect
         }
+        framed = false
         media.player.clear()
         runCatching {
             val pb = videos.playback(card.bvid, PlaybackPrefs.preferredQuality(settings))
@@ -407,8 +427,6 @@ private fun FeedPage(deps: VideoPageDeps, nav: Nav, state: VerticalFeedState, ca
                 )
             },
     ) {
-        // The cover until the video runs (and for the pages beside the one shown).
-        if (!started) VideoCover(card.cover, portrait = true, Modifier.fillMaxSize())
         if (active) {
             AndroidView(
                 factory = {
@@ -421,6 +439,10 @@ private fun FeedPage(deps: VideoPageDeps, nav: Nav, state: VerticalFeedState, ca
                 update = { it.resizeMode = VideoScale.Fit.resizeMode() },
                 modifier = Modifier.fillMaxSize().zoomedBy(zoom),
             )
+        }
+        // The cover until this video's first frame (and for the pages beside the one shown).
+        if (!framed) VideoCover(card.cover, portrait = true, Modifier.fillMaxSize())
+        if (active) {
             danmaku?.let { if (state.danmakuOn) DanmakuLayer(danmakuService, it, display, Modifier.fillMaxSize().padding(top = 56.dp)) }
         }
         if (active && !playing) {
