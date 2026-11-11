@@ -9,9 +9,9 @@ const SIDE_MIN: f64 = 220.0;
 /// not get much narrower, and it would spill out of its column.
 const MAIN_MIN: f64 = 480.0;
 /// From this wide the side pane's rows are large, with the cover on top.
-const SIDE_LARGE_FROM: f64 = 320.0;
-/// From this wide the side pane has two columns.
-const SIDE_TWO_FROM: f64 = 460.0;
+const SIDE_LARGE_FROM: f64 = 400.0;
+/// From this wide the side pane has two columns: each still as wide as a large row.
+const SIDE_TWO_FROM: f64 = 2.0 * SIDE_LARGE_FROM;
 /// Height of a small row, and what a large one adds to its cover.
 const SMALL_ROW: f64 = 84.0;
 const LARGE_ROW_TEXT: f64 = 66.0;
@@ -84,11 +84,13 @@ mod tests {
     #[test]
     fn rows_follow_the_side_pane() {
         assert_eq!(side_layout(300.0), SideLayout { large: false, columns: 1, cell_width: 300.0, cell_height: 84.0 });
-        let large = side_layout(344.0);
+        assert!(!side_layout(390.0).large, "small rows up to 400");
+        let large = side_layout(424.0);
         assert!(large.large);
-        assert_eq!(large.cell_height, 180.0 + 66.0);
-        assert_eq!(side_layout(500.0).columns, 2);
-        assert_eq!(side_layout(500.0).cell_width, 250.0);
+        assert_eq!(large.cell_height, 225.0 + 66.0);
+        assert_eq!(side_layout(780.0).columns, 1, "one column until two large rows fit");
+        assert_eq!(side_layout(820.0).columns, 2);
+        assert_eq!(side_layout(820.0).cell_width, 410.0);
     }
 
     #[test]
