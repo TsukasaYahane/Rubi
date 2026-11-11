@@ -269,6 +269,7 @@ fn core_opened(opened: std::result::Result<Arc<Backend>, String>) {
     match opened {
         Ok(backend) => {
             let _ = shell.backend.set(backend);
+            crate::ui::emote_text::read_common();
             if let Some(home) = shell.home.borrow().as_ref() {
                 home.start();
             }

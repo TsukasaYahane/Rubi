@@ -2,6 +2,7 @@
 //! position while it moves. Loading and placing happen in the background; only moving touches XAML.
 
 use std::cell::{Cell, RefCell};
+use std::collections::BTreeMap;
 use std::rc::{Rc, Weak};
 use std::sync::Arc;
 use std::sync::atomic::{AtomicU64, Ordering};
@@ -14,28 +15,45 @@ use windows_core::{EventRevoker, IInspectable, Interface, Ref, Result};
 
 use crate::backend::Backend;
 use crate::state::danmaku::{FONT_SIZE, Item, SCROLL_MS, items, on_screen, tracks};
+use crate::state::emotes::has_emotes;
+use crate::ui::emote_text;
 use crate::ui::shell::shell;
 use crate::ui::{load, named, post, soon};
 use crate::xaml::{
-    Color, CompositionTarget, CoreDispatcher, IFrameworkElement, IPanel, IRectangleGeometry, ITextBlock,
-    ITranslateTransform, IUIElement, RectangleGeometry, SizeChangedEventArgs, SolidColorBrush, UIElement, Visibility,
+    Color, CompositionTarget, CoreDispatcher, IFrameworkElement, IPanel, IRectangleGeometry, IRichTextBlock,
+    ITextBlock, ITranslateTransform, IUIElement, RectangleGeometry, SizeChangedEventArgs, SolidColorBrush, UIElement,
+    Visibility,
 };
 
 /// Most danmaku on screen at once.
 const POOL: usize = 72;
-/// One danmaku: four black copies around the text make a 1pt outline, moved as one.
+/// One danmaku: four black copies around the text make a 1pt outline, moved as one. A danmaku with
+/// emotes uses the rich copies instead, the emotes drawn in each (the black ones hide under the
+/// top one but for a pixel); plain text keeps to the light ones.
 const SLOT: &str = r##"
 <Grid xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation" Visibility="Collapsed">
   <Grid.RenderTransform><TranslateTransform /></Grid.RenderTransform>
   <Grid.Resources>
     <Style TargetType="TextBlock"><Setter Property="FontSize" Value="22" /></Style>
+    <Style TargetType="RichTextBlock">
+      <Setter Property="FontSize" Value="22" />
+      <Setter Property="IsTextSelectionEnabled" Value="False" />
+      <Setter Property="Visibility" Value="Collapsed" />
+    </Style>
   </Grid.Resources>
   <TextBlock Foreground="Black" Margin="-1,-1,1,1" />
   <TextBlock Foreground="Black" Margin="1,-1,-1,1" />
   <TextBlock Foreground="Black" Margin="-1,1,1,-1" />
   <TextBlock Foreground="Black" Margin="1,1,-1,-1" />
   <TextBlock Foreground="White" />
+  <RichTextBlock Foreground="Black" Margin="-1,-1,1,1" />
+  <RichTextBlock Foreground="Black" Margin="1,-1,-1,1" />
+  <RichTextBlock Foreground="Black" Margin="-1,1,1,-1" />
+  <RichTextBlock Foreground="Black" Margin="1,1,-1,-1" />
+  <RichTextBlock Foreground="White" />
 </Grid>"##;
+/// Emotes in a danmaku, square, a little over the text's height.
+const EMOTE_SIZE: f64 = 28.0;
 /// Copies of the text in a slot; the last is the coloured one on top.
 const LAYERS: u32 = 5;
 
@@ -54,6 +72,10 @@ const IDLE_LOOK: Duration = Duration::from_millis(16);
 
 struct Slot {
     layers: Vec<ITextBlock>,
+    /// The copies for a danmaku with emotes.
+    rich: Vec<IRichTextBlock>,
+    /// Which copies show: the plain ones, or the rich.
+    rich_on: Cell<bool>,
     element: IUIElement,
     shift: ITranslateTransform,
     /// The item it shows, so text and colour change only when that does.
@@ -81,6 +103,8 @@ pub struct Overlay {
     placing: Cell<bool>,
     placed_stale: Cell<bool>,
     on: Cell<bool>,
+    /// Emotes the danmaku use beyond the common set: a live room's own.
+    emotes: RefCell<BTreeMap<String, String>>,
     /// Itself, for the frame handler it starts again after stopping.
     me: Weak<Self>,
     /// Drawing every frame; `None` while the clock stands still or the danmaku are off.
@@ -105,10 +129,20 @@ impl Overlay {
             let slot = load(SLOT)?;
             let parts = slot.cast::<IPanel>()?.Children()?.cast::<IVector<UIElement>>()?;
             let layers = (0..LAYERS).map(|at| parts.GetAt(at)?.cast()).collect::<Result<Vec<ITextBlock>>>()?;
+            let rich =
+                (LAYERS..2 * LAYERS).map(|at| parts.GetAt(at)?.cast()).collect::<Result<Vec<IRichTextBlock>>>()?;
             let element = slot.cast::<IUIElement>()?;
             let shift = element.RenderTransform()?.cast::<ITranslateTransform>()?;
             children.Append(&slot.cast::<UIElement>()?)?;
-            slots.push(Slot { layers, element, shift, shows: Cell::new(None), visible: Cell::new(false) });
+            slots.push(Slot {
+                layers,
+                rich,
+                rich_on: Cell::new(false),
+                element,
+                shift,
+                shows: Cell::new(None),
+                visible: Cell::new(false),
+            });
         }
         let overlay = Rc::new_cyclic(|me| Self {
             host,
@@ -120,6 +154,7 @@ impl Overlay {
             items: RefCell::default(),
             danmaku: RefCell::default(),
             on: Cell::new(true),
+            emotes: RefCell::default(),
             me: me.clone(),
             frames: RefCell::new(None),
             last_ms: Cell::new(u32::MAX),
@@ -345,13 +380,7 @@ impl Overlay {
                 let Some(slot) = self.slots.get(used) else { break };
                 used += 1;
                 if slot.shows.replace(Some(at)) != Some(at) {
-                    let item = &items[at];
-                    for layer in &slot.layers {
-                        layer.SetText(&item.text)?;
-                    }
-                    if let Some(top) = slot.layers.last() {
-                        top.SetForeground(&brush(item.color)?)?;
-                    }
+                    self.dress(slot, &items[at])?;
                     slot.element.SetVisibility(Visibility::Visible)?;
                     slot.visible.set(true);
                 }
@@ -363,6 +392,48 @@ impl Overlay {
             slot.shows.set(None);
             if slot.visible.take() {
                 slot.element.SetVisibility(Visibility::Collapsed)?;
+            }
+        }
+        Ok(())
+    }
+}
+
+impl Overlay {
+    /// Adds emotes a live room's danmaku use, by token.
+    pub fn add_emotes(&self, more: BTreeMap<String, String>) {
+        self.emotes.borrow_mut().extend(more);
+    }
+
+    /// Puts `item`'s text and colour in `slot`, on the rich copies when it has emotes.
+    fn dress(&self, slot: &Slot, item: &Item) -> Result<()> {
+        let own = self.emotes.borrow();
+        let rich = has_emotes(&item.text, emote_text::lookup(&own));
+        if slot.rich_on.replace(rich) != rich {
+            let (on, off) = if rich {
+                (Visibility::Visible, Visibility::Collapsed)
+            } else {
+                (Visibility::Collapsed, Visibility::Visible)
+            };
+            for layer in &slot.rich {
+                layer.cast::<IUIElement>()?.SetVisibility(on)?;
+            }
+            for layer in &slot.layers {
+                layer.cast::<IUIElement>()?.SetVisibility(off)?;
+            }
+        }
+        if rich {
+            for layer in &slot.rich {
+                emote_text::show(layer, &item.text, &own, EMOTE_SIZE)?;
+            }
+            if let Some(top) = slot.rich.last() {
+                top.SetForeground(&brush(item.color)?)?;
+            }
+        } else {
+            for layer in &slot.layers {
+                layer.SetText(&item.text)?;
+            }
+            if let Some(top) = slot.layers.last() {
+                top.SetForeground(&brush(item.color)?)?;
             }
         }
         Ok(())

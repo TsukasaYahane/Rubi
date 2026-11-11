@@ -52,6 +52,8 @@ pub struct Post {
     /// What the comment button says.
     pub comment_label: String,
     pub comment_count: u64,
+    /// Images of the emotes the text and the quote use, by token.
+    pub emotes: std::collections::BTreeMap<String, String>,
 }
 
 fn kind_label(kind: DynamicKind) -> &'static str {
@@ -91,6 +93,10 @@ impl Post {
         let comments = (post.comment_kind > 0 && post.comment_oid > 0).then_some((post.comment_kind, post.comment_oid));
         let comment_label =
             if post.comment_count > 0 { format!("评论 {}", count(post.comment_count)) } else { "评论".to_owned() };
+        let mut emotes = post.emotes;
+        if let Some(orig) = orig {
+            emotes.extend(orig.emotes.iter().map(|(k, v)| (k.clone(), v.clone())));
+        }
         let link = if post.link.is_empty() { orig.map_or_else(String::new, |o| o.link.clone()) } else { post.link };
         Self {
             id: post.id,
@@ -107,6 +113,7 @@ impl Post {
             comments,
             comment_label,
             comment_count: post.comment_count,
+            emotes,
         }
     }
 }

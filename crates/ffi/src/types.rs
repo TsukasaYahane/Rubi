@@ -394,6 +394,10 @@ pub struct FfiEmote {
     pub url: String,
 }
 
+fn emotes_of(map: &std::collections::BTreeMap<String, String>) -> Vec<FfiEmote> {
+    map.iter().map(|(text, url)| FfiEmote { text: text.clone(), url: url.clone() }).collect()
+}
+
 impl FfiCommentRow {
     pub fn of(row: &ThreadRow, c: &Comment) -> Self {
         Self {
@@ -406,7 +410,7 @@ impl FfiCommentRow {
             likes: c.likes,
             is_up: c.is_up,
             ctime: c.ctime,
-            emotes: c.emotes.iter().map(|(text, url)| FfiEmote { text: text.clone(), url: url.clone() }).collect(),
+            emotes: emotes_of(&c.emotes),
             pictures: c
                 .pictures
                 .iter()
@@ -932,6 +936,8 @@ pub struct FfiDynamicBody {
     pub pictures: Vec<String>,
     pub video: Option<FfiVideoCard>,
     pub link: String,
+    /// Images of the emotes its text uses.
+    pub emotes: Vec<FfiEmote>,
 }
 
 #[derive(Debug, Clone, uniffi::Record)]
@@ -972,6 +978,7 @@ impl FfiDynamicBody {
             pictures: d.pictures.clone(),
             video: d.video.as_ref().map(|v| FfiVideoCard::of(v, None)),
             link: d.link.clone(),
+            emotes: emotes_of(&d.emotes),
         }
     }
 }
@@ -1174,19 +1181,38 @@ pub struct FfiLiveFilter {
 
 #[derive(Debug, Clone, uniffi::Enum)]
 pub enum FfiLiveEvent {
-    Danmaku { uname: String, text: String, color: u32 },
-    Gift { text: String },
-    Popup { text: String },
-    Effect { text: String },
-    Online { count: u64 },
-    Status { live: bool },
+    /// `sticker`: a big emote's image, standing for the text.
+    Danmaku {
+        uname: String,
+        text: String,
+        color: u32,
+        emotes: Vec<FfiEmote>,
+        sticker: Option<String>,
+    },
+    Gift {
+        text: String,
+    },
+    Popup {
+        text: String,
+    },
+    Effect {
+        text: String,
+    },
+    Online {
+        count: u64,
+    },
+    Status {
+        live: bool,
+    },
 }
 
 impl From<rubi_model::LiveEvent> for FfiLiveEvent {
     fn from(e: rubi_model::LiveEvent) -> Self {
         use rubi_model::LiveEvent as E;
         match e {
-            E::Danmaku { uname, text, color } => Self::Danmaku { uname, text, color },
+            E::Danmaku { uname, text, color, emotes, sticker } => {
+                Self::Danmaku { uname, text, color, emotes: emotes_of(&emotes), sticker }
+            }
             E::Gift { text } => Self::Gift { text },
             E::Popup { text } => Self::Popup { text },
             E::Effect { text } => Self::Effect { text },

@@ -219,7 +219,7 @@ mod tests {
     }
 
     fn dm(text: &str) -> LiveEvent {
-        LiveEvent::Danmaku { uname: "u".into(), text: text.into(), color: 0 }
+        LiveEvent::Danmaku { uname: "u".into(), text: text.into(), color: 0, emotes: Default::default(), sticker: None }
     }
 
     #[test]

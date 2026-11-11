@@ -34,10 +34,11 @@ fn now() -> i64 {
 }
 
 fn text(body: &str, size: u32, weight: &str, margin: &str) -> String {
+    let none = std::collections::BTreeMap::new();
+    let inlines = crate::ui::emote_text::inlines(body, crate::ui::emote_text::lookup(&none), f64::from(size) * 1.4);
     format!(
-        r##"<TextBlock Text="{}" FontSize="{size}" FontWeight="{weight}" Margin="{margin}" TextWrapping="Wrap"
-             IsTextSelectionEnabled="True" LineHeight="{}" />"##,
-        escape(body),
+        r##"<RichTextBlock FontSize="{size}" FontWeight="{weight}" Margin="{margin}" TextWrapping="Wrap"
+             IsTextSelectionEnabled="True" LineHeight="{}"><Paragraph>{inlines}</Paragraph></RichTextBlock>"##,
         size * 3 / 2
     )
 }

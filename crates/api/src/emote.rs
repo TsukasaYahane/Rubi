@@ -8,8 +8,9 @@ use crate::params;
 use crate::parse::{image_of, str_of};
 
 const PACKAGE: &str = "https://api.bilibili.com/x/emote/package";
-/// 小黄脸, the default set used across comments, messages and danmaku. Readable as a guest.
-pub const DEFAULT_PACKAGES: &[u32] = &[1];
+/// The common sets: 小黄脸, tv_小电视, 喵 and the classic sticker packs (5–20; 4 is 颜文字, not
+/// `[token]`s). Content that uses others carries their images itself. Readable as a guest.
+pub const DEFAULT_PACKAGES: &[u32] = &[1, 2, 3, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20];
 
 /// Emote token (e.g. `[doge]`) and its image url.
 #[derive(Debug, Clone, PartialEq, Eq)]

@@ -62,6 +62,10 @@ pub enum LiveEvent {
         uname: String,
         text: String,
         color: u32,
+        /// Images of the room emotes the text uses, by token (e.g. `[dog]`).
+        emotes: std::collections::BTreeMap<String, String>,
+        /// A big emote sent on its own: its image stands for the text.
+        sticker: Option<String>,
     },
     /// 礼物横幅: gifts, combos, 舰长.
     Gift {
@@ -90,7 +94,7 @@ impl LiveEvent {
         match self {
             Self::Gift { .. } => Some(LiveCategory::Gift),
             Self::Popup { .. } => Some(LiveCategory::Popup),
-            Self::Effect { .. } => Some(LiveCategory::Effect),
+            Self::Effect { .. } | Self::Danmaku { sticker: Some(_), .. } => Some(LiveCategory::Effect),
             _ => None,
         }
     }

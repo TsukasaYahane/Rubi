@@ -31,7 +31,7 @@ use crate::ui::{keep, load, media, named, on_click, on_enter, post, set_text, so
 use crate::xaml::{
     Color, ElementTheme, FocusState, FrameworkElement, Grid, GridLength, GridUnitType, IColumnDefinition,
     IContentControl, IControl, IFontIcon, IFrameworkElement, IFrameworkElement2, IItemsControl, IMediaPlayer, IPanel,
-    IRowDefinition, ITextBlock, ITextBox, IUIElement, MediaPlaybackState, MediaPlayer, MediaSource, PropertyValue,
+    IRowDefinition, ITextBox, IUIElement, MediaPlaybackState, MediaPlayer, MediaSource, PropertyValue,
     SizeChangedEventArgs, SolidColorBrush, Thickness, VirtualKey, Visibility,
 };
 
@@ -120,7 +120,7 @@ const LAYOUT: &str = r##"
           </Style>
         </ListView.ItemContainerStyle>
         <ListView.ItemTemplate><DataTemplate>
-          <Grid><TextBlock FontSize="13" TextWrapping="Wrap" /></Grid>
+          <Grid><RichTextBlock FontSize="13" TextWrapping="Wrap" IsTextSelectionEnabled="False" /></Grid>
         </DataTemplate></ListView.ItemTemplate>
       </ListView>
       <Border Grid.Row="2" BorderThickness="0,1,0,0" BorderBrush="{ThemeResource SystemControlForegroundBaseLowBrush}">
@@ -142,7 +142,7 @@ struct Room {
     source: RefCell<Option<MediaSource>>,
     overlay: RefCell<Option<Rc<Overlay>>>,
     channel: Arc<Mutex<Option<Arc<LiveChannel>>>>,
-    chat: RefCell<Vec<String>>,
+    chat: RefCell<Vec<ChatLine>>,
     next_danmaku: Cell<u64>,
     filling: Filling,
     bar: Rc<ControlBar>,
@@ -297,7 +297,7 @@ pub fn open(room_id: u64, title: &str, uploader: &str, uid: u64) -> Result<()> {
         let Some(room) = room() else { return Ok(()) };
         let lines = room.chat.borrow();
         let Some(line) = lines.get(at) else { return Ok(()) };
-        parts.GetAt(0)?.cast::<ITextBlock>()?.SetText(line)
+        crate::ui::emote_text::show(&parts.GetAt(0)?.cast()?, &line.text, &line.emotes, line.emote_size)
     })?;
     keep(root.SizeChanged(|sender: Ref<windows_core::IInspectable>, _: Ref<SizeChangedEventArgs>| {
         if let Ok(root) = sender.ok().and_then(|s| s.cast::<IFrameworkElement>()) {
@@ -506,24 +506,63 @@ fn listen(room_id: u64, opening: u64) {
     });
 }
 
+/// The token a big emote's image stands in for in a chat line.
+const STICKER: &str = "[大表情]";
+
+/// A line of the room's chat: who said what, with the emotes it uses. A big emote is its image
+/// alone, larger.
+struct ChatLine {
+    text: String,
+    emotes: std::collections::BTreeMap<String, String>,
+    emote_size: f64,
+}
+
+impl ChatLine {
+    fn of(
+        uname: &str,
+        text: &str,
+        mut emotes: std::collections::BTreeMap<String, String>,
+        sticker: Option<String>,
+    ) -> Self {
+        match sticker {
+            Some(url) => {
+                emotes.insert(STICKER.to_owned(), url);
+                Self { text: format!("{uname}：{STICKER}"), emotes, emote_size: 48.0 }
+            }
+            None => Self { text: format!("{uname}：{text}"), emotes, emote_size: 18.0 },
+        }
+    }
+}
+
 fn heard(events: Vec<LiveEvent>) -> Result<()> {
     let Some(room) = room() else { return Ok(()) };
     let list = named::<IFrameworkElement>(&room.root, "Chat")?;
     let now = room.opened.elapsed().as_millis() as u32 + DANMAKU_LEAD_MS;
     let mut fresh = Vec::new();
+    let mut room_emotes = std::collections::BTreeMap::new();
     let from = room.chat.borrow().len();
     for event in events {
         match event {
-            LiveEvent::Danmaku { uname, text, color } => {
-                room.chat.borrow_mut().push(format!("{uname}：{text}"));
+            LiveEvent::Danmaku { uname, text, color, emotes, sticker } => {
                 let id = room.next_danmaku.replace(room.next_danmaku.get() + 1);
+                room_emotes.extend(emotes.iter().map(|(k, v)| (k.clone(), v.clone())));
+                // A big emote flies as its image, under a token of its own.
+                let content = match &sticker {
+                    Some(url) => {
+                        let token = format!("[大表情{id}]");
+                        room_emotes.insert(token.clone(), url.clone());
+                        token
+                    }
+                    None => text.clone(),
+                };
+                room.chat.borrow_mut().push(ChatLine::of(&uname, &text, emotes, sticker));
                 fresh.push(Danmaku {
                     id,
                     progress_ms: now,
                     mode: 1,
                     font_size: 25,
                     color,
-                    content: text,
+                    content,
                     ..Danmaku::default()
                 });
             }
@@ -544,6 +583,7 @@ fn heard(events: Vec<LiveEvent>) -> Result<()> {
         add_rows(&list, from, to)?;
     }
     if let Some(overlay) = room.overlay.borrow().as_ref() {
+        overlay.add_emotes(room_emotes);
         overlay.add_live(fresh);
     }
     Ok(())

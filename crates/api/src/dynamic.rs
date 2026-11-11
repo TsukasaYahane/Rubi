@@ -45,6 +45,22 @@ fn link_of(v: &Value) -> String {
     https_image(&str_of(v))
 }
 
+/// The emote images among a text's rich nodes, by token.
+fn emotes_of(nodes: &Value, into: &mut std::collections::BTreeMap<String, String>) {
+    for node in nodes.as_array().into_iter().flatten() {
+        if str_of(&node["type"]) != "RICH_TEXT_NODE_TYPE_EMOJI" {
+            continue;
+        }
+        let token = Some(str_of(&node["orig_text"]))
+            .filter(|t| !t.is_empty())
+            .unwrap_or_else(|| str_of(&node["emoji"]["text"]));
+        let url = image_of(&node["emoji"]["icon_url"]);
+        if token.starts_with('[') && !url.is_empty() {
+            into.insert(token, url);
+        }
+    }
+}
+
 pub(crate) fn dynamic_of(item: &Value) -> Dynamic {
     let author = &item["modules"]["module_author"];
     let md = &item["modules"]["module_dynamic"];
@@ -61,6 +77,8 @@ pub(crate) fn dynamic_of(item: &Value) -> Dynamic {
         comment_count: u64_of(&item["modules"]["module_stat"]["comment"]["count"]),
         ..Default::default()
     };
+    emotes_of(&md["desc"]["rich_text_nodes"], &mut d.emotes);
+    emotes_of(&major["opus"]["summary"]["rich_text_nodes"], &mut d.emotes);
     d.kind = match str_of(&item["type"]).as_str() {
         "DYNAMIC_TYPE_AV" => DynamicKind::Video,
         "DYNAMIC_TYPE_WORD" => DynamicKind::Word,
@@ -180,6 +198,17 @@ mod tests {
     use serde_json::json;
 
     /// Shapes from the 2026-11-01 capture of feed/all?host_mid=…
+    #[test]
+    fn emotes_come_with_the_text() {
+        let item = json!({"id_str": "9", "type": "DYNAMIC_TYPE_WORD", "modules": {"module_author": {"mid": 1, "name": "u"},
+            "module_dynamic": {"desc": {"text": "好[doge]", "rich_text_nodes": [
+                {"type": "RICH_TEXT_NODE_TYPE_TEXT", "orig_text": "好", "text": "好"},
+                {"type": "RICH_TEXT_NODE_TYPE_EMOJI", "orig_text": "[doge]", "text": "[doge]",
+                 "emoji": {"icon_url": "http://i0.hdslb.com/bfs/emote/doge.png", "text": "[doge]"}}]}, "major": null}}});
+        let d = dynamic_of(&item);
+        assert_eq!(d.emotes.get("[doge]").map(String::as_str), Some("https://i0.hdslb.com/bfs/emote/doge.png"));
+    }
+
     #[test]
     fn parses_kinds() {
         let author = json!({"mid": 7, "name": "up", "face": "http://i0.hdslb.com/f.jpg", "pub_ts": "1793251346"});

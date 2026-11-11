@@ -314,6 +314,7 @@ private fun DynamicBody(body: FfiDynamicBody, onOpenVideo: (FfiVideoCard) -> Uni
             fontSize = 14.sp,
             lineHeight = 21.sp,
             maxLines = if (expanded) Int.MAX_VALUE else 6,
+            extra = body.emotes,
             onTextLayout = { if (!expanded) overflows = it.hasVisualOverflow },
         )
         if (overflows || expanded) {

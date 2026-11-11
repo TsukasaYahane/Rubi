@@ -14,6 +14,8 @@ import androidx.compose.ui.text.PlaceholderVerticalAlign
 import androidx.compose.ui.text.LinkAnnotation
 import androidx.compose.ui.text.SpanStyle
 import androidx.compose.ui.text.TextLayoutResult
+import androidx.compose.ui.text.TextStyle
+import androidx.compose.material3.LocalTextStyle
 import androidx.compose.ui.text.buildAnnotatedString
 import androidx.compose.ui.text.withLink
 import androidx.compose.ui.text.withStyle
@@ -51,6 +53,9 @@ fun EmoteText(
     links: List<FfiVideoLink> = emptyList(),
     onLink: (FfiVideoLink) -> Unit = {},
     onTextLayout: (TextLayoutResult) -> Unit = {},
+    style: TextStyle = LocalTextStyle.current,
+    softWrap: Boolean = true,
+    overflow: TextOverflow = TextOverflow.Ellipsis,
 ) {
     val global = LocalEmotes.current
     val accent = LocalMetro.current.accent
@@ -101,8 +106,10 @@ fun EmoteText(
         fontSize = fontSize,
         lineHeight = lineHeight,
         maxLines = maxLines,
-        overflow = TextOverflow.Ellipsis,
+        overflow = overflow,
+        softWrap = softWrap,
         onTextLayout = onTextLayout,
         modifier = modifier,
+        style = style,
     )
 }

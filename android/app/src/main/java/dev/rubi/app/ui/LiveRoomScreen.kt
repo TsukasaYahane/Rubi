@@ -80,6 +80,8 @@ import dev.rubi.app.R
 import dev.rubi.app.playback.LocalMedia
 import dev.rubi.app.ui.theme.LocalMetro
 import dev.rubi.core.FfiLiveChannel
+import coil3.compose.AsyncImage
+import dev.rubi.core.FfiEmote
 import dev.rubi.core.FfiLiveEvent
 import dev.rubi.core.FfiLiveFilter
 import dev.rubi.core.FfiLivePlay
@@ -107,9 +109,23 @@ private const val SHOW_MS = 3_000L
 /** Reconnects to the message channel before giving up. */
 private const val MAX_RECONNECTS = 5
 
-private class Flying(val id: Long, val text: String, val color: Color, val lane: Int, val start: Long)
+private class Flying(
+    val id: Long,
+    val text: String,
+    val color: Color,
+    val lane: Int,
+    val start: Long,
+    val emotes: List<FfiEmote> = emptyList(),
+    val sticker: String? = null,
+)
 
-private class ChatLine(val id: Long, val uname: String, val text: String)
+private class ChatLine(
+    val id: Long,
+    val uname: String,
+    val text: String,
+    val emotes: List<FfiEmote> = emptyList(),
+    val sticker: String? = null,
+)
 
 /**
  * A live room: the picture with its danmaku, the anchor and 关注, the room's three filter
@@ -164,22 +180,22 @@ fun LiveRoomScreen(space: SpaceService, actions: ActionsService, liveService: Li
     var serial by remember { mutableLongStateOf(0L) }
     var now by remember { mutableLongStateOf(SystemClock.uptimeMillis()) }
 
-    fun launchDanmaku(text: String, color: Color) {
+    fun launchDanmaku(text: String, color: Color, emotes: List<FfiEmote> = emptyList(), sticker: String? = null) {
         val t = SystemClock.uptimeMillis()
         flying.removeAll { t - it.start > CROSS_MS }
         if (!dm.enabled) return
         // The first lane free for a while; when every lane is busy the danmaku is skipped.
         val lane = (0 until laneCount.coerceIn(1, MAX_LANES)).firstOrNull { t - laneLast[it] >= LANE_GAP_MS } ?: return
         laneLast[lane] = t
-        flying.add(Flying(serial++, text, color, lane, t))
+        flying.add(Flying(serial++, text, color, lane, t, emotes, sticker))
     }
 
     fun show(ev: FfiLiveEvent) {
         val t = SystemClock.uptimeMillis()
         when (ev) {
             is FfiLiveEvent.Danmaku -> {
-                launchDanmaku(ev.text, Color((0xFF000000 or ev.color.toLong()).toInt()))
-                chat.add(ChatLine(serial++, ev.uname, ev.text))
+                launchDanmaku(ev.text, Color((0xFF000000 or ev.color.toLong()).toInt()), ev.emotes, ev.sticker)
+                chat.add(ChatLine(serial++, ev.uname, ev.text, ev.emotes, ev.sticker))
                 if (chat.size > CHAT_LINES) chat.removeRange(0, chat.size - CHAT_LINES)
             }
             is FfiLiveEvent.Gift -> banner = ev.text to t
@@ -318,16 +334,32 @@ fun LiveRoomScreen(space: SpaceService, actions: ActionsService, liveService: Li
                 // No danmaku in the small window: too little room to read them.
                 if (dm.enabled && !inPip) flying.forEach { f ->
                     if (f.lane >= fits) return@forEach
-                    Text(
-                        f.text,
-                        style = style.copy(color = f.color.copy(alpha = dm.opacity)),
-                        maxLines = 1,
-                        softWrap = false,
-                        modifier = Modifier.offset {
-                            val x = widthPx - (now - f.start) * (widthPx + 600f) / CROSS_MS
-                            IntOffset(x.toInt(), (f.lane * laneH + laneH * 0.2f).toInt())
-                        },
-                    )
+                    val at = Modifier.offset {
+                        val x = widthPx - (now - f.start) * (widthPx + 600f) / CROSS_MS
+                        IntOffset(x.toInt(), (f.lane * laneH + laneH * 0.2f).toInt())
+                    }
+                    val sticker = f.sticker
+                    if (sticker != null) {
+                        // A big emote flies as its image, about two lines tall.
+                        AsyncImage(
+                            model = sticker,
+                            contentDescription = f.text,
+                            alpha = dm.opacity,
+                            modifier = at.size((fontSp * 2.2f).dp),
+                        )
+                    } else {
+                        EmoteText(
+                            f.text,
+                            color = f.color.copy(alpha = dm.opacity),
+                            fontSize = fontSp.sp,
+                            maxLines = 1,
+                            extra = f.emotes,
+                            style = style.copy(color = f.color.copy(alpha = dm.opacity)),
+                            softWrap = false,
+                            overflow = TextOverflow.Clip,
+                            modifier = at,
+                        )
+                    }
                 }
                 if (onAir && !compact) LiveBadge(Modifier.align(Alignment.TopStart).padding(6.dp))
                 if (!onAir) Text("主播还没有开播", fontSize = 14.sp, color = Color.White, modifier = Modifier.align(Alignment.Center))
@@ -474,7 +506,12 @@ fun LiveRoomScreen(space: SpaceService, actions: ActionsService, liveService: Li
                 items(chat, key = { it.id }) { line ->
                     Row(Modifier.padding(vertical = 2.dp)) {
                         Text(line.uname + "：", fontSize = 13.sp, color = c.fg2, maxLines = 1)
-                        Text(line.text, fontSize = 13.sp, color = c.fg)
+                        val sticker = line.sticker
+                        if (sticker != null) {
+                            AsyncImage(model = sticker, contentDescription = line.text, modifier = Modifier.size(48.dp))
+                        } else {
+                            EmoteText(line.text, color = c.fg, fontSize = 13.sp, extra = line.emotes)
+                        }
                     }
                 }
             }

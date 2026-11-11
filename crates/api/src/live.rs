@@ -326,14 +326,24 @@ pub fn event_of(msg: &Value) -> Option<LiveEvent> {
             let info = &msg["info"];
             let uname = str_of(&info[2][1]);
             let text = str_of(&info[1]);
-            // info[0][9]: danmaku sent by joining a 天选 lottery; info[0][12] 1: a sticker.
+            // info[0][9]: danmaku sent by joining a 天选 lottery; info[0][12] 1: a big emote, its
+            // image in info[0][13]; info[0][15].extra: a JSON text whose `emots` are the room
+            // emotes the text uses.
             if u64_of(&info[0][9]) != 0 {
                 return Some(LiveEvent::Popup { text: format!("{uname}：{text}") });
             }
-            if u64_of(&info[0][12]) == 1 {
-                return Some(LiveEvent::Effect { text: format!("{uname}：{text}") });
-            }
-            Some(LiveEvent::Danmaku { uname, text, color: u64_of(&info[0][3]) as u32 })
+            let sticker =
+                (u64_of(&info[0][12]) == 1).then(|| image_of(&info[0][13]["url"])).filter(|url| !url.is_empty());
+            let extra: Value =
+                info[0][15]["extra"].as_str().and_then(|e| serde_json::from_str(e).ok()).unwrap_or_default();
+            let emotes = extra["emots"]
+                .as_object()
+                .into_iter()
+                .flatten()
+                .map(|(token, e)| (token.clone(), image_of(&e["url"])))
+                .filter(|(token, url)| token.starts_with('[') && !url.is_empty())
+                .collect();
+            Some(LiveEvent::Danmaku { uname, text, color: u64_of(&info[0][3]) as u32, emotes, sticker })
         }
         "SEND_GIFT" => Some(LiveEvent::Gift {
             text: format!(
@@ -500,12 +510,27 @@ mod tests {
         let dm = json!({"cmd": "DANMU_MSG", "info": [[0, 1, 25, 16777215, 0, 0, 0, "", 0, 0, 0, "", 0], "BLG！！", [1, "观众"]]});
         assert_eq!(
             event_of(&dm),
-            Some(LiveEvent::Danmaku { uname: "观众".into(), text: "BLG！！".into(), color: 0xFF_FFFF })
+            Some(LiveEvent::Danmaku {
+                uname: "观众".into(),
+                text: "BLG！！".into(),
+                color: 0xFF_FFFF,
+                emotes: Default::default(),
+                sticker: None
+            })
         );
         let lottery = json!({"cmd": "DANMU_MSG:4:0:2:2:2:0", "info": [[0, 1, 25, 16777215, 0, 0, 0, "", 0, 2, 0, "", 0], "老板大气", [1, "观众"]]});
         assert!(matches!(event_of(&lottery), Some(LiveEvent::Popup { .. })));
-        let sticker = json!({"cmd": "DANMU_MSG", "info": [[0, 1, 25, 16777215, 0, 0, 0, "", 0, 0, 0, "", 1], "[dog]", [1, "观众"]]});
-        assert!(matches!(event_of(&sticker), Some(LiveEvent::Effect { .. })));
+        let sticker = json!({"cmd": "DANMU_MSG", "info": [[0, 1, 25, 16777215, 0, 0, 0, "", 0, 0, 0, "", 1,
+            {"url": "http://i0.hdslb.com/bfs/live/dog.png"}], "[dog]", [1, "观众"]]});
+        let read = event_of(&sticker).unwrap();
+        assert!(
+            matches!(&read, LiveEvent::Danmaku { sticker: Some(url), .. } if url == "https://i0.hdslb.com/bfs/live/dog.png")
+        );
+        assert_eq!(read.category(), Some(rubi_model::LiveCategory::Effect), "big emotes stay behind the 高能 switch");
+        let emoted = json!({"cmd": "DANMU_MSG", "info": [[0, 1, 25, 16777215, 0, 0, 0, "", 0, 0, 0, "", 0, "{}", 0,
+            {"extra": "{\"emots\":{\"[dog]\":{\"url\":\"http://i0.hdslb.com/bfs/live/d.png\"}}}"}], "好[dog]", [1, "观众"]]});
+        let Some(LiveEvent::Danmaku { emotes, sticker: None, .. }) = event_of(&emoted) else { panic!("a danmaku") };
+        assert_eq!(emotes.get("[dog]").map(String::as_str), Some("https://i0.hdslb.com/bfs/live/d.png"));
         let gift =
             json!({"cmd": "SEND_GIFT", "data": {"uname": "用户X", "action": "投喂", "giftName": "辣条", "num": 3}});
         assert_eq!(event_of(&gift), Some(LiveEvent::Gift { text: "用户X 投喂 辣条 ×3".into() }));

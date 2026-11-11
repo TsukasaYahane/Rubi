@@ -47,6 +47,9 @@ pub struct Dynamic {
     pub comment_oid: u64,
     #[serde(default)]
     pub comment_count: u64,
+    /// Images of the emotes its text uses, by token (e.g. `[doge]`).
+    #[serde(default)]
+    pub emotes: std::collections::BTreeMap<String, String>,
 }
 
 /// Someone the user follows, from the full following list.
