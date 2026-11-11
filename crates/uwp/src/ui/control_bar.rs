@@ -1,11 +1,12 @@
 //! The bar along the foot of a player, for videos and live rooms. In fullscreen it goes after a
-//! while without a sign of life, along with whatever else `hide_too` names, and the cursor.
+//! while without a sign of life, along with whatever else `hide_too` names, and the cursor. A
+//! finger's tap on the picture shows or hides it.
 
 use std::cell::Cell;
 use std::rc::Rc;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicU64, Ordering};
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 use windows_core::{IInspectable, Interface, Ref, Result};
 
@@ -14,14 +15,17 @@ use crate::ui::shell::shell;
 use crate::ui::{keep, named, post};
 use crate::xaml::{
     Color, CoreCursor, CoreCursorType, CoreWindow, FocusState, IContentControl, IControl, ICoreWindow, IFontIcon,
-    IFrameworkElement, IPanel, IRangeBase, IUIElement, PointerRoutedEventArgs, RangeBaseValueChangedEventArgs,
-    SolidColorBrush, UIElement, Visibility,
+    IFrameworkElement, IPanel, IRangeBase, ITappedRoutedEventArgs, IUIElement, PointerDeviceType,
+    PointerRoutedEventArgs, RangeBaseValueChangedEventArgs, SolidColorBrush, TappedRoutedEventArgs, UIElement,
+    Visibility,
 };
 
 /// How long the fullscreen bar stays without a sign of life.
 const STAYS: Duration = Duration::from_secs(3);
 const WHITE: Color = Color { a: 255, r: 255, g: 255, b: 255 };
 const DIMMED: Color = Color { a: 110, r: 255, g: 255, b: 255 };
+/// A tap this soon after the bar came up is the touch that brought it: it stays.
+const JUST_SHOWN: Duration = Duration::from_millis(400);
 
 const MARKUP: &str = r##"
 <Grid x:Name="ControlBar" <!--place--> VerticalAlignment="Bottom" Background="#99000000" Padding="4,2,8,2"
@@ -99,6 +103,8 @@ pub struct ControlBar {
     full: Cell<bool>,
     muted: Cell<bool>,
     idle: Cell<bool>,
+    /// When the bar last came up.
+    shown_at: Cell<Option<Instant>>,
     /// Where the pointer last was.
     pointer: Cell<(f32, f32)>,
     over_bar: Cell<bool>,
@@ -125,6 +131,7 @@ impl ControlBar {
             full: Cell::new(false),
             muted: Cell::new(false),
             idle: Cell::new(false),
+            shown_at: Cell::new(None),
             pointer: Cell::default(),
             over_bar: Cell::new(false),
             turn: Arc::default(),
@@ -155,6 +162,14 @@ impl ControlBar {
                     if bar.pointer.replace((at.x, at.y)) != (at.x, at.y) {
                         let _ = bar.wake();
                     }
+                }
+            },
+        )?);
+        let weak = Rc::downgrade(&bar);
+        keep(named::<IUIElement>(root, stage)?.Tapped(
+            move |_: Ref<IInspectable>, args: Ref<TappedRoutedEventArgs>| {
+                if let (Some(bar), true) = (weak.upgrade(), is_touch(&args)) {
+                    let _ = bar.touched();
                 }
             },
         )?);
@@ -218,6 +233,17 @@ impl ControlBar {
         Ok(())
     }
 
+    /// A finger tapped the picture: brings the bar up, or puts it away.
+    fn touched(&self) -> Result<()> {
+        let just_shown = self.shown_at.get().is_some_and(|at| at.elapsed() < JUST_SHOWN);
+        if self.idle.get() || just_shown {
+            return self.wake();
+        }
+        // Any hiding still waiting is for a sign of life before this.
+        self.turn.fetch_add(1, Ordering::Relaxed);
+        self.set_idle(true)
+    }
+
     fn hide_after(&self, turn: u64) {
         let Some(shell) = shell() else { return };
         let Some(backend) = shell.backend.get().cloned() else { return };
@@ -251,6 +277,9 @@ impl ControlBar {
         if self.idle.replace(idle) == idle {
             return Ok(());
         }
+        if !idle {
+            self.shown_at.set(Some(Instant::now()));
+        }
         let shown = if idle { Visibility::Collapsed } else { Visibility::Visible };
         named::<IUIElement>(&self.root, "ControlBar")?.SetVisibility(shown)?;
         for name in self.hide_too {
@@ -267,6 +296,13 @@ impl ControlBar {
             window.SetPointerCursor(&CoreCursor::CreateCursor(CoreCursorType::Arrow, 0)?)
         }
     }
+}
+
+/// The tap came from a finger, not a mouse or pen.
+pub fn is_touch(args: &Ref<TappedRoutedEventArgs>) -> bool {
+    args.ok()
+        .and_then(|a| a.cast::<ITappedRoutedEventArgs>()?.PointerDeviceType())
+        .is_ok_and(|kind| kind == PointerDeviceType::Touch)
 }
 
 /// Moves the send bar from one host to another, in the colour that suits where it lands.

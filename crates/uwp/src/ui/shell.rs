@@ -15,7 +15,7 @@ use crate::state::panes::{self, Widths};
 use crate::state::settings::Prefs;
 use crate::ui::home::HomePage;
 use crate::ui::keep;
-use crate::ui::splitter::{self, BAR_TEMPLATE};
+use crate::ui::splitter;
 use crate::ui::{follow, live, live_room, load, me, named, on_click, player, post, search, set_text, up};
 use crate::xaml::{
     ApplicationData, ApplicationView, Color, CoreApplication, CoreDispatcher, CoreWindow, CoreWindowActivationState,
@@ -76,7 +76,7 @@ const LAYOUT: &str = r##"
     <RowDefinition Height="*" />
     <RowDefinition Height="Auto" />
   </Grid.RowDefinitions>
-  <Thumb x:Name="RailBar" Grid.Column="1" Grid.RowSpan="3" Width="5" Background="Transparent"><!--bar--></Thumb>
+  <Thumb x:Name="RailBar" Grid.Column="1" Grid.RowSpan="3" <!--bar-attrs-->><!--bar--></Thumb>
   <Grid x:Name="DragBar" Grid.Column="2" Background="Transparent">
     <TextBlock Text="Rubi" FontSize="12" Margin="12,0,0,0" VerticalAlignment="Center"
                Foreground="{ThemeResource SystemControlForegroundBaseMediumBrush}" />
@@ -145,7 +145,7 @@ pub fn shell() -> Option<Rc<Shell>> {
 /// Builds the window, then opens the core in the background.
 pub fn start() -> Result<()> {
     let window = Window::Current()?.cast::<IWindow>()?;
-    let root = load(&LAYOUT.replace("<!--bar-->", BAR_TEMPLATE))?;
+    let root = load(&splitter::fill(LAYOUT))?;
     let page = named::<IContentControl>(&root, "Page")?;
     let dispatcher = window.Dispatcher()?;
     let folder = ApplicationData::Current()?.cast::<IApplicationData>()?.LocalFolder()?;

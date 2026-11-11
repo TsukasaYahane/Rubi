@@ -8,18 +8,25 @@ use std::cell::{Cell, RefCell};
 use std::time::{Duration, Instant};
 
 use rubi_core::portrait_of;
-use windows_core::{IInspectable, Ref, Result};
+use windows_core::{IInspectable, Interface, Ref, Result};
 
 use crate::state::feed::{BATCH, Feed, Item};
 use crate::ui::keep;
 use crate::ui::shell::{shell, toast};
 use crate::ui::{load, named, on_click, player, post, set_text};
-use crate::xaml::{IFontIcon, IFrameworkElement, IUIElement, PointerRoutedEventArgs, Visibility};
+use crate::xaml::{
+    IFontIcon, IFrameworkElement, IManipulationCompletedRoutedEventArgs, IUIElement,
+    ManipulationCompletedRoutedEventArgs, ManipulationModes, PointerDeviceType, PointerRoutedEventArgs, Visibility,
+};
 
 /// How long a video's shape is looked up before it opens anyway.
 const LOOKUP: Duration = Duration::from_millis(1_500);
 /// Wheel notches closer together than this count as one move.
 const WHEEL_GAP: Duration = Duration::from_millis(450);
+/// A swipe up or down the picture moves on when it goes this far, in pixels...
+const SWIPE_DISTANCE: f32 = 80.0;
+/// ...or is let go this fast, in pixels per ms.
+const SWIPE_SPEED: f32 = 0.5;
 
 /// The video page's elements, by the same names, around a centred picture.
 pub const LAYOUT: &str = r##"
@@ -374,6 +381,26 @@ pub fn attach(root: &IFrameworkElement) -> Result<()> {
         },
     )?;
     keep(revoker);
+    let picture = named::<IUIElement>(root, "Video")?;
+    picture.SetManipulationMode(ManipulationModes::TranslateY)?;
+    keep(picture.ManipulationCompleted(|_: Ref<IInspectable>, args: Ref<ManipulationCompletedRoutedEventArgs>| {
+        if let Ok(args) = args.ok().and_then(|a| a.cast::<IManipulationCompletedRoutedEventArgs>()) {
+            let _ = swiped(&args);
+        }
+    })?);
+    Ok(())
+}
+
+/// A finger or pen let go of the picture: up is the next video, down the one before. A mouse has
+/// the wheel.
+fn swiped(args: &IManipulationCompletedRoutedEventArgs) -> Result<()> {
+    if args.PointerDeviceType()? == PointerDeviceType::Mouse {
+        return Ok(());
+    }
+    let (moved, speed) = (args.Cumulative()?.translation.y, args.Velocities()?.linear.y);
+    if moved.abs() >= SWIPE_DISTANCE || speed.abs() >= SWIPE_SPEED {
+        step(if moved < 0.0 { 1 } else { -1 });
+    }
     Ok(())
 }
 

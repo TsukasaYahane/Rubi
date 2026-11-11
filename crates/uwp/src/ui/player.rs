@@ -144,7 +144,7 @@ const LAYOUT: &str = r##"
       </StackPanel>
     </ScrollViewer>
   </Grid>
-  <Thumb x:Name="SideBar" Grid.Column="1" Width="5" Background="Transparent"><!--bar--></Thumb>
+  <Thumb x:Name="SideBar" Grid.Column="1" <!--bar-attrs-->><!--bar--></Thumb>
   <Grid x:Name="Side" Grid.Column="2" Background="{ThemeResource ApplicationPageBackgroundThemeBrush}">
     <Grid.RowDefinitions>
       <RowDefinition Height="Auto" />
@@ -540,8 +540,7 @@ pub fn open(feed: bool, bvid: &str, title: &str, uploader: &str) -> Result<()> {
     let layout = if feed { feed::LAYOUT } else { LAYOUT };
     let place = if feed { r#"Grid.RowSpan="4""# } else { r#"Grid.Row="1""# };
     let root = load(
-        &layout
-            .replace("<!--bar-->", splitter::BAR_TEMPLATE)
+        &splitter::fill(layout)
             .replace("<!--lists-->", LISTS)
             .replace("<!--controls-->", &control_bar::markup(place))
             .replace("<!--second-->", SECOND_ELEMENT),
@@ -605,10 +604,14 @@ pub fn open(feed: bool, bvid: &str, title: &str, uploader: &str) -> Result<()> {
         named::<IUIElement>(&root, "Next")?.SetVisibility(shown(queued.has_next()))?;
     }
     on_click(&root, "DanmakuSwitch", toggle_danmaku)?;
-    keep(
-        named::<IUIElement>(&root, "Video")?
-            .Tapped(|_: Ref<windows_core::IInspectable>, _: Ref<TappedRoutedEventArgs>| toggle_play())?,
-    );
+    keep(named::<IUIElement>(&root, "Video")?.Tapped(
+        |_: Ref<windows_core::IInspectable>, args: Ref<TappedRoutedEventArgs>| {
+            // A finger's tap is the bar's: it shows or hides it.
+            if !crate::ui::control_bar::is_touch(&args) {
+                toggle_play();
+            }
+        },
+    )?);
     keep(named::<IRangeBase>(&root, "Seek")?.ValueChanged(
         |_: Ref<windows_core::IInspectable>, args: Ref<RangeBaseValueChangedEventArgs>| {
             let value = args.ok().and_then(|a| a.cast::<IRangeBaseValueChangedEventArgs>()?.NewValue());

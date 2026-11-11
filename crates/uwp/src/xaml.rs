@@ -13878,6 +13878,139 @@ impl windows_core::RuntimeType for IInputEnabledEventArgs {
 pub struct IInputEnabledEventArgs_Vtbl {
     pub base__: windows_core::IInspectable_Vtbl,
 }
+windows_core::imp::define_interface!(IInputPane, IInputPane_Vtbl, 0x640ada70_06f3_4c87_a678_9829c9127c28);
+impl windows_core::RuntimeType for IInputPane {
+    const SIGNATURE: windows_core::imp::ConstBuffer = windows_core::imp::ConstBuffer::for_interface::<Self>();
+}
+impl IInputPane {
+    pub fn Showing<F>(&self, handler: F) -> windows_core::Result<windows_core::EventRevoker>
+    where
+        F: Fn(windows_core::Ref<InputPane>, windows_core::Ref<InputPaneVisibilityEventArgs>) + 'static,
+    {
+        let handler: TypedEventHandler<InputPane, InputPaneVisibilityEventArgs> = {
+            let com =
+                windows_core::imp::DelegateBox::<TypedEventHandler<InputPane, InputPaneVisibilityEventArgs>, F>::new(
+                    &TypedEventHandlerBox::<InputPane, InputPaneVisibilityEventArgs, F>::VTABLE,
+                    handler,
+                );
+            unsafe { core::mem::transmute(windows_core::imp::box_new(com)) }
+        };
+        unsafe {
+            let mut result__ = core::mem::zeroed();
+            let token__ = (windows_core::Interface::vtable(self).Showing)(
+                windows_core::Interface::as_raw(self),
+                windows_core::Interface::as_raw(&handler),
+                &mut result__,
+            )
+            .map(|| result__)?;
+            Ok(windows_core::EventRevoker::new(
+                self.clone(),
+                token__,
+                windows_core::Interface::vtable(self).RemoveShowing,
+            ))
+        }
+    }
+    pub fn Hiding<F>(&self, handler: F) -> windows_core::Result<windows_core::EventRevoker>
+    where
+        F: Fn(windows_core::Ref<InputPane>, windows_core::Ref<InputPaneVisibilityEventArgs>) + 'static,
+    {
+        let handler: TypedEventHandler<InputPane, InputPaneVisibilityEventArgs> = {
+            let com =
+                windows_core::imp::DelegateBox::<TypedEventHandler<InputPane, InputPaneVisibilityEventArgs>, F>::new(
+                    &TypedEventHandlerBox::<InputPane, InputPaneVisibilityEventArgs, F>::VTABLE,
+                    handler,
+                );
+            unsafe { core::mem::transmute(windows_core::imp::box_new(com)) }
+        };
+        unsafe {
+            let mut result__ = core::mem::zeroed();
+            let token__ = (windows_core::Interface::vtable(self).Hiding)(
+                windows_core::Interface::as_raw(self),
+                windows_core::Interface::as_raw(&handler),
+                &mut result__,
+            )
+            .map(|| result__)?;
+            Ok(windows_core::EventRevoker::new(
+                self.clone(),
+                token__,
+                windows_core::Interface::vtable(self).RemoveHiding,
+            ))
+        }
+    }
+    pub fn OccludedRect(&self) -> windows_core::Result<Rect> {
+        unsafe {
+            let mut result__ = core::mem::zeroed();
+            (windows_core::Interface::vtable(self).OccludedRect)(windows_core::Interface::as_raw(self), &mut result__)
+                .map(|| result__)
+        }
+    }
+}
+#[repr(C)]
+pub struct IInputPane_Vtbl {
+    pub base__: windows_core::IInspectable_Vtbl,
+    pub Showing:
+        unsafe extern "system" fn(*mut core::ffi::c_void, *mut core::ffi::c_void, *mut i64) -> windows_core::HRESULT,
+    pub RemoveShowing: unsafe extern "system" fn(*mut core::ffi::c_void, i64) -> windows_core::HRESULT,
+    pub Hiding:
+        unsafe extern "system" fn(*mut core::ffi::c_void, *mut core::ffi::c_void, *mut i64) -> windows_core::HRESULT,
+    pub RemoveHiding: unsafe extern "system" fn(*mut core::ffi::c_void, i64) -> windows_core::HRESULT,
+    pub OccludedRect: unsafe extern "system" fn(*mut core::ffi::c_void, *mut Rect) -> windows_core::HRESULT,
+}
+windows_core::imp::define_interface!(IInputPaneStatics, IInputPaneStatics_Vtbl, 0x95f4af3a_ef47_424a_9741_fd2815eba2bd);
+impl windows_core::RuntimeType for IInputPaneStatics {
+    const SIGNATURE: windows_core::imp::ConstBuffer = windows_core::imp::ConstBuffer::for_interface::<Self>();
+}
+#[repr(C)]
+pub struct IInputPaneStatics_Vtbl {
+    pub base__: windows_core::IInspectable_Vtbl,
+    pub GetForCurrentView:
+        unsafe extern "system" fn(*mut core::ffi::c_void, *mut *mut core::ffi::c_void) -> windows_core::HRESULT,
+}
+windows_core::imp::define_interface!(
+    IInputPaneVisibilityEventArgs,
+    IInputPaneVisibilityEventArgs_Vtbl,
+    0xd243e016_d907_4fcc_bb8d_f77baa5028f1
+);
+impl windows_core::RuntimeType for IInputPaneVisibilityEventArgs {
+    const SIGNATURE: windows_core::imp::ConstBuffer = windows_core::imp::ConstBuffer::for_interface::<Self>();
+}
+impl IInputPaneVisibilityEventArgs {
+    pub fn OccludedRect(&self) -> windows_core::Result<Rect> {
+        unsafe {
+            let mut result__ = core::mem::zeroed();
+            (windows_core::Interface::vtable(self).OccludedRect)(windows_core::Interface::as_raw(self), &mut result__)
+                .map(|| result__)
+        }
+    }
+    pub fn SetEnsuredFocusedElementInView(&self, value: bool) -> windows_core::Result<()> {
+        unsafe {
+            (windows_core::Interface::vtable(self).SetEnsuredFocusedElementInView)(
+                windows_core::Interface::as_raw(self),
+                value,
+            )
+            .ok()
+        }
+    }
+    pub fn EnsuredFocusedElementInView(&self) -> windows_core::Result<bool> {
+        unsafe {
+            let mut result__ = core::mem::zeroed();
+            (windows_core::Interface::vtable(self).EnsuredFocusedElementInView)(
+                windows_core::Interface::as_raw(self),
+                &mut result__,
+            )
+            .map(|| result__)
+        }
+    }
+}
+#[repr(C)]
+pub struct IInputPaneVisibilityEventArgs_Vtbl {
+    pub base__: windows_core::IInspectable_Vtbl,
+    pub OccludedRect: unsafe extern "system" fn(*mut core::ffi::c_void, *mut Rect) -> windows_core::HRESULT,
+    pub SetEnsuredFocusedElementInView:
+        unsafe extern "system" fn(*mut core::ffi::c_void, bool) -> windows_core::HRESULT,
+    pub EnsuredFocusedElementInView:
+        unsafe extern "system" fn(*mut core::ffi::c_void, *mut bool) -> windows_core::HRESULT,
+}
 windows_core::imp::define_interface!(IInputScope, IInputScope_Vtbl, 0x5c0f85f3_f9d8_4220_b666_045d074d9bfa);
 impl windows_core::RuntimeType for IInputScope {
     const SIGNATURE: windows_core::imp::ConstBuffer = windows_core::imp::ConstBuffer::for_interface::<Self>();
@@ -15101,9 +15234,77 @@ windows_core::imp::define_interface!(
 impl windows_core::RuntimeType for IManipulationCompletedRoutedEventArgs {
     const SIGNATURE: windows_core::imp::ConstBuffer = windows_core::imp::ConstBuffer::for_interface::<Self>();
 }
+impl IManipulationCompletedRoutedEventArgs {
+    pub fn Container(&self) -> windows_core::Result<UIElement> {
+        unsafe {
+            let mut result__ = core::mem::zeroed();
+            (windows_core::Interface::vtable(self).Container)(windows_core::Interface::as_raw(self), &mut result__)
+                .and_then(|| windows_core::imp::Type::from_abi(result__))
+        }
+    }
+    pub fn Position(&self) -> windows_core::Result<Point> {
+        unsafe {
+            let mut result__ = core::mem::zeroed();
+            (windows_core::Interface::vtable(self).Position)(windows_core::Interface::as_raw(self), &mut result__)
+                .map(|| result__)
+        }
+    }
+    pub fn IsInertial(&self) -> windows_core::Result<bool> {
+        unsafe {
+            let mut result__ = core::mem::zeroed();
+            (windows_core::Interface::vtable(self).IsInertial)(windows_core::Interface::as_raw(self), &mut result__)
+                .map(|| result__)
+        }
+    }
+    pub fn Cumulative(&self) -> windows_core::Result<ManipulationDelta> {
+        unsafe {
+            let mut result__ = core::mem::zeroed();
+            (windows_core::Interface::vtable(self).Cumulative)(windows_core::Interface::as_raw(self), &mut result__)
+                .map(|| result__)
+        }
+    }
+    pub fn Velocities(&self) -> windows_core::Result<ManipulationVelocities> {
+        unsafe {
+            let mut result__ = core::mem::zeroed();
+            (windows_core::Interface::vtable(self).Velocities)(windows_core::Interface::as_raw(self), &mut result__)
+                .map(|| result__)
+        }
+    }
+    pub fn Handled(&self) -> windows_core::Result<bool> {
+        unsafe {
+            let mut result__ = core::mem::zeroed();
+            (windows_core::Interface::vtable(self).Handled)(windows_core::Interface::as_raw(self), &mut result__)
+                .map(|| result__)
+        }
+    }
+    pub fn SetHandled(&self, value: bool) -> windows_core::Result<()> {
+        unsafe { (windows_core::Interface::vtable(self).SetHandled)(windows_core::Interface::as_raw(self), value).ok() }
+    }
+    pub fn PointerDeviceType(&self) -> windows_core::Result<PointerDeviceType> {
+        unsafe {
+            let mut result__ = core::mem::zeroed();
+            (windows_core::Interface::vtable(self).PointerDeviceType)(
+                windows_core::Interface::as_raw(self),
+                &mut result__,
+            )
+            .map(|| result__)
+        }
+    }
+}
 #[repr(C)]
 pub struct IManipulationCompletedRoutedEventArgs_Vtbl {
     pub base__: windows_core::IInspectable_Vtbl,
+    pub Container:
+        unsafe extern "system" fn(*mut core::ffi::c_void, *mut *mut core::ffi::c_void) -> windows_core::HRESULT,
+    pub Position: unsafe extern "system" fn(*mut core::ffi::c_void, *mut Point) -> windows_core::HRESULT,
+    pub IsInertial: unsafe extern "system" fn(*mut core::ffi::c_void, *mut bool) -> windows_core::HRESULT,
+    pub Cumulative: unsafe extern "system" fn(*mut core::ffi::c_void, *mut ManipulationDelta) -> windows_core::HRESULT,
+    pub Velocities:
+        unsafe extern "system" fn(*mut core::ffi::c_void, *mut ManipulationVelocities) -> windows_core::HRESULT,
+    pub Handled: unsafe extern "system" fn(*mut core::ffi::c_void, *mut bool) -> windows_core::HRESULT,
+    pub SetHandled: unsafe extern "system" fn(*mut core::ffi::c_void, bool) -> windows_core::HRESULT,
+    pub PointerDeviceType:
+        unsafe extern "system" fn(*mut core::ffi::c_void, *mut PointerDeviceType) -> windows_core::HRESULT,
 }
 windows_core::imp::define_interface!(
     IManipulationDeltaRoutedEventArgs,
@@ -19718,9 +19919,51 @@ windows_core::imp::define_interface!(
 impl windows_core::RuntimeType for ITappedRoutedEventArgs {
     const SIGNATURE: windows_core::imp::ConstBuffer = windows_core::imp::ConstBuffer::for_interface::<Self>();
 }
+impl ITappedRoutedEventArgs {
+    pub fn PointerDeviceType(&self) -> windows_core::Result<PointerDeviceType> {
+        unsafe {
+            let mut result__ = core::mem::zeroed();
+            (windows_core::Interface::vtable(self).PointerDeviceType)(
+                windows_core::Interface::as_raw(self),
+                &mut result__,
+            )
+            .map(|| result__)
+        }
+    }
+    pub fn Handled(&self) -> windows_core::Result<bool> {
+        unsafe {
+            let mut result__ = core::mem::zeroed();
+            (windows_core::Interface::vtable(self).Handled)(windows_core::Interface::as_raw(self), &mut result__)
+                .map(|| result__)
+        }
+    }
+    pub fn SetHandled(&self, value: bool) -> windows_core::Result<()> {
+        unsafe { (windows_core::Interface::vtable(self).SetHandled)(windows_core::Interface::as_raw(self), value).ok() }
+    }
+    pub fn GetPosition<P0>(&self, relativeto: P0) -> windows_core::Result<Point>
+    where
+        P0: windows_core::Param<UIElement>,
+    {
+        unsafe {
+            let mut result__ = core::mem::zeroed();
+            (windows_core::Interface::vtable(self).GetPosition)(
+                windows_core::Interface::as_raw(self),
+                relativeto.param().abi(),
+                &mut result__,
+            )
+            .map(|| result__)
+        }
+    }
+}
 #[repr(C)]
 pub struct ITappedRoutedEventArgs_Vtbl {
     pub base__: windows_core::IInspectable_Vtbl,
+    pub PointerDeviceType:
+        unsafe extern "system" fn(*mut core::ffi::c_void, *mut PointerDeviceType) -> windows_core::HRESULT,
+    pub Handled: unsafe extern "system" fn(*mut core::ffi::c_void, *mut bool) -> windows_core::HRESULT,
+    pub SetHandled: unsafe extern "system" fn(*mut core::ffi::c_void, bool) -> windows_core::HRESULT,
+    pub GetPosition:
+        unsafe extern "system" fn(*mut core::ffi::c_void, *mut core::ffi::c_void, *mut Point) -> windows_core::HRESULT,
 }
 windows_core::imp::define_interface!(ITextBlock, ITextBlock_Vtbl, 0xae2d9271_3b4a_45fc_8468_f7949548f4d5);
 impl windows_core::RuntimeType for ITextBlock {
@@ -23638,6 +23881,70 @@ impl windows_core::RuntimeName for InputEnabledEventArgs {
 }
 #[repr(transparent)]
 #[derive(Clone, Debug, Eq, PartialEq)]
+pub struct InputPane(windows_core::IUnknown);
+windows_core::imp::interface_hierarchy!(InputPane, windows_core::IUnknown, windows_core::IInspectable);
+impl InputPane {
+    pub fn GetForCurrentView() -> windows_core::Result<Self> {
+        Self::IInputPaneStatics(|this| unsafe {
+            let mut result__ = core::mem::zeroed();
+            (windows_core::Interface::vtable(this).GetForCurrentView)(
+                windows_core::Interface::as_raw(this),
+                &mut result__,
+            )
+            .and_then(|| windows_core::imp::Type::from_abi(result__))
+        })
+    }
+    fn IInputPaneStatics<R, F: FnOnce(&IInputPaneStatics) -> windows_core::Result<R>>(
+        callback: F,
+    ) -> windows_core::Result<R> {
+        static SHARED: windows_core::imp::FactoryCache<InputPane, IInputPaneStatics> =
+            windows_core::imp::FactoryCache::new();
+        SHARED.call(callback)
+    }
+}
+impl windows_core::RuntimeType for InputPane {
+    const SIGNATURE: windows_core::imp::ConstBuffer = windows_core::imp::ConstBuffer::for_class::<Self, IInputPane>();
+}
+unsafe impl windows_core::Interface for InputPane {
+    type Vtable = <IInputPane as windows_core::Interface>::Vtable;
+    const IID: windows_core::GUID = <IInputPane as windows_core::Interface>::IID;
+}
+impl core::ops::Deref for InputPane {
+    type Target = IInputPane;
+    fn deref(&self) -> &Self::Target {
+        unsafe { core::mem::transmute(self) }
+    }
+}
+impl windows_core::RuntimeName for InputPane {
+    const NAME: &'static str = "Windows.UI.ViewManagement.InputPane";
+}
+#[repr(transparent)]
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct InputPaneVisibilityEventArgs(windows_core::IUnknown);
+windows_core::imp::interface_hierarchy!(
+    InputPaneVisibilityEventArgs,
+    windows_core::IUnknown,
+    windows_core::IInspectable
+);
+impl windows_core::RuntimeType for InputPaneVisibilityEventArgs {
+    const SIGNATURE: windows_core::imp::ConstBuffer =
+        windows_core::imp::ConstBuffer::for_class::<Self, IInputPaneVisibilityEventArgs>();
+}
+unsafe impl windows_core::Interface for InputPaneVisibilityEventArgs {
+    type Vtable = <IInputPaneVisibilityEventArgs as windows_core::Interface>::Vtable;
+    const IID: windows_core::GUID = <IInputPaneVisibilityEventArgs as windows_core::Interface>::IID;
+}
+impl core::ops::Deref for InputPaneVisibilityEventArgs {
+    type Target = IInputPaneVisibilityEventArgs;
+    fn deref(&self) -> &Self::Target {
+        unsafe { core::mem::transmute(self) }
+    }
+}
+impl windows_core::RuntimeName for InputPaneVisibilityEventArgs {
+    const NAME: &'static str = "Windows.UI.ViewManagement.InputPaneVisibilityEventArgs";
+}
+#[repr(transparent)]
+#[derive(Clone, Debug, Eq, PartialEq)]
 pub struct InputScope(windows_core::IUnknown);
 windows_core::imp::interface_hierarchy!(InputScope, windows_core::IUnknown, windows_core::IInspectable);
 windows_core::imp::required_hierarchy!(InputScope, DependencyObject);
@@ -24349,6 +24656,22 @@ impl windows_core::RuntimeName for ManipulationCompletedRoutedEventArgs {
 }
 unsafe impl Send for ManipulationCompletedRoutedEventArgs {}
 unsafe impl Sync for ManipulationCompletedRoutedEventArgs {}
+#[repr(C)]
+#[derive(Clone, Copy, Debug, Default, PartialEq)]
+pub struct ManipulationDelta {
+    pub translation: Point,
+    pub scale: f32,
+    pub rotation: f32,
+    pub expansion: f32,
+}
+impl windows_core::imp::TypeKind for ManipulationDelta {
+    type TypeKind = windows_core::imp::CopyType;
+}
+impl windows_core::RuntimeType for ManipulationDelta {
+    const SIGNATURE: windows_core::imp::ConstBuffer = windows_core::imp::ConstBuffer::from_slice(
+        b"struct(Windows.UI.Input.ManipulationDelta;struct(Windows.Foundation.Point;f4;f4);f4;f4;f4)",
+    );
+}
 windows_core::imp::define_interface!(
     ManipulationDeltaEventHandler,
     ManipulationDeltaEventHandler_Vtbl,
@@ -24701,6 +25024,21 @@ impl windows_core::RuntimeName for ManipulationStartingRoutedEventArgs {
 }
 unsafe impl Send for ManipulationStartingRoutedEventArgs {}
 unsafe impl Sync for ManipulationStartingRoutedEventArgs {}
+#[repr(C)]
+#[derive(Clone, Copy, Debug, Default, PartialEq)]
+pub struct ManipulationVelocities {
+    pub linear: Point,
+    pub angular: f32,
+    pub expansion: f32,
+}
+impl windows_core::imp::TypeKind for ManipulationVelocities {
+    type TypeKind = windows_core::imp::CopyType;
+}
+impl windows_core::RuntimeType for ManipulationVelocities {
+    const SIGNATURE: windows_core::imp::ConstBuffer = windows_core::imp::ConstBuffer::from_slice(
+        b"struct(Windows.UI.Input.ManipulationVelocities;struct(Windows.Foundation.Point;f4;f4);f4;f4)",
+    );
+}
 #[repr(transparent)]
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct MediaBinder(windows_core::IUnknown);
@@ -25758,6 +26096,21 @@ impl core::ops::Deref for PointerDevice {
 }
 impl windows_core::RuntimeName for PointerDevice {
     const NAME: &'static str = "Windows.Devices.Input.PointerDevice";
+}
+#[repr(transparent)]
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
+pub struct PointerDeviceType(pub i32);
+impl PointerDeviceType {
+    pub const Touch: Self = Self(0);
+    pub const Pen: Self = Self(1);
+    pub const Mouse: Self = Self(2);
+}
+impl windows_core::imp::TypeKind for PointerDeviceType {
+    type TypeKind = windows_core::imp::CopyType;
+}
+impl windows_core::RuntimeType for PointerDeviceType {
+    const SIGNATURE: windows_core::imp::ConstBuffer =
+        windows_core::imp::ConstBuffer::from_slice(b"enum(Windows.Devices.Input.PointerDeviceType;i4)");
 }
 #[repr(transparent)]
 #[derive(Clone, Debug, Eq, PartialEq)]

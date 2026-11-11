@@ -1,8 +1,8 @@
 //! Danmaku over the video: a fixed pool of text blocks, moved every frame from the playback
-//! position. Loading and placing happen in the background; only moving touches XAML.
+//! position while it moves. Loading and placing happen in the background; only moving touches XAML.
 
 use std::cell::{Cell, RefCell};
-use std::rc::Rc;
+use std::rc::{Rc, Weak};
 use std::sync::Arc;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::Duration;
@@ -45,6 +45,12 @@ const SETTLE: Duration = Duration::from_millis(200);
 const LIVE_KEPT: usize = 200;
 /// Segments loaded together after the first.
 const BATCH: usize = 3;
+/// Frames the clock may stand still before frames stop: drawing every frame keeps the whole window
+/// redrawing at the screen's rate, paused or not.
+const STILL_FRAMES: u32 = 30;
+/// How often a stopped overlay looks whether the clock moves again: about a frame, so danmaku set
+/// off with the picture. A look only posts a little work; frames redraw the whole window.
+const IDLE_LOOK: Duration = Duration::from_millis(16);
 
 struct Slot {
     layers: Vec<ITextBlock>,
@@ -75,7 +81,15 @@ pub struct Overlay {
     placing: Cell<bool>,
     placed_stale: Cell<bool>,
     on: Cell<bool>,
+    /// Itself, for the frame handler it starts again after stopping.
+    me: Weak<Self>,
+    /// Drawing every frame; `None` while the clock stands still or the danmaku are off.
     frames: RefCell<Option<EventRevoker>>,
+    /// The clock at the last frame, and for how many frames it has not moved.
+    last_ms: Cell<u32>,
+    still: Cell<u32>,
+    /// A look at the clock is waiting, while frames are stopped.
+    looking: Cell<bool>,
     sizing: RefCell<Option<EventRevoker>>,
     clip_pending: Rc<Cell<bool>>,
     /// Bumped by each size change: only the last one places the danmaku again.
@@ -96,7 +110,7 @@ impl Overlay {
             children.Append(&slot.cast::<UIElement>()?)?;
             slots.push(Slot { layers, element, shift, shows: Cell::new(None), visible: Cell::new(false) });
         }
-        let overlay = Rc::new(Self {
+        let overlay = Rc::new_cyclic(|me| Self {
             host,
             clock,
             placing: Cell::new(false),
@@ -106,21 +120,20 @@ impl Overlay {
             items: RefCell::default(),
             danmaku: RefCell::default(),
             on: Cell::new(true),
+            me: me.clone(),
             frames: RefCell::new(None),
+            last_ms: Cell::new(u32::MAX),
+            still: Cell::new(0),
+            looking: Cell::new(false),
             sizing: RefCell::new(None),
             clip_pending: Rc::default(),
             resizes: Arc::default(),
         });
-        let drawing = Rc::downgrade(&overlay);
-        let frames = CompositionTarget::Rendering(move |_: Ref<IInspectable>, _: Ref<IInspectable>| {
-            if let Some(overlay) = drawing.upgrade() {
-                let _ = overlay.draw();
-            }
-        })?;
-        *overlay.frames.borrow_mut() = Some(frames);
+        overlay.wake();
         let resizing = Rc::downgrade(&overlay);
         let sizing = overlay.canvas.SizeChanged(move |_: Ref<IInspectable>, _: Ref<SizeChangedEventArgs>| {
             let Some(overlay) = resizing.upgrade() else { return };
+            overlay.wake();
             let pane = Rc::downgrade(&overlay);
             soon(&overlay.clip_pending, move || {
                 if let Some(overlay) = pane.upgrade() {
@@ -138,7 +151,65 @@ impl Overlay {
     pub fn toggle(&self) -> bool {
         let on = !self.on.get();
         self.on.set(on);
+        // Off, the next frame hides what shows and then frames stop.
+        self.wake();
         on
+    }
+
+    /// Draws every frame again, until the clock stands still.
+    fn wake(&self) {
+        self.still.set(0);
+        if self.frames.borrow().is_some() {
+            return;
+        }
+        let drawing = self.me.clone();
+        let frames = CompositionTarget::Rendering(move |_: Ref<IInspectable>, _: Ref<IInspectable>| {
+            if let Some(overlay) = drawing.upgrade() {
+                let _ = overlay.draw();
+                overlay.rest_if_still();
+            }
+        });
+        if let Ok(frames) = frames {
+            *self.frames.borrow_mut() = Some(frames);
+        }
+    }
+
+    /// Stops drawing every frame once nothing on screen can move, and looks at the clock now and
+    /// then instead.
+    fn rest_if_still(&self) {
+        let now_ms = (self.clock)();
+        let still = if now_ms == self.last_ms.replace(now_ms) { self.still.get() + 1 } else { 0 };
+        self.still.set(still);
+        let nothing_shows = !self.on.get() && self.slots.iter().all(|slot| !slot.visible.get());
+        if nothing_shows || still >= STILL_FRAMES {
+            self.frames.borrow_mut().take();
+            self.look_later();
+        }
+    }
+
+    /// Looks at the clock in a little while, and draws every frame again if it moved.
+    fn look_later(&self) {
+        if self.looking.replace(true) {
+            return;
+        }
+        let Some(shell) = shell() else { return };
+        let Some(backend) = shell.backend.get().cloned() else { return };
+        let (dispatcher, run, find) = (shell.dispatcher.clone(), (self.host.run)(), self.host.find);
+        backend.spawn(async move {
+            tokio::time::sleep(IDLE_LOOK).await;
+            post(&dispatcher, move || {
+                let Some(overlay) = find(run) else { return };
+                overlay.looking.set(false);
+                if overlay.frames.borrow().is_some() {
+                    return;
+                }
+                if overlay.on.get() && (overlay.clock)() != overlay.last_ms.get() {
+                    overlay.wake();
+                } else {
+                    overlay.look_later();
+                }
+            });
+        });
     }
 
     /// Loads the video's danmaku, the part being watched first.
@@ -189,6 +260,7 @@ impl Overlay {
         *self.danmaku.borrow_mut() = danmaku;
         *self.items.borrow_mut() = placed;
         self.forget_slots();
+        self.wake();
         self.placing.set(false);
         if self.placed_stale.take() {
             self.place();

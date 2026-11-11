@@ -271,3 +271,14 @@ Windows.Media.Playback.IMediaPlayerSurface
 Windows.Media.Playback.IMediaPlayer4
 Windows.UI.Xaml.Controls.Flyout
 Windows.UI.Xaml.Controls.IFlyout
+Windows.UI.Xaml.Input.ITappedRoutedEventArgs
+Windows.Devices.Input.PointerDeviceType
+Windows.UI.Xaml.Input.ManipulationCompletedRoutedEventArgs
+Windows.UI.Xaml.Input.IManipulationCompletedRoutedEventArgs
+Windows.UI.Input.ManipulationDelta
+Windows.UI.Input.ManipulationVelocities
+Windows.UI.ViewManagement.InputPane
+Windows.UI.ViewManagement.IInputPane
+Windows.UI.ViewManagement.IInputPaneStatics
+Windows.UI.ViewManagement.InputPaneVisibilityEventArgs
+Windows.UI.ViewManagement.IInputPaneVisibilityEventArgs

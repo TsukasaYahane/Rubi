@@ -11,9 +11,18 @@ use crate::xaml::{
     PointerRoutedEventArgs, SolidColorBrush,
 };
 
-/// The bar in a XAML layout.
-pub const BAR_TEMPLATE: &str = r##"<Thumb.Template><ControlTemplate TargetType="Thumb">
-  <Border Background="{TemplateBinding Background}" /></ControlTemplate></Thumb.Template>"##;
+/// The bar's look: a thin line in a wider, clear strip a finger can find. The strip
+/// reaches over both neighbours by [`BAR_ATTRS`]' margins, so the layout keeps a 5 px column.
+const BAR_TEMPLATE: &str = r##"<Thumb.Template><ControlTemplate TargetType="Thumb">
+  <Grid Background="Transparent"><Border Width="5" Background="{TemplateBinding Background}" /></Grid>
+  </ControlTemplate></Thumb.Template>"##;
+/// Size and place of a bar's `Thumb`, above its neighbours.
+const BAR_ATTRS: &str = r##"Width="17" Margin="-6,0" Canvas.ZIndex="10" Background="Transparent""##;
+
+/// Fills in a layout's bars: each is `<Thumb ... <!--bar-attrs-->><!--bar--></Thumb>`.
+pub fn fill(layout: &str) -> String {
+    layout.replace("<!--bar-attrs-->", BAR_ATTRS).replace("<!--bar-->", BAR_TEMPLATE)
+}
 
 const COBALT: Color = Color { a: 255, r: 0x00, g: 0x50, b: 0xEF };
 const CLEAR: Color = Color { a: 0, r: 0, g: 0, b: 0 };
