@@ -60,6 +60,9 @@ impl Held {
         let opened =
             sharp.cast::<IBitmapImage>()?.ImageOpened(move |sender: Ref<IInspectable>, _: Ref<RoutedEventArgs>| {
                 came.set(true);
+                if let Ok(sender) = sender.ok() {
+                    crate::ui::shell::preloaded(sender);
+                }
                 let Ok(sharp) = sender.ok().and_then(|s| s.cast::<BitmapImage>()) else { return };
                 for image in given.take().into_iter().filter_map(|w| w.upgrade()) {
                     if wants(&image).as_deref() == Some(url.as_str()) {
@@ -67,6 +70,9 @@ impl Held {
                     }
                 }
             })?;
+        if rough.is_some() {
+            crate::ui::shell::preload(&sharp)?;
+        }
         Ok(Self { rough, sharp, ready, waiting, _opened: opened })
     }
 }

@@ -15,7 +15,7 @@ use windows_core::{IInspectable, Interface, Ref, Result};
 use crate::state::comments::{Act, Branch, Foot, Mode, Shape, Thread, body};
 use crate::state::library::{age, count};
 use crate::ui::card_menu::{self, Choice};
-use crate::ui::rows::on_row;
+use crate::ui::rows::{Covers, on_row};
 use crate::ui::shell::{shell, toast};
 use crate::ui::{keep, load, named, on_click, on_enter, post, set_text};
 use crate::xaml::{
@@ -25,6 +25,9 @@ use crate::xaml::{
 };
 
 const COBALT: Color = Color { a: 255, r: 0, g: 0x50, b: 0xEF };
+/// A comment's pictures shown in its row, and how wide they are decoded.
+const THUMBS: usize = 3;
+const THUMB_DECODE_WIDTH: i32 = 180;
 /// Emotes in a comment, square, a little over the text's height.
 const EMOTE_SIZE: f64 = 20.0;
 const DIM: Color = Color { a: 255, r: 0x76, g: 0x76, b: 0x76 };
@@ -97,6 +100,26 @@ const LAYOUT: &str = r##"
                          Foreground="{ThemeResource SystemControlForegroundBaseMediumBrush}" />
             </StackPanel>
             <RichTextBlock FontSize="14" TextWrapping="Wrap" Margin="0,2,0,0" IsTextSelectionEnabled="True" />
+            <StackPanel Orientation="Horizontal" Margin="0,6,0,0" Visibility="Collapsed">
+                <Button Padding="0" Margin="0,0,4,0" BorderThickness="0" Background="Transparent" MinWidth="0"
+                        MinHeight="0" AllowFocusOnInteraction="False"><Grid>
+                  <Image Width="90" Height="90" Stretch="UniformToFill" />
+                  <Border Background="#73000000" Visibility="Collapsed">
+                    <TextBlock FontSize="18" Foreground="White" HorizontalAlignment="Center" VerticalAlignment="Center" />
+                  </Border></Grid></Button>
+                <Button Padding="0" Margin="0,0,4,0" BorderThickness="0" Background="Transparent" MinWidth="0"
+                        MinHeight="0" AllowFocusOnInteraction="False"><Grid>
+                  <Image Width="90" Height="90" Stretch="UniformToFill" />
+                  <Border Background="#73000000" Visibility="Collapsed">
+                    <TextBlock FontSize="18" Foreground="White" HorizontalAlignment="Center" VerticalAlignment="Center" />
+                  </Border></Grid></Button>
+                <Button Padding="0" Margin="0,0,4,0" BorderThickness="0" Background="Transparent" MinWidth="0"
+                        MinHeight="0" AllowFocusOnInteraction="False"><Grid>
+                  <Image Width="90" Height="90" Stretch="UniformToFill" />
+                  <Border Background="#73000000" Visibility="Collapsed">
+                    <TextBlock FontSize="18" Foreground="White" HorizontalAlignment="Center" VerticalAlignment="Center" />
+                  </Border></Grid></Button>
+            </StackPanel>
             <StackPanel Orientation="Horizontal" Margin="0,3,0,0">
               <StackPanel.Resources>
                 <Style TargetType="Button">
@@ -207,6 +230,7 @@ fn list_of(id: u64) -> Option<Rc<CommentList>> {
 pub struct CommentList {
     id: u64,
     root: IFrameworkElement,
+    covers: Covers,
     area: Cell<Option<CommentArea>>,
     /// How many the area holds, as its owner knows it.
     total: Cell<u64>,
@@ -231,6 +255,7 @@ impl CommentList {
         let shown = Rc::new(Self {
             id: NEXT_ID.fetch_add(1, Ordering::Relaxed),
             root: root.clone(),
+            covers: Covers::default(),
             area: Cell::new(None),
             total: Cell::new(0),
             by_time: Cell::new(false),
@@ -498,6 +523,7 @@ impl CommentList {
                     })
                     .unwrap_or(0);
                 fill_comment(&body_part, row, comment, shape.branch, root.is_none(), total)?;
+                self.fill_pictures(&body_part, comment)?;
             }
             Line::Foot { foot, .. } => {
                 draw_lines(&lines_part, &Shape { depth: 0, later: false, through: Vec::new(), branch: Branch::None })?;
@@ -523,9 +549,14 @@ impl CommentList {
         }
         marker.SetTag(&PropertyValue::CreateInt32(1)?)?;
         let id = self.id;
-        let meta = children(&children(&parts.GetAt(1)?.cast::<IPanel>()?)?.GetAt(2)?.cast::<IPanel>()?)?;
+        let body = children(&parts.GetAt(1)?.cast::<IPanel>()?)?;
+        let meta = children(&body.GetAt(3)?.cast::<IPanel>()?)?;
+        let thumbs = children(&body.GetAt(2)?.cast::<IPanel>()?)?;
         let foot = children(&parts.GetAt(2)?.cast::<IPanel>()?)?;
         let buttons = [
+            (thumbs.GetAt(0)?, Press::Picture(0)),
+            (thumbs.GetAt(1)?, Press::Picture(1)),
+            (thumbs.GetAt(2)?, Press::Picture(2)),
             (meta.GetAt(0)?, Press::Like),
             (meta.GetAt(2)?, Press::Reply),
             (meta.GetAt(3)?, Press::Branch),
@@ -541,6 +572,31 @@ impl CommentList {
                     let _ = shown.pressed(key, press);
                 }
             })?);
+        }
+        Ok(())
+    }
+
+    /// A comment's pictures, the first three, the last saying how many more there are.
+    fn fill_pictures(&self, body_part: &IPanel, comment: &Comment) -> Result<()> {
+        let row = children(body_part)?.GetAt(2)?;
+        show(&row, !comment.pictures.is_empty())?;
+        let thumbs = children(&row.cast::<IPanel>()?)?;
+        let more = comment.pictures.len().saturating_sub(THUMBS);
+        for slot in 0..THUMBS {
+            let button = thumbs.GetAt(slot as u32)?;
+            let Some(picture) = comment.pictures.get(slot) else {
+                show(&button, false)?;
+                continue;
+            };
+            show(&button, true)?;
+            let inside = children(&button.cast::<IContentControl>()?.Content()?.cast::<IPanel>()?)?;
+            self.covers.show(&inside.GetAt(0)?.cast::<crate::xaml::IImage>()?, &picture.url, THUMB_DECODE_WIDTH)?;
+            let badge = inside.GetAt(1)?;
+            let last = slot + 1 == THUMBS && more > 0;
+            show(&badge, last)?;
+            if last {
+                badge.cast::<crate::xaml::IBorder>()?.Child()?.cast::<ITextBlock>()?.SetText(&format!("+{more}"))?;
+            }
         }
         Ok(())
     }
@@ -562,6 +618,11 @@ impl CommentList {
                     thread.toggle_branch(rpid);
                 }
                 self.redraw(at)
+            }
+            (Line::Comment { comment, .. }, Press::Picture(slot)) => {
+                let pictures: Vec<String> = comment.pictures.iter().map(|p| p.url.clone()).collect();
+                drop(lines);
+                crate::ui::viewer::open(pictures, slot)
             }
             (Line::Comment { root, row, comment, .. }, Press::Reply) => {
                 let target = Target { root: root.unwrap_or(row.rpid), rpid: row.rpid, name: comment.name.clone() };
@@ -820,6 +881,8 @@ enum Press {
     Reply,
     /// Folds a reply's answers away, or shows them.
     Branch,
+    /// Opens the comment's pictures from this one.
+    Picture(usize),
     /// The thread foot's first or second action.
     Foot(usize),
 }
@@ -874,7 +937,7 @@ fn fill_comment(
     let now = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map_or(0, |d| d.as_secs() as i64);
     head.GetAt(3)?.cast::<ITextBlock>()?.SetText(&age(comment.ctime, now))?;
     crate::ui::emote_text::show(&parts.GetAt(1)?.cast()?, &body(row, comment), &comment.emotes, EMOTE_SIZE)?;
-    let meta = children(&parts.GetAt(2)?.cast::<IPanel>()?)?;
+    let meta = children(&parts.GetAt(3)?.cast::<IPanel>()?)?;
     let like = meta.GetAt(0)?.cast::<IContentControl>()?.Content()?.cast::<ITextBlock>()?;
     like.SetText(&format!("{} {}", if comment.liked { "已赞" } else { "赞" }, count(comment.likes)))?;
     like.SetForeground(&SolidColorBrush::CreateInstanceWithColor(if comment.liked { COBALT } else { DIM })?)?;

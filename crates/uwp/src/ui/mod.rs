@@ -37,6 +37,7 @@ pub mod splitter;
 pub mod twin_video;
 pub mod up;
 pub mod video_list;
+pub mod viewer;
 pub mod watch;
 
 use std::cell::Cell;

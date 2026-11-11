@@ -64,9 +64,12 @@ const LIST: &str = r##"
                      Foreground="{ThemeResource SystemControlForegroundBaseMediumBrush}" />
         </Grid>
         <StackPanel Grid.Column="1" Grid.Row="4" Margin="0,8,0,0" Orientation="Horizontal">
-          <Image Width="130" Height="130" Margin="0,0,4,0" Stretch="UniformToFill" />
-          <Image Width="130" Height="130" Margin="0,0,4,0" Stretch="UniformToFill" />
-          <Image Width="130" Height="130" Margin="0,0,4,0" Stretch="UniformToFill" />
+          <Button Padding="0" Margin="0,0,4,0" BorderThickness="0" Background="Transparent" MinWidth="0" MinHeight="0"
+                  AllowFocusOnInteraction="False"><Image Width="130" Height="130" Stretch="UniformToFill" /></Button>
+          <Button Padding="0" Margin="0,0,4,0" BorderThickness="0" Background="Transparent" MinWidth="0" MinHeight="0"
+                  AllowFocusOnInteraction="False"><Image Width="130" Height="130" Stretch="UniformToFill" /></Button>
+          <Button Padding="0" Margin="0,0,4,0" BorderThickness="0" Background="Transparent" MinWidth="0" MinHeight="0"
+                  AllowFocusOnInteraction="False"><Image Width="130" Height="130" Stretch="UniformToFill" /></Button>
           <TextBlock FontSize="12" VerticalAlignment="Bottom" Margin="4,0,0,0"
                      Foreground="{ThemeResource SystemControlForegroundBaseMediumBrush}" />
         </StackPanel>
@@ -255,11 +258,14 @@ impl PostList {
         shown(parts.GetAt(5), pictured)?;
         if pictured {
             let inside = parts.GetAt(5)?.cast::<IPanel>()?.Children()?.cast::<IVector<UIElement>>()?;
+            self.wire_pictures(&inside)?;
             for slot in 0..PICTURES {
                 match post.pictures.get(slot) {
                     Some(url) => {
                         shown(inside.GetAt(slot as u32), true)?;
-                        self.covers.show(&inside.GetAt(slot as u32)?.cast::<IImage>()?, url, PICTURE_DECODE_WIDTH)?;
+                        let image =
+                            inside.GetAt(slot as u32)?.cast::<IContentControl>()?.Content()?.cast::<IImage>()?;
+                        self.covers.show(&image, url, PICTURE_DECODE_WIDTH)?;
                     }
                     None => shown(inside.GetAt(slot as u32), false)?,
                 }
@@ -281,6 +287,31 @@ impl PostList {
         drop(posts);
         if near_end {
             self.load();
+        }
+        Ok(())
+    }
+
+    /// Rows are reused: a card's pictures are wired once, and find their post through the row's
+    /// data; each opens the viewer at itself.
+    fn wire_pictures(&self, inside: &IVector<UIElement>) -> Result<()> {
+        let first = inside.GetAt(0)?.cast::<IFrameworkElement>()?;
+        if first.Tag().is_ok_and(|t| t.cast::<IPropertyValue>().is_ok()) {
+            return Ok(());
+        }
+        first.SetTag(&PropertyValue::CreateString("wired")?)?;
+        let id = self.id;
+        for slot in 0..PICTURES {
+            let button = inside.GetAt(slot as u32)?.cast::<IButtonBase>()?;
+            keep(button.Click(move |sender: Ref<IInspectable>, _: Ref<RoutedEventArgs>| {
+                let at = sender
+                    .ok()
+                    .and_then(|s| s.cast::<IFrameworkElement>()?.DataContext()?.cast::<IPropertyValue>()?.GetInt32());
+                let Some(shown) = LISTS.with_borrow(|l| l.get(&id).and_then(Weak::upgrade)) else { return };
+                let gallery = at.ok().and_then(|at| shown.posts.borrow().get(at as usize).map(|p| p.gallery.clone()));
+                if let Some(gallery) = gallery {
+                    let _ = crate::ui::viewer::open(gallery, slot);
+                }
+            })?);
         }
         Ok(())
     }

@@ -39,6 +39,8 @@ pub struct Post {
     pub text: String,
     pub clip: Option<Clip>,
     pub pictures: Vec<String>,
+    /// Every picture, for the viewer: `pictures` holds the first few.
+    pub gallery: Vec<String>,
     /// How much further there is than the pictures shown.
     pub more_pictures: usize,
     /// The reposted post, in a line.
@@ -88,6 +90,7 @@ impl Post {
             pictures.clone_from(&orig.pictures);
         }
         let more_pictures = pictures.len().saturating_sub(PICTURES);
+        let gallery = pictures.clone();
         pictures.truncate(PICTURES);
         let readable = matches!(post.kind, DynamicKind::Article | DynamicKind::Opus);
         let comments = (post.comment_kind > 0 && post.comment_oid > 0).then_some((post.comment_kind, post.comment_oid));
@@ -106,6 +109,7 @@ impl Post {
             text: joined(&post.title, &post.text),
             clip,
             pictures,
+            gallery,
             more_pictures,
             quote,
             link,

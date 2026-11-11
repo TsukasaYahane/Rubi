@@ -102,6 +102,20 @@ pub fn show_under(button: &FrameworkElement, choices: Vec<Choice>) -> Result<()>
     menu(choices)?.cast::<IFlyoutBase>()?.ShowAt(button)
 }
 
+/// Offers the menu `choices` gives where `element` is right-clicked or pressed and held.
+pub fn attach_menu(element: &IFrameworkElement, choices: impl Fn() -> Vec<Choice> + 'static) -> Result<()> {
+    keep(element.cast::<IUIElement4>()?.ContextRequested(
+        move |sender: Ref<UIElement>, args: Ref<ContextRequestedEventArgs>| {
+            let (Ok(sender), Ok(args)) = (sender.ok(), args.ok()) else { return };
+            let source = args.cast::<IRoutedEventArgs>().and_then(|a| a.OriginalSource());
+            if let Ok(source) = source {
+                let _ = show_menu(sender, &source, args, choices());
+            }
+        },
+    )?);
+    Ok(())
+}
+
 fn requested(
     list: &UIElement,
     args: &ContextRequestedEventArgs,
@@ -109,7 +123,21 @@ fn requested(
 ) -> Result<()> {
     let source = args.cast::<IRoutedEventArgs>()?.OriginalSource()?;
     let row = source.cast::<IFrameworkElement>()?.DataContext()?.cast::<IPropertyValue>()?.GetInt32()?;
-    let Some(choices) = choices(row as usize).filter(|c| !c.is_empty()) else { return Ok(()) };
+    let Some(choices) = choices(row as usize) else { return Ok(()) };
+    show_menu(list, &source, args, choices)
+}
+
+/// Shows `choices` at the pointer over `target`, or by `source` when asked from the keyboard.
+fn show_menu(
+    target: &UIElement,
+    source: &IInspectable,
+    args: &ContextRequestedEventArgs,
+    choices: Vec<Choice>,
+) -> Result<()> {
+    if choices.is_empty() {
+        return Ok(());
+    }
+    let list = target;
     let asked = args.cast::<IContextRequestedEventArgs>()?;
     asked.SetHandled(true)?;
     let mut point = Point::default();

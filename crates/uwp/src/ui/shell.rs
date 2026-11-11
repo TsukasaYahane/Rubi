@@ -96,6 +96,8 @@ const LAYOUT: &str = r##"
   </StackPanel>
   <ContentControl x:Name="Page" Grid.Column="2" Grid.Row="1" HorizontalContentAlignment="Stretch"
                   VerticalContentAlignment="Stretch" IsTabStop="False" />
+  <Grid x:Name="Viewer" Grid.Row="1" Grid.RowSpan="2" Grid.ColumnSpan="3" Visibility="Collapsed" />
+  <Canvas x:Name="Preload" Width="1" Height="1" Opacity="0" IsHitTestVisible="False" />
   <Border x:Name="Toast" Grid.Column="2" Grid.Row="1" HorizontalAlignment="Center" VerticalAlignment="Bottom"
           Margin="0,0,0,24" Padding="14,7" Background="#E6000000" Visibility="Collapsed" IsHitTestVisible="False">
     <TextBlock x:Name="ToastText" FontSize="13" Foreground="White" TextWrapping="Wrap" />
@@ -378,6 +380,11 @@ impl Shell {
             .unwrap_or(false)
     }
 
+    /// The layer over the page and the navigation that the picture viewer fills.
+    pub fn viewer_host(&self) -> Result<crate::xaml::IPanel> {
+        named(&self.root, "Viewer")
+    }
+
     pub fn prefs(&self) -> Prefs {
         self.prefs.get()
     }
@@ -499,4 +506,42 @@ impl Shell {
 
 fn visible(root: &IFrameworkElement, name: &str, on: bool) -> Result<()> {
     named::<IUIElement>(root, name)?.SetVisibility(if on { Visibility::Visible } else { Visibility::Collapsed })
+}
+
+/// Pictures being loaded off screen. XAML loads a picture only once an element in the tree
+/// shows it: a sharp copy waits here, unseen, until it has come and takes the rough one's place.
+const PRELOADS_HELD: u32 = 80;
+
+/// Starts loading `bitmap`, unseen; [`preloaded`] lets it go once it has come.
+pub fn preload(bitmap: &crate::xaml::BitmapImage) -> Result<()> {
+    let Some(shell) = shell() else { return Ok(()) };
+    let canvas = named::<crate::xaml::IPanel>(&shell.root, "Preload")?;
+    let children = canvas.Children()?.cast::<windows_collections::IVector<UIElement>>()?;
+    if children.Size()? >= PRELOADS_HELD {
+        children.RemoveAt(0)?;
+    }
+    let image =
+        load(r#"<Image xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation" Width="1" Height="1" />"#)?;
+    image.cast::<crate::xaml::IImage>()?.SetSource(bitmap)?;
+    children.Append(&image.cast::<UIElement>()?)
+}
+
+/// Lets go of a preloaded picture: it has come, or will not.
+pub fn preloaded(bitmap: &windows_core::IInspectable) {
+    let Some(shell) = shell() else { return };
+    let Ok(canvas) = named::<crate::xaml::IPanel>(&shell.root, "Preload") else { return };
+    let Ok(children) = canvas.Children().and_then(|c| c.cast::<windows_collections::IVector<UIElement>>()) else {
+        return;
+    };
+    let size = children.Size().unwrap_or(0);
+    for at in (0..size).rev() {
+        let shows = children
+            .GetAt(at)
+            .and_then(|c| c.cast::<crate::xaml::IImage>())
+            .and_then(|i| i.Source())
+            .is_ok_and(|s| s.cast::<windows_core::IInspectable>().is_ok_and(|s| &s == bitmap));
+        if shows {
+            let _ = children.RemoveAt(at);
+        }
+    }
 }
