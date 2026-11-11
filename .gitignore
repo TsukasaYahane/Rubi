@@ -12,3 +12,7 @@ local.properties
 build/
 /tools/uwp-bindgen/target
 /tools/uwp-bindgen/Cargo.lock
+
+# Kept local, not published
+/CLAUDE.md
+/docs/
