@@ -22,6 +22,7 @@ use crate::state::settings::quality_patch;
 use crate::ui::control_bar::{self, ControlBar};
 use crate::ui::danmaku::{Host, Overlay};
 use crate::ui::feed;
+use crate::ui::filling::Filling;
 use crate::ui::keep;
 use crate::ui::media;
 use crate::ui::player_actions::Actions;
@@ -240,9 +241,7 @@ struct Page {
     /// The position is being shown, not chosen.
     showing_position: Rc<Cell<bool>>,
     seeks: Arc<AtomicU64>,
-    /// Filling the screen, or only the window when `window_full`.
-    full: Rc<Cell<bool>>,
-    window_full: Rc<Cell<bool>>,
+    filling: Rc<Filling>,
 }
 
 fn page() -> Option<Page> {
@@ -323,54 +322,32 @@ fn reset_side() {
 /// Enters or leaves fullscreen. The video element stays where it is and only the page around
 /// it folds away, so the picture does not restart its swap chain and the danmaku stay over it.
 pub fn toggle_full() {
-    let on = !page().is_some_and(|p| p.full.get() && !p.window_full.get());
-    let _ = set_full_as(on, false);
+    let _ = page().map(|p| p.filling.toggle(false).and_then(|changed| filled(&p, changed)));
 }
 
 /// 窗口全屏: the video fills the window, the screen left as it is.
 fn toggle_window_full() {
-    let on = !page().is_some_and(|p| p.full.get() && p.window_full.get());
-    let _ = set_full_as(on, true);
+    let _ = page().map(|p| p.filling.toggle(true).and_then(|changed| filled(&p, changed)));
 }
 
-fn set_full(on: bool) -> Result<()> {
-    let window = page().is_some_and(|p| p.window_full.get());
-    set_full_as(on, on && window)
+fn leave_full() -> Result<()> {
+    page().map_or(Ok(()), |p| p.filling.leave().and_then(|changed| filled(&p, changed)))
 }
 
-/// Fills the screen, or only the window when `window`; or neither.
-fn set_full_as(on: bool, window: bool) -> Result<()> {
-    let (Some(page), Some(shell)) = (page(), shell()) else { return Ok(()) };
-    let (was, was_window) = (page.full.get(), page.window_full.get());
-    if was == on && (!on || was_window == window) {
+/// The page follows a change of [`Filling`].
+fn filled(page: &Page, changed: bool) -> Result<()> {
+    if !changed {
         return Ok(());
     }
-    page.full.set(on);
-    page.window_full.set(on && window);
-    match (on, window) {
-        (true, true) => {
-            if shell.is_filling_screen() {
-                shell.fill_screen(false)?;
-            }
-            shell.immersive(true)?;
-        }
-        (true, false) => shell.fill_screen(true)?,
-        (false, _) if was_window => shell.immersive(false)?,
-        (false, _) => shell.fill_screen(false)?,
-    }
-    let glyph = if on && window { "\u{E73F}" } else { "\u{E9A6}" };
-    named::<IFontIcon>(&page.root, "WindowFullIcon")?.SetGlyph(glyph)?;
+    named::<IFontIcon>(&page.root, "WindowFullIcon")?.SetGlyph(page.filling.window_glyph())?;
     apply_layout(&page.root)?;
-    page.bar.set_full(on && !window)?;
+    page.bar.set_full(page.filling.screen())?;
     page.bar.wake()
 }
 
 /// The window left fullscreen by itself (the system's own control): the page follows.
 pub fn window_changed() {
-    let filling = page().is_some_and(|p| p.full.get() && !p.window_full.get());
-    if filling && !shell().is_some_and(|s| s.is_filling_screen()) {
-        let _ = set_full(false);
-    }
+    let _ = page().map(|p| p.filling.follow_system().and_then(|changed| filled(&p, changed)));
 }
 
 /// Keys of the video page; false when the key is not one of them.
@@ -382,8 +359,8 @@ pub fn key(key: VirtualKey) -> bool {
     if typing {
         return false;
     }
-    if key == VirtualKey::Escape && page.full.get() {
-        let _ = set_full(false);
+    if key == VirtualKey::Escape && page.filling.on() {
+        let _ = leave_full();
         return true;
     }
     if !shell().is_some_and(|s| s.prefs().shortcuts) {
@@ -475,7 +452,7 @@ pub fn resized() {
 /// Beside the video on a wide window; under it otherwise, the video keeping 16:9.
 fn apply_layout(root: &IFrameworkElement) -> Result<()> {
     let Some(shell) = shell() else { return Ok(()) };
-    let full = page().is_some_and(|p| p.full.get());
+    let full = page().is_some_and(|p| p.filling.on());
     if page().is_some_and(|p| p.feed) {
         return apply_feed_layout(root, shell.class() == WindowClass::Wide, full);
     }
@@ -514,7 +491,7 @@ fn apply_layout(root: &IFrameworkElement) -> Result<()> {
 /// Stops the video and lets its player go.
 pub fn leave() {
     watch::stop();
-    let _ = set_full(false);
+    let _ = leave_full();
     PAUSED_FOR_BLUR.set(false);
     let waiting = page().and_then(|p| {
         p.bar.keep_volume();
@@ -610,8 +587,7 @@ pub fn open(feed: bool, bvid: &str, title: &str, uploader: &str) -> Result<()> {
         seek_held: Rc::new(Cell::new(Instant::now())),
         showing_position: Rc::default(),
         seeks: Arc::default(),
-        full: Rc::new(Cell::new(false)),
-        window_full: Rc::default(),
+        filling: Rc::default(),
     };
     PAGE.with(|p| *p.borrow_mut() = Some(opened));
     on_click(&root, "ActDanmaku", toggle_danmaku)?;

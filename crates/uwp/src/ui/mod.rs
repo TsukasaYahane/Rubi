@@ -8,6 +8,7 @@ pub mod comment_list;
 pub mod control_bar;
 pub mod danmaku;
 pub mod feed;
+pub mod filling;
 pub mod folder_edit;
 pub mod follow;
 pub mod home;

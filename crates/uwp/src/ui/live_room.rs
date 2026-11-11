@@ -20,6 +20,7 @@ use crate::state::live::CHAT_MOST;
 use crate::state::quality::Offer;
 use crate::ui::control_bar::{self, ControlBar};
 use crate::ui::danmaku::{Host, Overlay};
+use crate::ui::filling::Filling;
 use crate::ui::pip;
 use crate::ui::quality;
 use crate::ui::rows::{add_rows, on_row};
@@ -143,7 +144,7 @@ struct Room {
     channel: Arc<Mutex<Option<Arc<LiveChannel>>>>,
     chat: RefCell<Vec<String>>,
     next_danmaku: Cell<u64>,
-    full: Cell<bool>,
+    filling: Filling,
     bar: Rc<ControlBar>,
     video: Rc<TwinVideo>,
     standby: RefCell<Option<(MediaPlayer, MediaSource, Offer)>>,
@@ -190,7 +191,7 @@ fn toggle_pip() {
     let (Some(player), Some(source)) = (room.player.borrow_mut().take(), room.source.borrow_mut().take()) else {
         return;
     };
-    let _ = set_full(&room, false);
+    let _ = leave_full(&room);
     let _ = notice(&room.root, PIP_GLYPH, IN_PIP);
     let shown =
         pip::Room { id: room.room_id, title: room.title.clone(), uploader: room.uploader.clone(), uid: room.uid };
@@ -221,7 +222,7 @@ pub fn leave() {
     let Some(room) = ROOM.with_borrow_mut(Option::take) else { return };
     let waiting = room.standby.borrow_mut().take();
     room.bar.keep_volume();
-    let _ = set_full(&room, false);
+    let _ = leave_full(&room);
     room.video.clear();
     if let Some((player, source, _)) = waiting {
         media::close(Some(player), Some(source));
@@ -273,7 +274,7 @@ pub fn open(room_id: u64, title: &str, uploader: &str, uid: u64) -> Result<()> {
         channel: Arc::default(),
         chat: RefCell::default(),
         next_danmaku: Cell::new(1),
-        full: Cell::new(false),
+        filling: Filling::default(),
         bar: ControlBar::attach(&root, "Stage", &["Back"], run, || room().map(|r| r.bar.clone()), set_sound)?,
         video: TwinVideo::new(&root, run, || room().map(|r| r.video.clone()))?,
         standby: RefCell::default(),
@@ -283,6 +284,8 @@ pub fn open(room_id: u64, title: &str, uploader: &str, uid: u64) -> Result<()> {
     ROOM.with_borrow_mut(|r| *r = Some(shown.clone()));
     on_click(&root, "Back", go_back)?;
     on_click(&root, "Full", toggle_full)?;
+    on_click(&root, "WindowFull", toggle_window_full)?;
+    named::<IUIElement>(&root, "WindowFull")?.SetVisibility(Visibility::Visible)?;
     on_click(&root, "DanmakuSwitch", toggle_danmaku)?;
     on_click(&root, "Quality", choose_quality)?;
     on_click(&root, "Pip", toggle_pip)?;
@@ -549,7 +552,7 @@ fn heard(events: Vec<LiveEvent>) -> Result<()> {
 /// The list beside the picture on a wide window, below it otherwise.
 fn apply_layout(root: &IFrameworkElement) -> Result<()> {
     let Some(shell) = shell() else { return Ok(()) };
-    let full = room().is_some_and(|r| r.full.get());
+    let full = room().is_some_and(|r| r.filling.on());
     let wide = shell.class() == WindowClass::Wide;
     let shown = |on| if on { Visibility::Visible } else { Visibility::Collapsed };
     let pixels = |value| GridLength { value, grid_unit_type: GridUnitType::Pixel };
@@ -634,19 +637,27 @@ fn go_back() {
 }
 
 fn toggle_full() {
-    if let Some(room) = room() {
-        let _ = set_full(&room, !room.full.get());
-    }
+    let _ = room().map(|r| r.filling.toggle(false).and_then(|changed| filled(&r, changed)));
 }
 
-fn set_full(room: &Room, on: bool) -> Result<()> {
-    if room.full.replace(on) == on {
+/// 窗口全屏: the picture fills the window, the screen left as it is.
+fn toggle_window_full() {
+    let _ = room().map(|r| r.filling.toggle(true).and_then(|changed| filled(&r, changed)));
+}
+
+fn leave_full(room: &Room) -> Result<()> {
+    room.filling.leave().and_then(|changed| filled(room, changed))
+}
+
+/// The page follows a change of [`Filling`].
+fn filled(room: &Room, changed: bool) -> Result<()> {
+    if !changed {
         return Ok(());
     }
-    let Some(shell) = shell() else { return Ok(()) };
-    shell.fill_screen(on)?;
+    named::<IFontIcon>(&room.root, "WindowFullIcon")?.SetGlyph(room.filling.window_glyph())?;
     apply_layout(&room.root)?;
-    room.bar.set_full(on)
+    room.bar.set_full(room.filling.screen())?;
+    room.bar.wake()
 }
 
 fn toggle_danmaku() {
@@ -659,12 +670,7 @@ fn toggle_danmaku() {
 
 /// The window left fullscreen by itself: the page follows.
 pub fn window_changed() {
-    if let (Some(room), Some(shell)) = (room(), shell())
-        && room.full.get()
-        && !shell.is_filling_screen()
-    {
-        let _ = set_full(&room, false);
-    }
+    let _ = room().map(|r| r.filling.follow_system().and_then(|changed| filled(&r, changed)));
 }
 
 /// Keys of the room; false when the key is not one of them.
@@ -673,8 +679,8 @@ pub fn key(key: VirtualKey) -> bool {
     let typing = named::<IControl>(&room.root, "SendText")
         .and_then(|c| c.FocusState())
         .is_ok_and(|f| f != FocusState::Unfocused);
-    if key == VirtualKey::Escape && room.full.get() {
-        let _ = set_full(&room, false);
+    if key == VirtualKey::Escape && room.filling.on() {
+        let _ = leave_full(&room);
         return true;
     }
     if typing || !shell().is_some_and(|s| s.prefs().shortcuts) {
