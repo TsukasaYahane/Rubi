@@ -496,7 +496,12 @@ impl CardGrid {
     fn apply_cell(&self) -> Result<()> {
         let Some(shell) = shell() else { return Ok(()) };
         let width = self.grid.ActualWidth()?;
-        let columns = shell.class().columns(width);
+        // A narrow window can show one column instead of two.
+        let columns = if shell.class() == crate::state::layout::WindowClass::Narrow && shell.prefs().single_column {
+            1
+        } else {
+            shell.class().columns(width)
+        };
         if width <= 0.0 || self.fitted.get() == (width, columns) {
             return Ok(());
         }

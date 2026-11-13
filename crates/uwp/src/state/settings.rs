@@ -89,6 +89,8 @@ pub struct Prefs {
     pub danmaku: Look,
     /// What live rooms hold back.
     pub live_filter: LiveFilter,
+    /// A narrow window shows the feed in one column instead of two.
+    pub single_column: bool,
 }
 
 impl Default for Prefs {
@@ -97,6 +99,7 @@ impl Default for Prefs {
             words: false, pause_on_blur: true, shortcuts: true, volume: DEFAULT_VOLUME,
             danmaku: Look::default(),
             live_filter: LiveFilter::default(),
+            single_column: false,
         }
     }
 }
@@ -193,7 +196,7 @@ mod tests {
     fn prefs_survive_a_round_trip() {
         let danmaku = Look { area: 1.0, speed: 1.5, size: 26.0, opacity: 0.6, top: false, ..Look::default() };
         let live_filter = LiveFilter { gifts: false, popups: true, effects: false };
-        let prefs = Prefs { words: true, pause_on_blur: false, shortcuts: true, volume: 35, danmaku, live_filter };
+        let prefs = Prefs { words: true, pause_on_blur: false, shortcuts: true, volume: 35, danmaku, live_filter, single_column: false };
         assert_eq!(Prefs::parse(&prefs.to_text()), prefs);
         assert_eq!(Prefs::parse("live_volume=250").volume, 100);
         assert_eq!(Prefs::parse("live_volume=loud").volume, DEFAULT_VOLUME);

@@ -33,7 +33,7 @@ const LAYOUT: &str = r##"
     <RowDefinition Height="*" />
   </Grid.RowDefinitions>
   <Grid Margin="16,8,16,8">
-    <Grid.ColumnDefinitions><ColumnDefinition Width="Auto" /><ColumnDefinition Width="*" /><ColumnDefinition Width="Auto" /><ColumnDefinition Width="Auto" /><ColumnDefinition Width="Auto" /></Grid.ColumnDefinitions>
+    <Grid.ColumnDefinitions><ColumnDefinition Width="Auto" /><ColumnDefinition Width="*" /><ColumnDefinition Width="Auto" /><ColumnDefinition Width="Auto" /><ColumnDefinition Width="Auto" /><ColumnDefinition Width="Auto" /></Grid.ColumnDefinitions>
     <StackPanel Orientation="Horizontal">
       <StackPanel.Resources>
         <Style TargetType="Button">
@@ -59,6 +59,8 @@ const LAYOUT: &str = r##"
         <TextBlock x:Name="PortraitLabel" Text="竖屏" FontSize="13" Margin="6,0,0,0" />
       </StackPanel>
     </Button>
+    <Button x:Name="Columns" Grid.Column="5" Background="Transparent" BorderThickness="1" BorderBrush="#3A3A3A"
+            Padding="8,2" Margin="8,0,0,0" VerticalAlignment="Center" FontSize="13" Visibility="Collapsed" />
     <Button x:Name="Search" Grid.Column="3" Visibility="Collapsed" Background="Transparent" BorderThickness="0"
             Padding="8,2" VerticalAlignment="Center"><FontIcon Glyph="&#xE721;" FontSize="14" /></Button>
   </Grid>
@@ -120,6 +122,12 @@ impl HomePage {
         on_click(&page.root, "Refresh", move || {
             if let Some(page) = weak.upgrade() {
                 let _ = page.refresh();
+            }
+        })?;
+        let turning = Rc::downgrade(&page);
+        on_click(&page.root, "Columns", move || {
+            if let Some(page) = turning.upgrade() {
+                let _ = page.toggle_columns();
             }
         })?;
         on_click(&page.root, "Search", || show_tab(Tab::Search))?;
@@ -192,7 +200,16 @@ impl HomePage {
         named::<IUIElement>(&self.root, "Tab2")?.SetVisibility(wide_only)?;
         named::<IUIElement>(&self.root, "Tab3")?.SetVisibility(wide_only)?;
         // A narrow window keeps the 竖屏 entry as its icon alone.
-        named::<IUIElement>(&self.root, "PortraitLabel")?.SetVisibility(wide_only)
+        named::<IUIElement>(&self.root, "PortraitLabel")?.SetVisibility(wide_only)?;
+        // Only a narrow window chooses between one column and two.
+        named::<IUIElement>(&self.root, "Columns")?.SetVisibility(if narrow {
+            Visibility::Visible
+        } else {
+            Visibility::Collapsed
+        })?;
+        let single = shell().is_some_and(|s| s.prefs().single_column);
+        let word = if single { "单列" } else { "双列" };
+        named::<IContentControl>(&self.root, "Columns")?.SetContent(&PropertyValue::CreateString(word)?)
     }
 
     fn reopen(&self) -> Result<()> {
@@ -246,6 +263,18 @@ impl HomePage {
         };
         self.say(&said);
         Ok(())
+    }
+
+    /// Switches a narrow window between one column and two.
+    fn toggle_columns(self: &Rc<Self>) -> Result<()> {
+        let Some(shell) = shell() else { return Ok(()) };
+        let mut prefs = shell.prefs();
+        prefs.single_column = !prefs.single_column;
+        shell.set_prefs(prefs)?;
+        for grid in &self.grids {
+            grid.resized();
+        }
+        self.style()
     }
 
     /// What the status line says for `tab`: what went wrong, else what the last refresh did.
