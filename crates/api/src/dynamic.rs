@@ -61,6 +61,22 @@ fn emotes_of(nodes: &Value, into: &mut std::collections::BTreeMap<String, String
     }
 }
 
+/// The words of a rich-text node list, joined as they read.
+pub(crate) fn nodes_text(nodes: &Value) -> String {
+    nodes
+        .as_array()
+        .map(|items| {
+            items
+                .iter()
+                .map(|n| {
+                    let orig = str_of(&n["orig_text"]);
+                    if orig.is_empty() { str_of(&n["text"]) } else { orig }
+                })
+                .collect::<String>()
+        })
+        .unwrap_or_default()
+}
+
 pub(crate) fn dynamic_of(item: &Value) -> Dynamic {
     let author = &item["modules"]["module_author"];
     let md = &item["modules"]["module_dynamic"];
@@ -141,6 +157,13 @@ pub(crate) fn dynamic_of(item: &Value) -> Dynamic {
                 break;
             }
         }
+    }
+    // The text field is sometimes empty while the nodes that build it are not.
+    if d.text.is_empty() {
+        d.text = nodes_text(&md["desc"]["rich_text_nodes"]);
+    }
+    if d.text.is_empty() {
+        d.text = nodes_text(&md["major"]["opus"]["summary"]["rich_text_nodes"]);
     }
     if d.text.is_empty()
         && let Some(orig) = item["orig"].as_object()
