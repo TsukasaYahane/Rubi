@@ -172,7 +172,10 @@ impl Videos {
     pub async fn resolve(&self, video: VideoRef) -> Result<String> {
         match video {
             VideoRef::Bvid(bvid) => Ok(bvid),
-            VideoRef::Aid(aid) => Ok(self.api.bvid_of(aid).await?),
+            VideoRef::Aid(aid) => match rubi_model::bvid_of_aid(aid) {
+                Some(bvid) => Ok(bvid),
+                None => Ok(self.api.bvid_of(aid).await?),
+            },
             VideoRef::Short(url) => {
                 let target = self.api.expand_short(&url).await?.unwrap_or_default();
                 match find_video_ref(&target) {

@@ -8,13 +8,14 @@ use std::rc::{Rc, Weak};
 use std::sync::atomic::{AtomicU64, Ordering};
 
 use rubi_core::{CommentArea, ThreadView};
-use rubi_model::{Comment, ThreadRow};
+use rubi_model::{Comment, CommentRef, ThreadRow};
 use windows_collections::IVector;
 use windows_core::{IInspectable, Interface, Ref, Result};
 
 use crate::state::comments::{Act, Branch, Foot, Mode, Shape, Thread, body};
 use crate::state::library::{age, count};
 use crate::ui::card_menu::{self, Choice};
+use crate::ui::mentions::Mentions;
 use crate::ui::rows::{Covers, on_row};
 use crate::ui::shell::{shell, toast};
 use crate::ui::{keep, load, named, on_click, on_enter, post, set_text};
@@ -48,7 +49,7 @@ const LAYOUT: &str = r##"
   <Grid.RowDefinitions>
     <RowDefinition Height="Auto" /><RowDefinition Height="Auto" /><RowDefinition Height="*" /><RowDefinition Height="Auto" />
   </Grid.RowDefinitions>
-  <Grid Margin="16,6,8,2">
+  <Grid x:Name="CommentHead" Margin="16,6,8,2">
     <Grid.ColumnDefinitions>
       <ColumnDefinition Width="*" /><ColumnDefinition Width="Auto" /><ColumnDefinition Width="Auto" />
       <ColumnDefinition Width="Auto" />
@@ -96,6 +97,8 @@ const LAYOUT: &str = r##"
                       Visibility="Collapsed"><TextBlock Text="UP" FontSize="10" Foreground="#0050EF" /></Border>
               <Border BorderBrush="#0050EF" BorderThickness="1" Padding="3,0" Margin="8,0,0,0" VerticalAlignment="Center"
                       Visibility="Collapsed"><TextBlock Text="置顶" FontSize="10" Foreground="#0050EF" /></Border>
+              <Border BorderBrush="#0050EF" BorderThickness="1" Padding="3,0" Margin="8,0,0,0" VerticalAlignment="Center"
+                      Visibility="Collapsed"><TextBlock Text="笔记" FontSize="10" Foreground="#0050EF" /></Border>
               <TextBlock FontSize="11" Margin="8,0,0,0" VerticalAlignment="Center"
                          Foreground="{ThemeResource SystemControlForegroundBaseMediumBrush}" />
             </StackPanel>
@@ -137,6 +140,8 @@ const LAYOUT: &str = r##"
               <Button Margin="14,0,0,0"><TextBlock Text="回复" FontSize="12"
                       Foreground="{ThemeResource SystemControlForegroundBaseMediumBrush}" /></Button>
               <Button Margin="14,0,0,0" Visibility="Collapsed"><TextBlock FontSize="12" Foreground="#0050EF" /></Button>
+              <Button Margin="14,0,0,0" Visibility="Collapsed"><TextBlock Text="查看完整笔记 ›" FontSize="12"
+                      Foreground="#0050EF" /></Button>
             </StackPanel>
           </StackPanel>
           <StackPanel Orientation="Horizontal" Margin="22,2,0,10" Visibility="Collapsed">
@@ -163,9 +168,14 @@ const LAYOUT: &str = r##"
   <Grid Grid.Row="3" Padding="16,6" BorderThickness="0,1,0,0"
         BorderBrush="{ThemeResource SystemControlForegroundBaseLowBrush}">
     <Grid.Resources><CornerRadius x:Key="ControlCornerRadius">0</CornerRadius></Grid.Resources>
-    <Grid.RowDefinitions><RowDefinition Height="Auto" /><RowDefinition Height="Auto" /></Grid.RowDefinitions>
+    <Grid.RowDefinitions>
+      <RowDefinition Height="Auto" /><RowDefinition Height="Auto" /><RowDefinition Height="Auto" />
+    </Grid.RowDefinitions>
     <Grid.ColumnDefinitions><ColumnDefinition Width="*" /><ColumnDefinition Width="Auto" /></Grid.ColumnDefinitions>
-    <StackPanel x:Name="ReplyTarget" Grid.ColumnSpan="2" Orientation="Horizontal" Margin="0,0,0,4"
+    <ContentControl x:Name="MentionList" Grid.ColumnSpan="2" Visibility="Collapsed" IsTabStop="False" MaxHeight="200"
+                    HorizontalContentAlignment="Stretch" Margin="0,0,0,6" BorderThickness="1"
+                    BorderBrush="{ThemeResource SystemControlForegroundBaseLowBrush}" />
+    <StackPanel x:Name="ReplyTarget" Grid.Row="1" Grid.ColumnSpan="2" Orientation="Horizontal" Margin="0,0,0,4"
                 Visibility="Collapsed">
       <TextBlock Text="回复" FontSize="12" VerticalAlignment="Center"
                  Foreground="{ThemeResource SystemControlForegroundBaseMediumBrush}" />
@@ -174,12 +184,15 @@ const LAYOUT: &str = r##"
       <Button x:Name="CancelReply" Background="Transparent" BorderThickness="0" Padding="8,0" MinHeight="0"
               VerticalAlignment="Center" AutomationProperties.Name="取消回复"><FontIcon Glyph="&#xE711;" FontSize="10" /></Button>
     </StackPanel>
-    <TextBox x:Name="CommentText" Grid.Row="1" PlaceholderText="发一条友善的评论" MaxLength="1000" />
-    <Button x:Name="SendComment" Grid.Row="1" Grid.Column="1" Content="发送" Margin="8,0,0,0" Background="#0050EF"
+    <TextBox x:Name="CommentText" Grid.Row="2" PlaceholderText="发一条友善的评论 · 打 @ 提到别人" MaxLength="1000" />
+    <Button x:Name="SendComment" Grid.Row="2" Grid.Column="1" Content="发送" Margin="8,0,0,0" Background="#0050EF"
             Foreground="White" BorderThickness="0" Padding="14,5" />
   </Grid>
 </Grid>"##;
-const PLACEHOLDER: &str = "发一条友善的评论";
+const PLACEHOLDER: &str = "发一条友善的评论 · 打 @ 提到别人";
+/// A comment a notice pointed at.
+const FOCUSED: Color = Color { a: 0x26, r: 0, g: 0x50, b: 0xEF };
+const CLEAR: Color = Color { a: 0, r: 0, g: 0, b: 0 };
 
 /// A comment the list holds: a pinned one on its own, or a thread.
 enum Block {
@@ -247,6 +260,13 @@ pub struct CommentList {
     /// Bumped when the list starts over: answers for an earlier one are dropped.
     turn: Cell<u64>,
     close: RefCell<Option<Box<dyn Fn()>>>,
+    /// Says how to come back before a 笔记 opens over the page.
+    leaving: RefCell<Option<Box<dyn Fn()>>>,
+    /// The comment a notice pointed at: its thread comes first, the comment marked.
+    focus: Cell<Option<CommentRef>>,
+    /// The focused thread is still to be read before the first page.
+    focus_pending: Cell<bool>,
+    mentions: RefCell<Option<Rc<Mentions>>>,
 }
 
 impl CommentList {
@@ -269,6 +289,10 @@ impl CommentList {
             target: RefCell::default(),
             turn: Cell::new(0),
             close: RefCell::default(),
+            leaving: RefCell::default(),
+            focus: Cell::new(None),
+            focus_pending: Cell::new(false),
+            mentions: RefCell::default(),
         });
         LISTS.with_borrow_mut(|l| l.insert(shown.id, Rc::downgrade(&shown)));
         let id = shown.id;
@@ -297,7 +321,14 @@ impl CommentList {
             }
         };
         on_click(&root, "SendComment", send.clone())?;
-        on_enter(&root, "CommentText", send)?;
+        // Enter picks from the @ list while it is open; its own handler, after this one, does that.
+        on_enter(&root, "CommentText", move || {
+            let picking = list_of(id).is_some_and(|s| s.mentions.borrow().as_ref().is_some_and(|m| m.is_open()));
+            if !picking {
+                send();
+            }
+        })?;
+        *shown.mentions.borrow_mut() = Some(Mentions::attach(&root, "CommentText", "MentionList")?);
         on_click(&root, "CancelReply", move || {
             if let Some(shown) = list_of(id) {
                 let _ = shown.set_target(None);
@@ -329,6 +360,37 @@ impl CommentList {
         named::<IUIElement>(&self.root, "CloseComments")?.SetVisibility(Visibility::Visible)
     }
 
+    /// Puts `above` at the top of the list, scrolling with it, and the count and sort under it:
+    /// for a page that is read first and commented on after (an article).
+    pub fn put_above(&self, above: &UIElement) -> Result<()> {
+        let grid = self.root.cast::<IPanel>()?.Children()?.cast::<IVector<UIElement>>()?;
+        let head = load(r#"<StackPanel xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation" />"#)?;
+        let stacked = head.cast::<IPanel>()?.Children()?.cast::<IVector<UIElement>>()?;
+        stacked.Append(above)?;
+        for name in ["CommentHead", "CommentStatus"] {
+            let part = named::<UIElement>(&self.root, name)?;
+            let mut at = 0;
+            if grid.IndexOf(&part, &mut at)? {
+                grid.RemoveAt(at)?;
+            }
+            stacked.Append(&part)?;
+        }
+        named::<IListViewBase>(&self.root, "CommentRows")?.SetHeader(&head.cast::<IInspectable>()?)
+    }
+
+    /// Says how to come back to the page before a 笔记 opens over it.
+    pub fn before_leaving(&self, leaving: impl Fn() + 'static) {
+        *self.leaving.borrow_mut() = Some(Box::new(leaving));
+    }
+
+    /// Shows `area` with the thread of `focus` first and the comment marked.
+    pub fn show_focused(&self, area: CommentArea, total: u64, focus: CommentRef) -> Result<()> {
+        self.area.set(Some(area));
+        self.focus.set(Some(focus));
+        self.total.set(total);
+        self.restart()
+    }
+
     /// Shows `area`, which holds about `total` comments (0 when not known).
     pub fn show(&self, area: CommentArea, total: u64) -> Result<()> {
         if self.area.replace(Some(area)) == Some(area) && !self.blocks.borrow().is_empty() {
@@ -347,6 +409,7 @@ impl CommentList {
         *self.next.borrow_mut() = None;
         self.loading.set(false);
         self.set_target(None)?;
+        self.focus_pending.set(self.focus.get().is_some());
         self.items()?.Clear()?;
         self.say("正在读取…");
         self.load();
@@ -381,6 +444,21 @@ impl CommentList {
         }
         let (id, turn, by_time, offset) = (self.id, self.turn.get(), self.by_time.get(), self.next.borrow().clone());
         let (dispatcher, core) = (shell.dispatcher.clone(), backend.clone());
+        if let Some(focus) = self.focus.get().filter(|_| self.focus_pending.replace(false)) {
+            // The focused thread and the first page are read side by side.
+            backend.spawn(async move {
+                let comments = &core.services.comments;
+                let (thread, page) =
+                    tokio::join!(comments.focus(area, focus.root), comments.page(area, by_time, offset.as_deref()));
+                let (thread, page) = (thread.map_err(|e| e.to_string()), page.map_err(|e| e.to_string()));
+                post(&dispatcher, move || {
+                    if let Some(shown) = list_of(id).filter(|s| s.turn.get() == turn) {
+                        let _ = shown.took_focus(thread, page);
+                    }
+                });
+            });
+            return;
+        }
         backend.spawn(async move {
             let page = core.services.comments.page(area, by_time, offset.as_deref()).await.map_err(|e| e.to_string());
             post(&dispatcher, move || {
@@ -391,15 +469,33 @@ impl CommentList {
         });
     }
 
+    /// The focused thread and the first page came: the thread goes first.
+    fn took_focus(
+        &self,
+        thread: std::result::Result<ThreadView, String>,
+        page: std::result::Result<rubi_core::CommentsPage, String>,
+    ) -> Result<()> {
+        match thread {
+            Ok(view) => self.push_block(Block::Thread(Thread::new(view)))?,
+            Err(_) => {
+                self.focus.set(None);
+                toast("无法定位到消息里的评论（可能已被删除或折叠）");
+            }
+        }
+        self.took(page)
+    }
+
     fn took(&self, page: std::result::Result<rubi_core::CommentsPage, String>) -> Result<()> {
         self.loading.set(false);
+        let focused = self.focus.get().map(|f| f.root);
         match page {
             Ok(page) => {
-                let blocks = page
-                    .pinned
-                    .into_iter()
-                    .map(Block::Pinned)
-                    .chain(page.threads.into_iter().map(|view| Block::Thread(Thread::new(view))));
+                let blocks = page.pinned.into_iter().map(Block::Pinned).chain(
+                    page.threads
+                        .into_iter()
+                        .filter(|view| Some(view.root_rpid) != focused)
+                        .map(|view| Block::Thread(Thread::new(view))),
+                );
                 for block in blocks {
                     self.push_block(block)?;
                 }
@@ -523,6 +619,8 @@ impl CommentList {
                     })
                     .unwrap_or(0);
                 fill_comment(&body_part, row, comment, shape.branch, root.is_none(), total)?;
+                let marked = self.focus.get().is_some_and(|f| f.rpid == row.rpid);
+                body_part.SetBackground(&SolidColorBrush::CreateInstanceWithColor(if marked { FOCUSED } else { CLEAR })?)?;
                 self.fill_pictures(&body_part, comment)?;
             }
             Line::Foot { foot, .. } => {
@@ -560,6 +658,7 @@ impl CommentList {
             (meta.GetAt(0)?, Press::Like),
             (meta.GetAt(2)?, Press::Reply),
             (meta.GetAt(3)?, Press::Branch),
+            (meta.GetAt(4)?, Press::Note),
             (foot.GetAt(0)?, Press::Foot(0)),
             (foot.GetAt(1)?, Press::Foot(1)),
         ];
@@ -623,6 +722,15 @@ impl CommentList {
                 let pictures: Vec<String> = comment.pictures.iter().map(|p| p.url.clone()).collect();
                 drop(lines);
                 crate::ui::viewer::open(pictures, slot)
+            }
+            (Line::Comment { comment, .. }, Press::Note) => {
+                let cvid = comment.note_cvid;
+                drop(lines);
+                if let Some(leaving) = self.leaving.borrow().as_ref() {
+                    leaving();
+                }
+                crate::ui::shell::leave_pages();
+                crate::ui::article::open(&format!("cv{cvid}"))
             }
             (Line::Comment { root, row, comment, .. }, Press::Reply) => {
                 let target = Target { root: root.unwrap_or(row.rpid), rpid: row.rpid, name: comment.name.clone() };
@@ -814,9 +922,11 @@ impl CommentList {
             return Ok(());
         }
         let (id, dispatcher, core) = (self.id, shell.dispatcher.clone(), backend.clone());
+        let mentioned = self.mentions.borrow().as_ref().map(|m| m.picked()).unwrap_or_default();
         backend.spawn(async move {
             let (root, parent) = target.as_ref().map_or((0, 0), |t| (t.root, t.rpid));
-            let sent = core.services.comments.reply(area, root, parent, &text, &[]).await.map_err(|e| e.to_string());
+            let sent =
+                core.services.comments.reply(area, root, parent, &text, &mentioned).await.map_err(|e| e.to_string());
             post(&dispatcher, move || {
                 if let Some(shown) = list_of(id) {
                     let _ = shown.sent(target, sent.map(|(_, comment)| comment));
@@ -836,6 +946,9 @@ impl CommentList {
             }
         };
         named::<ITextBox>(&self.root, "CommentText")?.SetText("")?;
+        if let Some(mentions) = self.mentions.borrow().as_ref() {
+            mentions.clear();
+        }
         let rpid = comment.rpid;
         match target {
             Some(target) => {
@@ -885,6 +998,8 @@ enum Press {
     Picture(usize),
     /// The thread foot's first or second action.
     Foot(usize),
+    /// Opens the 笔记 a comment is part of.
+    Note,
 }
 
 fn children(panel: &IPanel) -> Result<IVector<UIElement>> {
@@ -935,7 +1050,8 @@ fn fill_comment(
     show(&head.GetAt(1)?, comment.is_up)?;
     show(&head.GetAt(2)?, pinned)?;
     let now = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map_or(0, |d| d.as_secs() as i64);
-    head.GetAt(3)?.cast::<ITextBlock>()?.SetText(&age(comment.ctime, now))?;
+    show(&head.GetAt(3)?, comment.note_cvid > 0)?;
+    head.GetAt(4)?.cast::<ITextBlock>()?.SetText(&age(comment.ctime, now))?;
     crate::ui::emote_text::show(&parts.GetAt(1)?.cast()?, &body(row, comment), &comment.emotes, EMOTE_SIZE)?;
     let meta = children(&parts.GetAt(3)?.cast::<IPanel>()?)?;
     let like = meta.GetAt(0)?.cast::<IContentControl>()?.Content()?.cast::<ITextBlock>()?;
@@ -953,7 +1069,8 @@ fn fill_comment(
     if let Some(label) = &label {
         fold.cast::<IContentControl>()?.Content()?.cast::<ITextBlock>()?.SetText(label)?;
     }
-    show(&fold, label.is_some())
+    show(&fold, label.is_some())?;
+    show(&meta.GetAt(4)?, comment.note_cvid > 0)
 }
 
 fn fill_foot(foot_part: &IPanel, foot: &Foot) -> Result<()> {

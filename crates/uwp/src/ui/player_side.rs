@@ -72,6 +72,8 @@ pub struct Side {
     layout: Cell<Option<SideLayout>>,
     /// The queue on play, as the video opened.
     queue: Option<Queue>,
+    /// The comment a notice opened the video at, until the comments load.
+    focus: Cell<Option<rubi_model::CommentRef>>,
 }
 
 impl Side {
@@ -88,7 +90,9 @@ impl Side {
             covers: Covers::default(),
             layout: Cell::new(None),
             queue: queue::view(),
+            focus: Cell::new(None),
         });
+        side.comments.before_leaving(crate::ui::player::remember_here);
 
         let related = named::<IFrameworkElement>(root, "Related")?;
         let sizing = Rc::downgrade(&side);
@@ -128,6 +132,12 @@ impl Side {
         side.mark_tabs(Pane::Related)?;
         side.show_queue()?;
         Ok(side)
+    }
+
+    /// Opens on the comments, at `focus`.
+    pub fn focus_comment(&self, focus: rubi_model::CommentRef) -> Result<()> {
+        self.focus.set(Some(focus));
+        self.select(Pane::Comments)
     }
 
     /// The video's aid and how many comments it has are known: comments can load.
@@ -222,7 +232,11 @@ impl Side {
     fn load_comments(&self) {
         let aid = self.aid.get();
         if aid > 0 && self.comments_opened.get() {
-            let _ = self.comments.show(CommentArea { kind: 1, oid: aid }, self.replies.get());
+            let area = CommentArea { kind: 1, oid: aid };
+            let _ = match self.focus.take() {
+                Some(focus) => self.comments.show_focused(area, self.replies.get(), focus),
+                None => self.comments.show(area, self.replies.get()),
+            };
         }
     }
 

@@ -11,6 +11,26 @@ pub enum VideoRef {
     Short(String),
 }
 
+/// The BV id of av number `aid`, worked out without asking B站 (the public av⇄BV mapping).
+/// `None` past the largest av number the mapping covers.
+pub fn bvid_of_aid(aid: u64) -> Option<String> {
+    const XOR_CODE: u64 = 23_442_827_791_579;
+    const MAX_AID: u64 = 1 << 51;
+    const ALPHABET: &[u8; 58] = b"FcwAPNKTMug3GV5Lj7EJnHpWsx4tb8haYeviqBz6rkCy12mUSDQX9RdoZf";
+    if aid == 0 || aid >= MAX_AID {
+        return None;
+    }
+    let mut id = *b"BV1000000000";
+    let mut rest = (MAX_AID | aid) ^ XOR_CODE;
+    for at in (3..12).rev() {
+        id[at] = ALPHABET[(rest % 58) as usize];
+        rest /= 58;
+    }
+    id.swap(3, 9);
+    id.swap(4, 7);
+    String::from_utf8(id.to_vec()).ok()
+}
+
 /// Hosts of Bilibili's share short links.
 const SHORT_HOSTS: [&str; 2] = ["b23.tv/", "bili2233.cn/"];
 
@@ -75,6 +95,13 @@ fn find_aid(text: &str) -> Option<u64> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn av_numbers_turn_into_bv_ids() {
+        assert_eq!(bvid_of_aid(170001).as_deref(), Some("BV17x411w7KC"));
+        assert_eq!(bvid_of_aid(1_054_803_170).as_deref(), Some("BV1mH4y1u7UA"));
+        assert_eq!(bvid_of_aid(0), None);
+    }
 
     #[test]
     fn finds_bvids_and_aids() {

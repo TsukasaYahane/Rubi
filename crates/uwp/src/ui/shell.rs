@@ -36,6 +36,7 @@ pub enum Tab {
     Home,
     Follow,
     Live,
+    Inbox,
     Me,
 }
 
@@ -45,7 +46,12 @@ const TOAST_FOR: Duration = Duration::from_secs(2);
 static TOASTS: AtomicU64 = AtomicU64::new(0);
 static PAGE_TURN: AtomicU64 = AtomicU64::new(0);
 
-const TABS: [(Tab, &str); 4] = [(Tab::Home, "Home"), (Tab::Follow, "Follow"), (Tab::Live, "Live"), (Tab::Me, "Me")];
+const TABS: [(Tab, &str); 5] =
+    [(Tab::Home, "Home"), (Tab::Follow, "Follow"), (Tab::Live, "Live"), (Tab::Inbox, "Inbox"), (Tab::Me, "Me")];
+/// The unread count on the 消息 icon.
+const BADGE: &str = r##"<Border x:Name="{}" Visibility="Collapsed" Background="#E33333" MinWidth="16" Height="16" Padding="4,0"
+            HorizontalAlignment="Left" VerticalAlignment="Top" Margin="{}" IsHitTestVisible="False">
+      <TextBlock FontSize="10" Foreground="White" HorizontalAlignment="Center" VerticalAlignment="Center" /></Border>"##;
 
 const LAYOUT: &str = r##"
 <Grid xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
@@ -91,6 +97,9 @@ const LAYOUT: &str = r##"
       <FontIcon x:Name="RailIconFollow" Glyph="&#xEB51;" FontSize="20" /><TextBlock x:Name="LabelFollow" Margin="12,0,0,0" Text="关注" /></StackPanel></Button>
     <Button x:Name="RailLive" Style="{StaticResource Nav}"><StackPanel Orientation="Horizontal">
       <FontIcon x:Name="RailIconLive" Glyph="&#xE93E;" FontSize="20" /><TextBlock x:Name="LabelLive" Margin="12,0,0,0" Text="直播" /></StackPanel></Button>
+    <Button x:Name="RailInbox" Style="{StaticResource Nav}"><StackPanel Orientation="Horizontal">
+      <Grid><FontIcon x:Name="RailIconInbox" Glyph="&#xE715;" FontSize="20" /><!--rail-badge--></Grid>
+      <TextBlock x:Name="LabelInbox" Margin="12,0,0,0" Text="消息" /></StackPanel></Button>
     <Button x:Name="RailMe" Style="{StaticResource Nav}"><StackPanel Orientation="Horizontal">
       <FontIcon x:Name="RailIconMe" Glyph="&#xE77B;" FontSize="20" /><TextBlock x:Name="LabelMe" Margin="12,0,0,0" Text="我的" /></StackPanel></Button>
   </StackPanel>
@@ -105,7 +114,7 @@ const LAYOUT: &str = r##"
   <Grid x:Name="Bottom" Grid.Column="2" Grid.Row="2" BorderThickness="0,1,0,0"
         BorderBrush="{ThemeResource SystemControlForegroundBaseLowBrush}">
     <Grid.ColumnDefinitions>
-      <ColumnDefinition /><ColumnDefinition /><ColumnDefinition /><ColumnDefinition />
+      <ColumnDefinition /><ColumnDefinition /><ColumnDefinition /><ColumnDefinition /><ColumnDefinition />
     </Grid.ColumnDefinitions>
     <Button x:Name="BarHome" Style="{StaticResource Bar}"><StackPanel>
       <FontIcon x:Name="BarIconHome" Glyph="&#xE80F;" FontSize="20" /><TextBlock Text="首页" FontSize="11" /></StackPanel></Button>
@@ -113,7 +122,10 @@ const LAYOUT: &str = r##"
       <FontIcon x:Name="BarIconFollow" Glyph="&#xEB51;" FontSize="20" /><TextBlock Text="关注" FontSize="11" /></StackPanel></Button>
     <Button x:Name="BarLive" Grid.Column="2" Style="{StaticResource Bar}"><StackPanel>
       <FontIcon x:Name="BarIconLive" Glyph="&#xE93E;" FontSize="20" /><TextBlock Text="直播" FontSize="11" /></StackPanel></Button>
-    <Button x:Name="BarMe" Grid.Column="3" Style="{StaticResource Bar}"><StackPanel>
+    <Button x:Name="BarInbox" Grid.Column="3" Style="{StaticResource Bar}"><Grid><StackPanel>
+      <FontIcon x:Name="BarIconInbox" Glyph="&#xE715;" FontSize="20" /><TextBlock Text="消息" FontSize="11" /></StackPanel>
+      <!--bar-badge--></Grid></Button>
+    <Button x:Name="BarMe" Grid.Column="4" Style="{StaticResource Bar}"><StackPanel>
       <FontIcon x:Name="BarIconMe" Glyph="&#xE77B;" FontSize="20" /><TextBlock Text="我的" FontSize="11" /></StackPanel></Button>
   </Grid>
 </Grid>"##;
@@ -147,7 +159,10 @@ pub fn shell() -> Option<Rc<Shell>> {
 /// Builds the window, then opens the core in the background.
 pub fn start() -> Result<()> {
     let window = Window::Current()?.cast::<IWindow>()?;
-    let root = load(&splitter::fill(LAYOUT))?;
+    let layout = LAYOUT
+        .replace("<!--rail-badge-->", &badge("RailBadge", "12,-6,-12,0"))
+        .replace("<!--bar-badge-->", &badge("BarBadge", "14,-4,-14,0"));
+    let root = load(&splitter::fill(&layout))?;
     let page = named::<IContentControl>(&root, "Page")?;
     let dispatcher = window.Dispatcher()?;
     let folder = ApplicationData::Current()?.cast::<IApplicationData>()?.LocalFolder()?;
@@ -196,7 +211,11 @@ pub fn start() -> Result<()> {
         |_: Ref<CoreWindow>, args: Ref<WindowActivatedEventArgs>| {
             let state = args.ok().and_then(|a| a.cast::<IWindowActivatedEventArgs>()?.WindowActivationState());
             if let Ok(state) = state {
-                player::focus_changed(state != CoreWindowActivationState::Deactivated);
+                let active = state != CoreWindowActivationState::Deactivated;
+                player::focus_changed(active);
+                if active {
+                    crate::ui::inbox::read_unread();
+                }
             }
         },
     )?;
@@ -272,6 +291,7 @@ fn core_opened(opened: std::result::Result<Arc<Backend>, String>) {
         Ok(backend) => {
             let _ = shell.backend.set(backend);
             crate::ui::emote_text::read_common();
+            crate::ui::inbox::watch_unread();
             if let Some(home) = shell.home.borrow().as_ref() {
                 home.start();
             }
@@ -340,6 +360,7 @@ pub fn show_tab(tab: Tab) {
         Tab::Me => me::show(),
         Tab::Live => live::show(),
         Tab::Follow => follow::show(),
+        Tab::Inbox => crate::ui::inbox::show(),
     };
     if let Err(problem) = shown.and_then(|()| shell.mark_tab()) {
         toast(&format!("打不开：{}", problem.message()));
@@ -417,6 +438,17 @@ impl Shell {
         Ok(())
     }
 
+    /// Shows `count` unread messages on the 消息 icons; none hides them.
+    pub fn set_unread(&self, count: u32) -> Result<()> {
+        let label = if count > 99 { "99+".to_owned() } else { count.to_string() };
+        for name in ["RailBadge", "BarBadge"] {
+            let badge = named::<crate::xaml::IBorder>(&self.root, name)?;
+            badge.Child()?.cast::<crate::xaml::ITextBlock>()?.SetText(&label)?;
+            visible(&self.root, name, count > 0)?;
+        }
+        Ok(())
+    }
+
     /// Folds the navigation away while a page fills the screen.
     pub fn immersive(&self, on: bool) -> Result<()> {
         self.immersive.set(on);
@@ -481,6 +513,7 @@ impl Shell {
         me::resized();
         live::resized();
         follow::resized();
+        crate::ui::inbox::resized();
         up::resized();
         crate::ui::pgc_season::resized();
         if let Some(home) = self.home.borrow().as_ref() {
@@ -544,4 +577,8 @@ pub fn preloaded(bitmap: &windows_core::IInspectable) {
             let _ = children.RemoveAt(at);
         }
     }
+}
+
+fn badge(name: &str, margin: &str) -> String {
+    BADGE.replacen("{}", name, 1).replacen("{}", margin, 1)
 }

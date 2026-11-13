@@ -281,6 +281,8 @@ thread_local! {
     static PAUSED_FOR_BLUR: Cell<bool> = const { Cell::new(false) };
     /// The episode the next opening plays, if it is one.
     static NEXT_EPISODE: Cell<Option<(u64, u64)>> = const { Cell::new(None) };
+    /// The comment the next video opens at, from a notice.
+    static NEXT_FOCUS: Cell<Option<rubi_model::CommentRef>> = const { Cell::new(None) };
     /// What `PLAYING` plays: closing it lets go of its connections.
     static SOURCE: RefCell<Option<MediaSource>> = const { RefCell::new(None) };
     /// Where the next opening of a video starts, in 100 ns ticks: back from the small window.
@@ -803,6 +805,13 @@ fn choose_share() {
             }),
         ));
     }
+    let (bvid, named_as) = (page.bvid.clone(), title.clone());
+    choices.push((
+        "发给好友…".to_owned(),
+        Rc::new(move || {
+            let _ = crate::ui::share_friend::open(&bvid, &named_as);
+        }),
+    ));
     choices.push(("系统分享…".to_owned(), Rc::new(move || crate::ui::sharing::share(shared.clone()))));
     let _ = crate::ui::card_menu::show_under(&button, choices);
 }
@@ -1145,6 +1154,12 @@ pub fn show_episode(bvid: &str, title: &str, uploader: &str, ep_id: u64, cid: u6
     open(false, bvid, title, uploader)
 }
 
+/// Opens the video with its comments at `focus`, as a notice asks.
+pub fn show_comment(bvid: &str, title: &str, focus: rubi_model::CommentRef) -> Result<()> {
+    NEXT_FOCUS.set(Some(focus));
+    open(false, bvid, title, "")
+}
+
 /// Opens the ordinary video page.
 pub fn show(bvid: &str, title: &str, uploader: &str) -> Result<()> {
     open(false, bvid, title, uploader)
@@ -1175,7 +1190,8 @@ pub fn open(feed: bool, bvid: &str, title: &str, uploader: &str) -> Result<()> {
     named::<IUIElement>(&root, "SeekRow")?.SetVisibility(Visibility::Visible)?;
     named::<IUIElement>(&root, "PlayPause")?.SetVisibility(Visibility::Visible)?;
     set_text(&root, "Title", title)?;
-    set_text(&root, "Meta", &format!("{uploader} · 正在打开…"))?;
+    let opening = if uploader.is_empty() { "正在打开…".to_owned() } else { format!("{uploader} · 正在打开…") };
+    set_text(&root, "Meta", &opening)?;
     on_click(&root, "Back", go_back)?;
     settle_buttons(&root)?;
     if feed {
@@ -1185,6 +1201,9 @@ pub fn open(feed: bool, bvid: &str, title: &str, uploader: &str) -> Result<()> {
     let pane = Side::attach(&root)?;
     if feed {
         pane.select(Pane::Comments)?;
+    }
+    if let Some(focus) = NEXT_FOCUS.take() {
+        pane.focus_comment(focus)?;
     }
     let actions = Actions::attach(&root, bvid)?;
     let (shown_overlay, cid) = (Rc::new(RefCell::new(None)), Rc::new(Cell::new(0)));
@@ -1411,11 +1430,12 @@ fn show_up_link(page: &Page, mid: u64, name: &str) -> Result<()> {
 }
 
 /// Opens the UP's page, coming back to this video from the start.
-fn open_up() {
+/// Says how to come back to the video on show from the page opened next.
+pub fn remember_here() {
     let (Some(page), Some(shell)) = (page(), shell()) else { return };
-    let (mid, name) = page.up.borrow().clone();
+    let uploader = page.up.borrow().1.clone();
     let (bvid, title) = (page.bvid.clone(), named::<ITextBlock>(&page.root, "Title").and_then(|t| t.Text()));
-    let (title, uploader, feed) = (title.map(|t| t.to_string()).unwrap_or_default(), name.clone(), page.feed);
+    let (title, feed) = (title.map(|t| t.to_string()).unwrap_or_default(), page.feed);
     let episode = page.episode;
     shell.remember(move || {
         let _ = match episode {
@@ -1423,6 +1443,12 @@ fn open_up() {
             None => open(feed, &bvid, &title, &uploader),
         };
     });
+}
+
+fn open_up() {
+    let Some(page) = page() else { return };
+    let (mid, name) = page.up.borrow().clone();
+    remember_here();
     crate::ui::shell::leave_pages();
     let _ = up::open(mid, &name);
 }

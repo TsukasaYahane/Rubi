@@ -26,7 +26,7 @@ pub use live::{LiveArea, LiveCategory, LiveEvent, LivePlay, LiveProtocol, LiveRo
 pub use message::{ChatMessage, ChatSession, CommentRef, Notice, NoticeKind, SharedVideo, UnreadCounts};
 pub use space::UpProfile;
 pub use video::{Owner, SourceKind, Stats, VideoCard, Zone};
-pub use video_ref::{VideoRef, find_video_ref};
+pub use video_ref::{VideoRef, bvid_of_aid, find_video_ref};
 
 /// Current Unix time in seconds.
 pub fn now_secs() -> i64 {

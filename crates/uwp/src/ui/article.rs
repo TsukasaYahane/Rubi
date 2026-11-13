@@ -1,10 +1,15 @@
 //! A 专栏 or 图文 to read, in the app.
 
 use rubi_model::{Article, ArticleBlock};
-use windows_core::{Interface, Result};
+use std::cell::RefCell;
+use std::rc::Rc;
+
+use rubi_core::CommentArea;
+use windows_core::{IInspectable, Interface, Result};
 
 use crate::state::library::age;
 use crate::state::settings::escape;
+use crate::ui::comment_list::CommentList;
 use crate::ui::shell::shell;
 use crate::ui::{load, named, on_click, post, set_text};
 use crate::xaml::{IContentControl, IFrameworkElement, UIElement};
@@ -21,12 +26,8 @@ const LAYOUT: &str = r##"
   </Button>
   <TextBlock x:Name="Status" Grid.Row="1" Margin="16,8" FontSize="13" IsHitTestVisible="False"
              Foreground="{ThemeResource SystemControlForegroundBaseMediumBrush}" />
-  <ScrollViewer Grid.Row="1">
-    <Grid>
-      <Grid.ColumnDefinitions><ColumnDefinition MaxWidth="760" /><ColumnDefinition Width="Auto" /></Grid.ColumnDefinitions>
-      <ContentControl x:Name="Body" IsTabStop="False" HorizontalContentAlignment="Stretch" />
-    </Grid>
-  </ScrollViewer>
+  <ContentControl x:Name="Body" Grid.Row="1" IsTabStop="False" MaxWidth="760" HorizontalAlignment="Left"
+                  HorizontalContentAlignment="Stretch" VerticalContentAlignment="Stretch" />
 </Grid>"##;
 
 fn now() -> i64 {
@@ -89,10 +90,38 @@ fn body_xaml(article: &Article) -> String {
     )
 }
 
-fn show_article(root: &IFrameworkElement, article: &Article) -> Result<()> {
+/// The article, then its comments under it in one scroll (none: the article alone).
+fn show_article(root: &IFrameworkElement, article: &Article, link: &str) -> Result<()> {
     let body = load(&body_xaml(article))?;
-    named::<IContentControl>(root, "Body")?.SetContent(&body.cast::<UIElement>()?)?;
-    set_text(root, "Status", "")
+    set_text(root, "Status", "")?;
+    let host = named::<IContentControl>(root, "Body")?;
+    if article.comment_kind == 0 || article.comment_oid == 0 {
+        let scroll = load(
+            r#"<ScrollViewer xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation" />"#,
+        )?;
+        scroll.cast::<IContentControl>()?.SetContent(&body.cast::<IInspectable>()?)?;
+        return host.SetContent(&scroll.cast::<IInspectable>()?);
+    }
+    let comments = CommentList::new()?;
+    comments.put_above(&body.cast::<UIElement>()?)?;
+    let back = link.to_owned();
+    comments.before_leaving(move || {
+        if let Some(shell) = shell() {
+            let back = back.clone();
+            shell.remember(move || {
+                let _ = open(&back);
+            });
+        }
+    });
+    host.SetContent(&comments.element().cast::<IInspectable>()?)?;
+    comments.show(CommentArea { kind: article.comment_kind, oid: article.comment_oid }, 0)?;
+    COMMENTS.with_borrow_mut(|c| *c = Some(comments));
+    Ok(())
+}
+
+thread_local! {
+    /// The comments of the article on show.
+    static COMMENTS: RefCell<Option<Rc<CommentList>>> = const { RefCell::new(None) };
 }
 
 fn go_back() {
@@ -120,7 +149,7 @@ pub fn open(link: &str) -> Result<()> {
             }
             let Ok(root) = shell.current_page() else { return };
             let _ = match &article {
-                Ok(article) => show_article(&root, article),
+                Ok(article) => show_article(&root, article, &link),
                 Err(problem) => set_text(&root, "Status", &format!("打不开：{problem}")),
             };
         });
