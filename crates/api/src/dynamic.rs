@@ -126,6 +126,30 @@ pub(crate) fn dynamic_of(item: &Value) -> Dynamic {
         }
         _ => {}
     }
+    // Whichever shape came back, the words may sit somewhere other than desc.text: the 图文
+    // summary, a 专栏's description, a forwarded post's own text.
+    if d.text.is_empty() {
+        let elsewhere = [
+            &md["major"]["opus"]["summary"]["text"],
+            &md["major"]["article"]["desc"],
+            &md["major"]["common"]["desc"],
+        ];
+        for value in elsewhere {
+            let words = str_of(value);
+            if !words.is_empty() {
+                d.text = words;
+                break;
+            }
+        }
+    }
+    if d.text.is_empty()
+        && let Some(orig) = item["orig"].as_object()
+    {
+        let forwarded = str_of(&orig["modules"]["module_dynamic"]["desc"]["text"]);
+        if !forwarded.is_empty() {
+            d.text = forwarded;
+        }
+    }
     if !item["orig"].is_null() {
         d.orig = Some(Box::new(dynamic_of(&item["orig"])));
     }
