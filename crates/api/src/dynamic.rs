@@ -142,6 +142,24 @@ pub(crate) fn dynamic_of(item: &Value) -> Dynamic {
             d.pictures = Some(image_of(&c["cover"])).filter(|u| !u.is_empty()).into_iter().collect();
             d.link = link_of(&c["jump_url"]);
         }
+        "MAJOR_TYPE_LIVE_RCMD" => {
+            // The room comes as a JSON string inside content.
+            let raw = str_of(&major["live_rcmd"]["content"]);
+            if let Ok(value) = serde_json::from_str::<Value>(&raw) {
+                let info = &value["live_play_info"];
+                d.title = str_of(&info["title"]);
+                let cover = image_of(&info["cover"]);
+                if !cover.is_empty() {
+                    d.pictures.push(cover);
+                }
+                let uname = str_of(&info["uname"]);
+                d.text = if uname.is_empty() { "正在直播".to_owned() } else { format!("正在直播 · {uname}") };
+                let area = str_of(&info["area_name"]);
+                if !area.is_empty() {
+                    d.text = format!("{} · {area}", d.text);
+                }
+            }
+        }
         _ => {}
     }
     // Whichever shape came back, the words may sit somewhere other than desc.text: the 图文
