@@ -30,14 +30,14 @@ const LAYOUT: &str = r##"<Grid xmlns="http://schemas.microsoft.com/winfx/2006/xa
       <ColumnDefinition Width="Auto" /><ColumnDefinition Width="Auto" /><ColumnDefinition Width="Auto" />
       <ColumnDefinition Width="Auto" /><ColumnDefinition Width="*" />
     </Grid.ColumnDefinitions>
-    <Button x:Name="Pick" Background="Transparent" BorderThickness="1" BorderBrush="#3A3A3A" Padding="10,4"
+    <Button x:Name="Pick" Background="Transparent" Padding="10,4"
             FontSize="14" />
-    <Button x:Name="NewList" Grid.Column="1" Content="＋ 新建" Margin="8,0,0,0" Background="Transparent"
-            BorderThickness="1" BorderBrush="#0050EF" Foreground="#0050EF" Padding="10,4" />
-    <Button x:Name="RenameList" Grid.Column="2" Content="重命名" Margin="8,0,0,0" Background="Transparent"
+    <Button x:Name="NewList" BorderThickness="0" Grid.Column="1" Content="＋ 新建" Margin="8,0,0,0" Background="Transparent"
+            Foreground="#0050EF" Padding="10,4" />
+    <Button x:Name="RenameList" BorderThickness="0" Grid.Column="2" Content="重命名" Margin="8,0,0,0" Background="Transparent"
             BorderThickness="1" BorderBrush="#3A3A3A" Padding="10,4" />
-    <Button x:Name="DeleteList" Grid.Column="3" Content="删除" Margin="8,0,0,0" Background="Transparent"
-            BorderThickness="1" BorderBrush="#C04A4A" Foreground="#C04A4A" Padding="10,4" />
+    <Button x:Name="DeleteList" BorderThickness="0" Grid.Column="3" Content="删除" Margin="8,0,0,0" Background="Transparent"
+            Foreground="#C04A4A" Padding="10,4" />
   </Grid>
   <StackPanel x:Name="Modes" Grid.Row="1" Orientation="Horizontal" Margin="16,0,16,8" />
   <Grid Grid.Row="2" Margin="16,0,16,0">

@@ -270,6 +270,8 @@ pub struct CardGrid {
     said: RefCell<String>,
     /// What the last refresh did, for the 摘要 line.
     note: RefCell<Option<Note>>,
+    /// That summary as text: what a later page keeps, where the working note would otherwise stay.
+    summary: RefCell<String>,
     /// A held card added the video, so the click that follows it is ignored.
     swallowed: Cell<bool>,
     /// The cells have been set for the grid's width.
@@ -297,6 +299,7 @@ impl CardGrid {
             turn: Cell::new(0),
             said: RefCell::default(),
             note: RefCell::default(),
+            summary: RefCell::default(),
             swallowed: Cell::new(false),
             sized: Cell::new(false),
             fitted: Cell::new((0.0, 0)),
@@ -397,6 +400,7 @@ impl CardGrid {
         self.ended.set(false);
         self.loading.set(false);
         *self.note.borrow_mut() = None;
+        self.summary.borrow_mut().clear();
         self.grid.cast::<IItemsControl>()?.Items()?.cast::<IVector<IInspectable>>()?.Clear()?;
         self.say(working);
         self.load_page();
@@ -460,7 +464,9 @@ impl CardGrid {
                 self.ended.set(!more);
                 let summary = note.map(|note| {
                     *self.note.borrow_mut() = Some(note);
-                    format!("新增 {} 条 · 过滤 {} 条 · 重复 {} 条", note.kept, note.blocked, note.dup)
+                    let text = format!("新增 {} 条 · 过滤 {} 条 · 重复 {} 条", note.kept, note.blocked, note.dup);
+                    *self.summary.borrow_mut() = text.clone();
+                    text
                 });
                 self.page.set(self.page.get() + 1);
                 let mut seen = self.seen.borrow_mut();
@@ -469,11 +475,12 @@ impl CardGrid {
                 let from = self.cards.borrow().len();
                 self.cards.borrow_mut().extend(fresh);
                 let to = self.cards.borrow().len();
-                // Later pages carry no note of their own: the summary of the first one stands.
+                // Later pages carry no note of their own: the summary of the first one stands,
+                // and the working note goes.
                 let said = if to == 0 {
                     "暂时没有内容，稍后再打开".to_owned()
                 } else {
-                    summary.unwrap_or_else(|| self.said())
+                    summary.unwrap_or_else(|| self.summary.borrow().clone())
                 };
                 self.say(&said);
                 add_rows(&self.grid, from, to)

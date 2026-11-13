@@ -53,14 +53,16 @@ const LAYOUT: &str = r##"
                Foreground="{ThemeResource SystemControlForegroundBaseMediumBrush}" />
     <!--refresh-->
     <Button x:Name="Portrait" Grid.Column="4" Background="Transparent" BorderThickness="1" BorderBrush="#0050EF"
-            Foreground="#0050EF" Padding="8,2" Margin="8,0,0,0" VerticalAlignment="Center">
+            Foreground="#0050EF" Padding="8,2" Margin="8,0,0,0" VerticalAlignment="Center" MinWidth="0"
+            MinHeight="0" FontSize="13">
       <StackPanel Orientation="Horizontal">
         <FontIcon Glyph="&#xE8EA;" FontSize="14" />
         <TextBlock x:Name="PortraitLabel" Text="竖屏" FontSize="13" Margin="6,0,0,0" />
       </StackPanel>
     </Button>
     <Button x:Name="Columns" Grid.Column="5" Background="Transparent" BorderThickness="1" BorderBrush="#3A3A3A"
-            Padding="8,2" Margin="8,0,0,0" VerticalAlignment="Center" FontSize="13" Visibility="Collapsed" />
+            Padding="8,2" Margin="8,0,0,0" VerticalAlignment="Center" FontSize="13" MinWidth="0"
+            MinHeight="0" Visibility="Collapsed" />
     <Button x:Name="Search" Grid.Column="3" Visibility="Collapsed" Background="Transparent" BorderThickness="0"
             Padding="8,2" VerticalAlignment="Center"><FontIcon Glyph="&#xE721;" FontSize="14" /></Button>
   </Grid>
@@ -192,6 +194,17 @@ impl HomePage {
     /// Follows the interface style.
     pub fn style(&self) -> Result<()> {
         style_refresh(&self.root)?;
+        // The words style keeps to type: no frames around its two buttons.
+        let words = shell().is_some_and(|s| s.prefs().words);
+        let edge = crate::xaml::Thickness {
+            left: if words { 0.0 } else { 1.0 },
+            top: if words { 0.0 } else { 1.0 },
+            right: if words { 0.0 } else { 1.0 },
+            bottom: if words { 0.0 } else { 1.0 },
+        };
+        for name in ["Portrait", "Columns"] {
+            named::<IControl>(&self.root, name)?.SetBorderThickness(edge)?;
+        }
         let narrow = shell().is_some_and(|s| s.class() == WindowClass::Narrow);
         let shown = if narrow { Visibility::Visible } else { Visibility::Collapsed };
         named::<IUIElement>(&self.root, "Search")?.SetVisibility(shown)?;
@@ -207,8 +220,9 @@ impl HomePage {
         } else {
             Visibility::Collapsed
         })?;
+        // The button says what a click gives, not what is on.
         let single = shell().is_some_and(|s| s.prefs().single_column);
-        let word = if single { "单列" } else { "双列" };
+        let word = if single { "双列" } else { "单列" };
         named::<IContentControl>(&self.root, "Columns")?.SetContent(&PropertyValue::CreateString(word)?)
     }
 
