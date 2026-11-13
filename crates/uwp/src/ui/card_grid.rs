@@ -20,8 +20,9 @@ use crate::ui::rows::{Covers, add_rows, on_row, on_row_click};
 use crate::ui::shell::shell;
 use crate::ui::{card_menu, feed, keep, live_room, load, post};
 use crate::xaml::{
-    Color, IBorder, IFrameworkElement, IImage, IItemsControl, IItemsControl2, IItemsWrapGrid, ITextBlock, IUIElement,
-    SizeChangedEventArgs, SolidColorBrush, Stretch, UIElement, Visibility,
+    Color, IBorder, IFrameworkElement, IImage, IItemsControl, IItemsControl2, IItemsWrapGrid, IPointerRoutedEventArgs,
+    ITextBlock, IUIElement, PointerRoutedEventArgs, SizeChangedEventArgs, SolidColorBrush, Stretch, UIElement,
+    Visibility,
 };
 
 /// Cards asked for at a time.
@@ -264,6 +265,10 @@ pub struct CardGrid {
     said: RefCell<String>,
     /// What the last refresh did, for the 摘要 line.
     note: RefCell<Option<Note>>,
+    /// Where and when a press began, and which video it was on: a long press adds it to the
+    /// default play list, and the click that follows is then ignored.
+    pressing: RefCell<Option<(std::time::Instant, f32, f32, String)>>,
+    swallowed: Cell<bool>,
     /// The cells have been set for the grid's width.
     sized: Cell<bool>,
     /// The grid width and columns the cells were last set for.
@@ -289,6 +294,8 @@ impl CardGrid {
             turn: Cell::new(0),
             said: RefCell::default(),
             note: RefCell::default(),
+            pressing: RefCell::default(),
+            swallowed: Cell::new(false),
             sized: Cell::new(false),
             fitted: Cell::new((0.0, 0)),
             covers: Covers::default(),
@@ -327,6 +334,44 @@ impl CardGrid {
                 }
             })
         })?;
+        // A long press with the mouse adds to the default play list, as Android does; a long
+        // press with a finger arrives as Holding below.
+        let pressed = Rc::downgrade(&shown);
+        keep(grid.cast::<IUIElement>()?.PointerPressed(move |_: Ref<IInspectable>, args: Ref<PointerRoutedEventArgs>| {
+            let Some(shown) = pressed.upgrade() else { return };
+            let Ok(args) = args.ok() else { return };
+            let Ok(element) = shown.grid.cast::<UIElement>() else { return };
+            let Ok(point) = args.cast::<IPointerRoutedEventArgs>().and_then(|a| a.GetCurrentPoint(&element)) else {
+                return;
+            };
+            let Ok(source) = args.cast::<crate::xaml::IRoutedEventArgs>().and_then(|a| a.OriginalSource()) else {
+                return;
+            };
+            let Some(at) = card_menu::row_of(&source) else { return };
+            let bvid = match shown.cards.borrow().get(at).map(|c| c.target.clone()) {
+                Some(Target::Video { bvid, .. }) => bvid,
+                _ => return,
+            };
+            let Ok(position) = point.Position() else { return };
+            *shown.pressing.borrow_mut() = Some((std::time::Instant::now(), position.x, position.y, bvid));
+        })?);
+        let released = Rc::downgrade(&shown);
+        keep(grid.cast::<IUIElement>()?.PointerReleased(move |_: Ref<IInspectable>, args: Ref<PointerRoutedEventArgs>| {
+            let Some(shown) = released.upgrade() else { return };
+            let Some((started, x, y, bvid)) = shown.pressing.borrow_mut().take() else { return };
+            let Ok(args) = args.ok() else { return };
+            let Ok(element) = shown.grid.cast::<UIElement>() else { return };
+            let moved = args
+                .cast::<IPointerRoutedEventArgs>()
+                .and_then(|a| a.GetCurrentPoint(&element))
+                .and_then(|p| p.Position())
+                .map(|p| (p.x - x).abs() + (p.y - y).abs())
+                .unwrap_or(f32::MAX);
+            if started.elapsed() >= std::time::Duration::from_millis(600) && moved < 12.0 {
+                shown.swallowed.set(true);
+                card_menu::add_to_default(&bvid);
+            }
+        })?);
         // Holding a card puts it in the default play list, as Android does.
         let holding = Rc::downgrade(&shown);
         keep(grid.cast::<IUIElement>()?.Holding(move |_: Ref<IInspectable>, args: Ref<crate::xaml::HoldingRoutedEventArgs>| {
@@ -544,6 +589,10 @@ impl CardGrid {
     }
 
     fn open_row(&self, at: usize) -> Result<()> {
+        // A long press that just added the video is not also a click.
+        if self.swallowed.replace(false) {
+            return Ok(());
+        }
         let Some(card) = self.cards.borrow().get(at).cloned() else { return Ok(()) };
         if let Some(leaving) = self.leaving.borrow().as_ref() {
             leaving();

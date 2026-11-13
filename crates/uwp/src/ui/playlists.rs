@@ -11,12 +11,12 @@ use windows_collections::IVector;
 use windows_core::{IInspectable, Interface, Ref, Result};
 
 use crate::ui::card_menu;
-use crate::ui::rows::{add_rows, on_row};
+use crate::ui::rows::{Covers, add_rows, on_row, on_row_click};
 use crate::ui::shell::{shell, toast};
 use crate::ui::{keep, load, named, on_click, popup, post, set_text};
 use crate::xaml::{
-    FrameworkElement, IButtonBase, IContentControl, IFrameworkElement, IItemsControl, IPanel, ITextBlock, ITextBox,
-    PropertyValue, RoutedEventArgs, UIElement,
+    FrameworkElement, IButtonBase, IContentControl, IFrameworkElement, IImage, IItemsControl, IPanel, ITextBlock,
+    ITextBox, PropertyValue, RoutedEventArgs, UIElement,
 };
 
 const LAYOUT: &str = r##"<Grid xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
@@ -41,7 +41,7 @@ const LAYOUT: &str = r##"<Grid xmlns="http://schemas.microsoft.com/winfx/2006/xa
   </Grid>
   <StackPanel x:Name="Modes" Grid.Row="1" Orientation="Horizontal" Margin="16,0,16,8" />
   <Grid Grid.Row="2" Margin="16,0,16,0">
-    <ListView x:Name="Items" SelectionMode="None" IsItemClickEnabled="False">
+    <ListView x:Name="Items" SelectionMode="None" IsItemClickEnabled="True">
       <ListView.ItemContainerTransitions><TransitionCollection /></ListView.ItemContainerTransitions>
       <ListView.ItemContainerStyle>
         <Style TargetType="ListViewItem">
@@ -56,7 +56,7 @@ const LAYOUT: &str = r##"<Grid xmlns="http://schemas.microsoft.com/winfx/2006/xa
             <ColumnDefinition Width="*" /></Grid.ColumnDefinitions>
           <TextBlock FontSize="12" VerticalAlignment="Center"
                      Foreground="{ThemeResource SystemControlForegroundBaseMediumBrush}" />
-          <Border Grid.Column="1" Width="88" Height="50" Background="#222" />
+          <Image Grid.Column="1" Width="88" Height="50" Stretch="UniformToFill" />
           <StackPanel Grid.Column="2" Margin="10,0,0,0" VerticalAlignment="Center">
             <TextBlock FontSize="13" TextTrimming="CharacterEllipsis" />
             <TextBlock FontSize="11" Foreground="{ThemeResource SystemControlForegroundBaseMediumBrush}" />
@@ -87,6 +87,7 @@ struct Row {
     bvid: String,
     title: String,
     line: String,
+    cover: String,
 }
 
 struct Page {
@@ -95,6 +96,7 @@ struct Page {
     list: RefCell<i64>,
     rows: RefCell<Vec<Row>>,
     mode: RefCell<PlaylistMode>,
+    covers: Covers,
 }
 
 thread_local! {
@@ -114,6 +116,7 @@ pub fn build() -> Result<IFrameworkElement> {
         list: RefCell::new(0),
         rows: RefCell::default(),
         mode: RefCell::new(PlaylistMode::default()),
+        covers: Covers::default(),
     });
     PAGE.with_borrow_mut(|slot| *slot = Some(opened.clone()));
     // A page whose wiring failed still shows, saying why, instead of taking 我的 down with it.
@@ -139,7 +142,8 @@ fn wire(page: &Rc<Page>) -> Result<()> {
     crate::ui::rows::on_row_click(&list, |at| {
         let Some(page) = open_page() else { return };
         let Some(row) = page.rows.borrow().get(at).cloned() else { return };
-        let _ = crate::ui::player::open(false, &row.bvid, &row.title, &row.line);
+        let owner = row.line.split(" · ").next().unwrap_or_default().to_owned();
+        let _ = crate::ui::player::open(false, &row.bvid, &row.title, &owner);
     })?;
     on_row(&list, |at, parts| {
         let Some(page) = open_page() else { return Ok(()) };
@@ -147,6 +151,7 @@ fn wire(page: &Rc<Page>) -> Result<()> {
         let Some(row) = rows.get(at) else { return Ok(()) };
         let number = format!("{}", at + 1);
         parts.GetAt(0)?.cast::<ITextBlock>()?.SetText(&number)?;
+        page.covers.show(&parts.GetAt(1)?.cast::<IImage>()?, &row.cover, 240)?;
         let stack = parts.GetAt(2)?.cast::<IPanel>()?.Children()?.cast::<IVector<UIElement>>()?;
         stack.GetAt(0)?.cast::<ITextBlock>()?.SetText(&row.title)?;
         stack.GetAt(1)?.cast::<ITextBlock>()?.SetText(&row.line)?;
@@ -285,6 +290,7 @@ impl Page {
                 bvid: card.bvid.clone(),
                 title: card.title,
                 line: format!("{} · {} 播放", card.owner.name, card.stats.view),
+                cover: card.cover.clone(),
             })
             .collect();
         let count = rows.len();
