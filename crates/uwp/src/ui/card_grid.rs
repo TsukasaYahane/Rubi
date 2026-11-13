@@ -138,59 +138,67 @@ pub enum Source {
 impl Source {
     /// Page `page` of the list, from 1, and whether another may follow. `now` asked for by hand:
     /// the feed fills even while its sources cool down.
-    async fn fetch(&self, core: &Backend, page: u32, now: bool) -> rubi_core::Result<(Vec<Tile>, bool)> {
+    async fn fetch(&self, core: &Backend, page: u32, now: bool) -> rubi_core::Result<(Vec<Tile>, bool, Option<Note>)> {
         let services = &core.services;
         let videos = |cards: Vec<VideoCard>| cards.into_iter().map(Tile::video).collect::<Vec<_>>();
         match self {
             Self::Recommended => {
-                if page == 1 {
+                let note = if page == 1 {
                     let _ = services.account.ensure_device_ids().await;
-                    if now {
-                        services.home.refresh_now(PER_SOURCE).await?;
+                    let report = if now {
+                        services.home.refresh_now(PER_SOURCE).await?
                     } else {
-                        services.home.refresh(PER_SOURCE).await?;
-                    }
-                }
+                        services.home.refresh(PER_SOURCE).await?
+                    };
+                    let fetched: usize = report.fetched.iter().map(|(_, n)| n).sum();
+                    Some(Note {
+                        kept: report.kept,
+                        blocked: report.blocked,
+                        dup: fetched.saturating_sub(report.kept + report.blocked),
+                    })
+                } else {
+                    None
+                };
                 let mut cards = services.home.next_page(PAGE)?;
                 if now && cards.is_empty() {
                     // Everything in the pool was seen: start over rather than show nothing.
                     services.home.new_session();
                     cards = services.home.next_page(PAGE)?;
                 }
-                Ok((videos(cards.into_iter().map(|r| r.card).collect()), true))
+                Ok((videos(cards.into_iter().map(|r| r.card).collect()), true, note))
             }
             Self::Popular => {
                 let cards = services.discover.popular(page).await?;
                 let more = !cards.is_empty();
-                Ok((videos(cards), more))
+                Ok((videos(cards), more, None))
             }
-            Self::Ranking => Ok((videos(services.discover.ranking().await?), false)),
+            Self::Ranking => Ok((videos(services.discover.ranking().await?), false, None)),
             Self::Zone(region) => {
                 let cards = services.discover.zone_feed(*region, page).await?;
                 let more = !cards.is_empty();
-                Ok((videos(cards), more))
+                Ok((videos(cards), more, None))
             }
             Self::Search(term) => {
                 let (cards, _) = services.discover.search(term, page).await?;
                 let more = !cards.is_empty();
-                Ok((videos(cards), more))
+                Ok((videos(cards), more, None))
             }
             Self::Uploads(mid, order) => {
                 let found = services.space.uploads(*mid, page, *order).await?;
-                Ok((videos(found.items), found.has_more))
+                Ok((videos(found.items), found.has_more, None))
             }
             Self::Rooms(None) => {
                 let rooms = services.live.recommended().await?;
-                Ok((rooms.into_iter().map(Tile::room).collect(), false))
+                Ok((rooms.into_iter().map(Tile::room).collect(), false, None))
             }
             Self::FollowedRooms => {
                 let (mut rooms, more) = services.live.followed(page).await?;
                 rooms.sort_by_key(|r| !r.live);
-                Ok((rooms.into_iter().map(Tile::room).collect(), more))
+                Ok((rooms.into_iter().map(Tile::room).collect(), more, None))
             }
             Self::Rooms(Some(area)) => {
                 let (rooms, more) = services.live.area_rooms(*area, page).await?;
-                Ok((rooms.into_iter().map(Tile::room).collect(), more))
+                Ok((rooms.into_iter().map(Tile::room).collect(), more, None))
             }
         }
     }
@@ -200,8 +208,19 @@ impl Source {
     }
 }
 
-/// A page of cards and whether another may follow, or why there is none.
-type Answer = std::result::Result<(Vec<Tile>, bool), String>;
+/// What the last refresh of the feed did, for the 摘要 line on 首页.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct Note {
+    /// New candidates the refresh left in the pool.
+    pub kept: usize,
+    /// Items the rules turned away.
+    pub blocked: usize,
+    /// Items the sources gave again.
+    pub dup: usize,
+}
+
+/// A page of cards, whether another may follow, and what a refresh did, or why there is none.
+type Answer = std::result::Result<(Vec<Tile>, bool, Option<Note>), String>;
 
 static NEXT_ID: AtomicU64 = AtomicU64::new(1);
 
@@ -228,6 +247,8 @@ pub struct CardGrid {
     turn: Cell<u64>,
     /// What the grid last had to say, shown while its tab is.
     said: RefCell<String>,
+    /// What the last refresh did, for the 摘要 line.
+    note: RefCell<Option<Note>>,
     /// The cells have been set for the grid's width.
     sized: Cell<bool>,
     /// The grid width and columns the cells were last set for.
@@ -252,6 +273,7 @@ impl CardGrid {
             loading: Cell::new(false),
             turn: Cell::new(0),
             said: RefCell::default(),
+            note: RefCell::default(),
             sized: Cell::new(false),
             fitted: Cell::new((0.0, 0)),
             covers: Covers::default(),
@@ -269,9 +291,21 @@ impl CardGrid {
         card_menu::attach(&grid, move |at| {
             let shown = asking.upgrade()?;
             let cards = shown.cards.borrow();
-            Some(match &cards.get(at)?.target {
-                Target::Video { bvid, .. } => card_menu::Target { later: Some(bvid.clone()), link: video_link(bvid) },
-                Target::Room { id, .. } => card_menu::Target { later: None, link: room_link(*id) },
+            let card = cards.get(at)?;
+            // Only the feed can explain a score: other lists are not in the pool it ranks.
+            let fed = shown.source() == Some(Source::Recommended);
+            let recommended = |bvid: &str| {
+                fed.then(|| card_menu::Recommended { bvid: bvid.to_owned(), title: card.title.clone() })
+            };
+            Some(match &card.target {
+                Target::Video { bvid, .. } => card_menu::Target {
+                    later: Some(bvid.clone()),
+                    link: video_link(bvid),
+                    recommended: recommended(bvid),
+                },
+                Target::Room { id, .. } => {
+                    card_menu::Target { later: None, link: room_link(*id), recommended: None }
+                }
             })
         })?;
         let sizing = Rc::downgrade(&shown);
@@ -300,6 +334,11 @@ impl CardGrid {
         self.said.borrow().clone()
     }
 
+    /// What the last refresh did, once the feed has one.
+    pub fn note(&self) -> Option<Note> {
+        *self.note.borrow()
+    }
+
     /// Starts over with `source`.
     pub fn open(self: &Rc<Self>, source: Source) -> Result<()> {
         let working = source.working();
@@ -310,6 +349,7 @@ impl CardGrid {
         self.page.set(1);
         self.ended.set(false);
         self.loading.set(false);
+        *self.note.borrow_mut() = None;
         self.grid.cast::<IItemsControl>()?.Items()?.cast::<IVector<IInspectable>>()?.Clear()?;
         self.say(working);
         self.load_page();
@@ -330,6 +370,7 @@ impl CardGrid {
         self.cards.borrow_mut().clear();
         self.seen.borrow_mut().clear();
         self.said.borrow_mut().clear();
+        *self.note.borrow_mut() = None;
         self.grid.cast::<IItemsControl>()?.Items()?.cast::<IVector<IInspectable>>()?.Clear()
     }
 
@@ -368,8 +409,12 @@ impl CardGrid {
         }
         self.loading.set(false);
         match answer {
-            Ok((cards, more)) => {
+            Ok((cards, more, note)) => {
                 self.ended.set(!more);
+                let summary = note.map(|note| {
+                    *self.note.borrow_mut() = Some(note);
+                    format!("新增 {} 条 · 过滤 {} 条 · 重复 {} 条", note.kept, note.blocked, note.dup)
+                });
                 self.page.set(self.page.get() + 1);
                 let mut seen = self.seen.borrow_mut();
                 let fresh: Vec<Tile> = cards.into_iter().filter(|c| seen.insert(c.key.clone())).collect();
@@ -377,7 +422,13 @@ impl CardGrid {
                 let from = self.cards.borrow().len();
                 self.cards.borrow_mut().extend(fresh);
                 let to = self.cards.borrow().len();
-                self.say(if to == 0 { "暂时没有内容，稍后再打开" } else { "" });
+                // Later pages carry no note of their own: the summary of the first one stands.
+                let said = if to == 0 {
+                    "暂时没有内容，稍后再打开".to_owned()
+                } else {
+                    summary.unwrap_or_else(|| self.said())
+                };
+                self.say(&said);
                 add_rows(&self.grid, from, to)
             }
             Err(problem) => {

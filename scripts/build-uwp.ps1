@@ -82,9 +82,20 @@ foreach ($cpu in $Arch) {
 }
 
 if ($Register) {
-    Add-AppxPackage -Register (Join-Path $layouts['x64'] 'AppxManifest.xml')
-    $registered = Get-AppxPackage -Name 'Rubi'
-    Write-Host "Registered: $($registered.PackageFamilyName)"
+    # Windows keeps an already registered copy where it is, even when the same version is registered
+    # again from another folder: the exe there would stay the old one. So the fresh layout is copied
+    # to the registered folder, which also keeps that copy's local data and its sign-in.
+    $layout = $layouts['x64']
+    $existing = Get-AppxPackage -Name 'Rubi' -ErrorAction SilentlyContinue | Select-Object -First 1
+    if ($existing -and $existing.InstallLocation -and
+        ($existing.InstallLocation.TrimEnd('\') -ne $layout.TrimEnd('\'))) {
+        Copy-Item (Join-Path $layout '*') $existing.InstallLocation -Recurse -Force
+        $registered = $existing
+    } else {
+        Add-AppxPackage -Register (Join-Path $layout 'AppxManifest.xml')
+        $registered = Get-AppxPackage -Name 'Rubi'
+    }
+    Write-Host "Registered: $($registered.PackageFamilyName) at $($registered.InstallLocation)"
 }
 
 if (-not ($Package -or $Store)) { return }

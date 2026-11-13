@@ -1409,6 +1409,7 @@ dependencies = [
  "qrcode",
  "rubi-core",
  "rubi-model",
+ "rubi-store",
  "serde_json",
  "tokio",
  "windows-collections",

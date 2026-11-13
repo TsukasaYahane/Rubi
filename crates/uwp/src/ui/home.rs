@@ -29,6 +29,7 @@ const LAYOUT: &str = r##"
       xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml">
   <Grid.RowDefinitions>
     <RowDefinition Height="Auto" />
+    <RowDefinition Height="Auto" />
     <RowDefinition Height="*" />
   </Grid.RowDefinitions>
   <Grid Margin="16,8,16,8">
@@ -48,6 +49,7 @@ const LAYOUT: &str = r##"
       <Button x:Name="Tab2" Content="排行" /><Button x:Name="Tab3" Content="分区" /><Button x:Name="Tab4" Content="影视" />
     </StackPanel>
     <TextBlock x:Name="Status" Grid.Column="1" FontSize="13" VerticalAlignment="Center" TextTrimming="CharacterEllipsis"
+               Visibility="Collapsed"
                Foreground="{ThemeResource SystemControlForegroundBaseMediumBrush}" />
     <!--refresh-->
     <Button x:Name="Portrait" Grid.Column="4" Background="Transparent" BorderThickness="1" BorderBrush="#0050EF"
@@ -60,7 +62,11 @@ const LAYOUT: &str = r##"
     <Button x:Name="Search" Grid.Column="3" Visibility="Collapsed" Background="Transparent" BorderThickness="0"
             Padding="8,2" VerticalAlignment="Center"><FontIcon Glyph="&#xE721;" FontSize="14" /></Button>
   </Grid>
-  <Grid x:Name="Grids" Grid.Row="1" />
+  <Grid x:Name="FeedNoteRow" Grid.Row="1" Margin="16,0,16,8" Background="Transparent">
+    <TextBlock x:Name="FeedNote" FontSize="12" TextWrapping="NoWrap" TextTrimming="CharacterEllipsis"
+               Foreground="{ThemeResource SystemControlForegroundBaseMediumBrush}" />
+  </Grid>
+  <Grid x:Name="Grids" Grid.Row="2" />
 </Grid>"##;
 
 fn tab_source(tab: usize) -> Option<Source> {
@@ -117,6 +123,15 @@ impl HomePage {
             }
         })?;
         on_click(&page.root, "Search", || show_tab(Tab::Search))?;
+        // The status line doubles as the way into 被过滤内容; a missing one must not keep the page
+        // from being made.
+        if let Ok(status) = named::<crate::xaml::IUIElement>(&page.root, "FeedNoteRow") {
+            if let Ok(revoker) = status.Tapped(move |_: Ref<IInspectable>, _: Ref<crate::xaml::TappedRoutedEventArgs>| {
+                crate::ui::filtered::open();
+            }) {
+                keep(revoker);
+            }
+        }
         on_click(&page.root, "Portrait", || {
             let _ = crate::ui::feed::open_from_pool();
         })?;
@@ -129,7 +144,7 @@ impl HomePage {
     }
 
     pub fn say(&self, text: &str) {
-        let _ = set_text(&self.root, "Status", text);
+        let _ = set_text(&self.root, "FeedNote", text);
     }
 
     /// Fills the feed the first time.
@@ -227,10 +242,25 @@ impl HomePage {
         let said = match self.pgc_shown() {
             Some(zone) => zone.said(),
             None if pgc => String::new(),
-            None => self.grids[current].said(),
+            None => self.status_of(current),
         };
         self.say(&said);
         Ok(())
+    }
+
+    /// What the status line says for `tab`: what went wrong, else what the last refresh did.
+    fn status_of(&self, tab: usize) -> String {
+        let grid = &self.grids[tab];
+        let said = grid.said();
+        if !said.is_empty() {
+            return said;
+        }
+        match grid.note() {
+            Some(note) => {
+                format!("新增 {} 条 · 过滤 {} 条 · 重复 {} 条", note.kept, note.blocked, note.dup)
+            }
+            None => String::new(),
+        }
     }
 
     fn pick_zone(self: &Rc<Self>) -> Result<()> {
@@ -317,7 +347,7 @@ impl HomePage {
         match self.pgc_shown() {
             Some(zone) => self.say(&zone.said()),
             None if tab == PGC_TAB => {}
-            None => self.say(&self.grids[tab].said()),
+            None => self.say(&self.status_of(tab)),
         }
     }
 

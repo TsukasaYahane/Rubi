@@ -8,6 +8,7 @@ use windows_core::{IInspectable, Interface, Ref, Result};
 
 use crate::state::settings::escape;
 use crate::ui::shell::{shell, toast};
+use crate::ui::why;
 use crate::ui::{keep, load_object, post};
 
 /// A cell of a grid menu: wide enough for a filter's longest names.
@@ -24,6 +25,14 @@ pub struct Target {
     /// The video, when 稍后再看 fits it.
     pub later: Option<String>,
     pub link: String,
+    /// The video as the feed sees it, when 为什么推荐 fits it.
+    pub recommended: Option<Recommended>,
+}
+
+/// A card of the feed: enough to explain its score and to mark it not interesting.
+pub struct Recommended {
+    pub bvid: String,
+    pub title: String,
 }
 
 /// One line of a menu and what it does.
@@ -122,9 +131,24 @@ fn requested(
     choices: &impl Fn(usize) -> Option<Vec<Choice>>,
 ) -> Result<()> {
     let source = args.cast::<IRoutedEventArgs>()?.OriginalSource()?;
-    let row = source.cast::<IFrameworkElement>()?.DataContext()?.cast::<IPropertyValue>()?.GetInt32()?;
-    let Some(choices) = choices(row as usize) else { return Ok(()) };
+    let Some(row) = row_of(&source) else { return Ok(()) };
+    let Some(choices) = choices(row) else { return Ok(()) };
     show_menu(list, &source, args, choices)
+}
+
+/// The row index carried by `source` or its nearest ancestor that has one: a click lands on a
+/// cover or a title inside the row, which carry no data of their own.
+fn row_of(source: &IInspectable) -> Option<usize> {
+    let mut element = source.cast::<IFrameworkElement>().ok();
+    while let Some(current) = element {
+        if let Ok(context) = current.DataContext() {
+            if let Ok(index) = context.cast::<IPropertyValue>().and_then(|v| v.GetInt32()) {
+                return Some(index as usize);
+            }
+        }
+        element = current.Parent().ok().and_then(|parent| parent.cast::<IFrameworkElement>().ok());
+    }
+    None
 }
 
 /// Shows `choices` at the pointer over `target`, or by `source` when asked from the keyboard.
@@ -155,8 +179,13 @@ fn item(label: &str) -> String {
 }
 
 fn card_choices(target: Target) -> Vec<Choice> {
-    let Target { later, link } = target;
+    let Target { later, link, recommended } = target;
     let mut choices: Vec<Choice> = Vec::new();
+    if let Some(rec) = recommended {
+        let (bvid, title) = (rec.bvid.clone(), rec.title.clone());
+        choices.push(("为什么推荐".to_owned(), Rc::new(move || why::show(&bvid, &title))));
+        choices.push(("不感兴趣".to_owned(), Rc::new(move || why::ask_dislike(&rec.bvid))));
+    }
     if let Some(bvid) = later {
         choices.push(("稍后再看".to_owned(), Rc::new(move || save_for_later(&bvid))));
     }
