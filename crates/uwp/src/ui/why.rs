@@ -62,7 +62,7 @@ const DISLIKE: &str = r##"<Grid xmlns="http://schemas.microsoft.com/winfx/2006/x
   </Grid>
 </Grid>"##;
 
-fn factor_name(factor: FactorId) -> &'static str {
+pub fn factor_name(factor: FactorId) -> &'static str {
     match factor {
         FactorId::Interest => "兴趣匹配",
         FactorId::Follow => "关注 UP",

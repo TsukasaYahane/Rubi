@@ -7,16 +7,18 @@ pub enum Shelf {
     History,
     Later,
     Favorites,
+    Playlists,
 }
 
 impl Shelf {
-    pub const ALL: [Self; 3] = [Self::History, Self::Later, Self::Favorites];
+    pub const ALL: [Self; 4] = [Self::History, Self::Later, Self::Favorites, Self::Playlists];
 
     pub fn label(self) -> &'static str {
         match self {
             Self::History => "历史记录",
             Self::Later => "稍后再看",
             Self::Favorites => "收藏夹",
+            Self::Playlists => "播放列表",
         }
     }
 }

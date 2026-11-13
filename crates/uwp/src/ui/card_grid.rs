@@ -66,6 +66,8 @@ const GRID: &str = r##"<GridView xmlns="http://schemas.microsoft.com/winfx/2006/
                    Margin="0,2,0,0" Foreground="{ThemeResource SystemControlForegroundBaseMediumBrush}" />
         <Border Background="#0050EF" Padding="5,1" Margin="4" HorizontalAlignment="Left" VerticalAlignment="Top"
                 Visibility="Collapsed"><TextBlock Text="直播中" FontSize="11" Foreground="White" /></Border>
+        <Border Background="#CC0050EF" Padding="5,1" Margin="4" HorizontalAlignment="Right" VerticalAlignment="Top"
+                Visibility="Collapsed"><TextBlock FontSize="11" Foreground="White" /></Border>
       </Grid>
     </DataTemplate>
   </GridView.ItemTemplate>
@@ -85,6 +87,8 @@ pub struct Tile {
     title: String,
     line: String,
     cover: String,
+    /// Why the feed recommended it, shown as a badge; empty for other lists.
+    reason: Option<String>,
     /// A room, and whether it is on air.
     live: Option<bool>,
     target: Target,
@@ -97,6 +101,7 @@ impl Tile {
             line: format!("{} · {} 播放", card.owner.name, count(card.stats.view)),
             title: card.title,
             cover: card.cover,
+            reason: None,
             live: None,
             target: Target::Video { bvid: card.bvid, owner: card.owner.name },
         }
@@ -108,6 +113,7 @@ impl Tile {
             line: room_line(&room),
             title: room.title,
             cover: room.cover,
+            reason: None,
             live: Some(room.live),
             target: Target::Room { id: room.room_id, owner: room.uname, uid: room.uid },
         }
@@ -165,7 +171,16 @@ impl Source {
                     services.home.new_session();
                     cards = services.home.next_page(PAGE)?;
                 }
-                Ok((videos(cards.into_iter().map(|r| r.card).collect()), true, note))
+                let tiles = cards
+                    .into_iter()
+                    .map(|ranked| {
+                        let mut tile = Tile::video(ranked.card);
+                        tile.reason =
+                            ranked.score.main_factor().map(|f| crate::ui::why::factor_name(f).to_owned());
+                        tile
+                    })
+                    .collect();
+                Ok((tiles, true, note))
             }
             Self::Popular => {
                 let cards = services.discover.popular(page).await?;
@@ -491,6 +506,16 @@ impl CardGrid {
         tag.SetBackground(&SolidColorBrush::CreateInstanceWithColor(color)?)?;
         tag.Child()?.cast::<ITextBlock>()?.SetText(if on_air { "直播中" } else { "未开播" })?;
         cover.cast::<IUIElement>()?.SetOpacity(if on_air { 1.0 } else { OFF_AIR_OPACITY })?;
+
+        // Why the feed picked this one, in the corner the ⋯ menu leaves free.
+        let reason = parts.GetAt(4)?;
+        match card.reason.as_deref() {
+            Some(text) => {
+                reason.cast::<IUIElement>()?.SetVisibility(Visibility::Visible)?;
+                reason.cast::<IBorder>()?.Child()?.cast::<ITextBlock>()?.SetText(text)?;
+            }
+            None => reason.cast::<IUIElement>()?.SetVisibility(Visibility::Collapsed)?,
+        }
 
         let near_end = at + LOAD_AHEAD >= cards.len();
         drop(cards);

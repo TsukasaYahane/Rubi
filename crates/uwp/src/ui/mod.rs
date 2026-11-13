@@ -32,6 +32,7 @@ pub mod play_settings;
 pub mod player;
 pub mod player_actions;
 pub mod player_side;
+pub mod playlists;
 pub mod post_list;
 pub mod popup;
 pub mod quality;

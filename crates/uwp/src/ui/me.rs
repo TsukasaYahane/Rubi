@@ -210,7 +210,9 @@ pub fn show() -> Result<()> {
     show_head();
     for (at, shelf) in Shelf::ALL.into_iter().enumerate() {
         on_click(&root, &format!("Shelf{at}"), move || {
-            let _ = open_shelf(shelf, true);
+            if let Err(problem) = open_shelf(shelf, true) {
+                crate::ui::shell::toast(&format!("打不开：{problem}"));
+            }
         })?;
     }
     if let Some(shelf) = SHELF.get() {
