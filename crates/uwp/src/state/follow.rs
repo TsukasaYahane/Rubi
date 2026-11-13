@@ -58,6 +58,11 @@ pub struct Post {
     pub emotes: std::collections::BTreeMap<String, String>,
 }
 
+/// Whether a post is a live room notice, which reads and opens as one.
+fn is_live(link: &str) -> bool {
+    link.starts_with("https://live.bilibili.com/")
+}
+
 fn kind_label(kind: DynamicKind) -> &'static str {
     match kind {
         DynamicKind::Video => "投稿了视频",
@@ -105,7 +110,10 @@ impl Post {
             id: post.id,
             face: post.author_face,
             name: post.author_name,
-            line: format!("{} · {}", age(post.published_at, now), kind_label(post.kind)),
+            line: {
+                let what = if is_live(&link) { "正在直播" } else { kind_label(post.kind) };
+                format!("{} · {what}", age(post.published_at, now))
+            },
             text: joined(&post.title, &post.text),
             clip,
             pictures,
