@@ -396,6 +396,11 @@ impl PostList {
             (self.leaving)();
             return article::open(&post.link);
         }
+        // Anything with words or pictures of its own opens as a page: the whole text, then comments.
+        if !post.text.is_empty() || !post.quote.is_empty() || !post.pictures.is_empty() {
+            (self.leaving)();
+            return crate::ui::post_page::open(&post);
+        }
         if post.link.starts_with("https://") {
             drop(Launcher::LaunchUriAsync(&Uri::CreateUri(&post.link)?)?);
         }

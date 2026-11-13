@@ -34,6 +34,7 @@ pub mod player_actions;
 pub mod player_side;
 pub mod playlists;
 pub mod post_list;
+pub mod post_page;
 pub mod popup;
 pub mod quality;
 pub mod queue;
