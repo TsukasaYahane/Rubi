@@ -40,9 +40,11 @@ const LAYOUT: &str = r##"
   <Border x:Name="UpsPane" Grid.RowSpan="2" BorderThickness="0,0,1,0"
           BorderBrush="{ThemeResource SystemControlForegroundBaseLowBrush}">
     <Grid>
-      <Grid.RowDefinitions><RowDefinition Height="Auto" /><RowDefinition Height="*" /></Grid.RowDefinitions>
+      <Grid.RowDefinitions><RowDefinition Height="Auto" /><RowDefinition Height="Auto" /><RowDefinition Height="*" /></Grid.RowDefinitions>
       <TextBlock Text="关注" FontSize="20" FontWeight="Light" Margin="16,8,16,6" />
-      <ListView x:Name="Ups" Grid.Row="1" SelectionMode="Single" IsItemClickEnabled="True">
+      <TextBox x:Name="UpQuery" Grid.Row="1" Margin="16,0,16,6" FontSize="12" MaxLength="30"
+               PlaceholderText="按名字找人" />
+      <ListView x:Name="Ups" Grid.Row="2" SelectionMode="Single" IsItemClickEnabled="True">
         <ListView.ItemContainerTransitions><TransitionCollection /></ListView.ItemContainerTransitions>
         <ListView.ItemContainerStyle>
           <Style TargetType="ListViewItem">
@@ -98,6 +100,8 @@ fn shown(element: windows_core::Result<UIElement>, on: bool) -> Result<()> {
 pub struct FollowPage {
     root: IFrameworkElement,
     ups: RefCell<Vec<FollowedUp>>,
+    /// Every followed UP as read, before the search box narrows it.
+    everyone: RefCell<Vec<FollowedUp>>,
     posts: Rc<PostList>,
     comments: Rc<CommentList>,
     /// The comment pane is open on a wide window.
@@ -128,6 +132,7 @@ impl FollowPage {
         let page = Rc::new(Self {
             root: root.clone(),
             ups: RefCell::default(),
+        everyone: RefCell::default(),
             posts,
             comments,
             comments_open: Cell::new(false),
@@ -139,6 +144,14 @@ impl FollowPage {
             let list = named::<IFrameworkElement>(&root, name)?;
             let filling = Rc::downgrade(&page);
             on_row(&list, move |at, parts| filling.upgrade().map_or(Ok(()), |p| p.fill_up(at, parts)))?;
+    let typing = Rc::downgrade(&page);
+    crate::ui::keep(named::<crate::xaml::ITextBox>(&page.root, "UpQuery")?.TextChanged(
+        move |_: windows_core::Ref<windows_core::IInspectable>, _: windows_core::Ref<crate::xaml::TextChangedEventArgs>| {
+            if let Some(page) = typing.upgrade() {
+                page.filter_ups();
+            }
+        },
+    )?);
             let picking = Rc::downgrade(&page);
             on_row_click(&list, move |at| {
                 if let Some(page) = picking.upgrade() {
@@ -194,12 +207,35 @@ impl FollowPage {
     }
 
     fn took_ups(&self, found: Vec<FollowedUp>) -> Result<()> {
-        let everyone = FollowedUp { name: "全部".into(), ..FollowedUp::default() };
+        *self.everyone.borrow_mut() = found;
+        self.show_matching()
+    }
+
+    /// Shows the followed UPs whose name holds what the box says.
+    fn show_matching(&self) -> Result<()> {
+        let query = named::<crate::xaml::ITextBox>(&self.root, "UpQuery")
+            .and_then(|b| b.Text())
+            .map(|t| t.to_string().trim().to_lowercase())
+            .unwrap_or_default();
+        let every = FollowedUp { name: "全部".into(), ..FollowedUp::default() };
         let more = FollowedUp { mid: MORE, name: "更多关注".into(), ..FollowedUp::default() };
-        let mut ups = vec![everyone];
-        ups.extend(found);
-        ups.push(more);
+        let mut ups = vec![every];
+        ups.extend(
+            self.everyone
+                .borrow()
+                .iter()
+                .filter(|up| query.is_empty() || up.name.to_lowercase().contains(&query))
+                .cloned(),
+        );
+        if query.is_empty() {
+            ups.push(more);
+        }
         self.show_ups(ups)
+    }
+
+    /// Narrows the list to the box.
+    fn filter_ups(&self) {
+        let _ = self.show_matching();
     }
 
     fn show_ups(&self, ups: Vec<FollowedUp>) -> Result<()> {
