@@ -131,6 +131,8 @@ pub enum Source {
     Ranking,
     /// A zone's feed, by its v2 main region.
     Zone(u32),
+    /// A zone's ranking, by the same region.
+    ZoneRanking(u32),
     /// Live rooms: the recommended ones, or a parent area's.
     Rooms(Option<u32>),
     /// Rooms of followed UPs, those on air first.
@@ -195,6 +197,7 @@ impl Source {
                 let more = !cards.is_empty();
                 Ok((videos(cards), more, None))
             }
+            Self::ZoneRanking(region) => Ok((videos(services.discover.zone_ranking(*region).await?), false, None)),
             Self::Search(term) => {
                 let (cards, _) = services.discover.search(term, page).await?;
                 let more = !cards.is_empty();

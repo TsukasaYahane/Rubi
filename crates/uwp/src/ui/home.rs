@@ -30,6 +30,7 @@ const LAYOUT: &str = r##"
   <Grid.RowDefinitions>
     <RowDefinition Height="Auto" />
     <RowDefinition Height="Auto" />
+    <RowDefinition Height="Auto" />
     <RowDefinition Height="*" />
   </Grid.RowDefinitions>
   <Grid Margin="16,8,16,8">
@@ -70,7 +71,14 @@ const LAYOUT: &str = r##"
     <TextBlock x:Name="FeedNote" FontSize="12" TextWrapping="NoWrap" TextTrimming="CharacterEllipsis"
                Foreground="{ThemeResource SystemControlForegroundBaseMediumBrush}" />
   </Grid>
-  <Grid x:Name="Grids" Grid.Row="2" />
+  <StackPanel x:Name="ZoneModes" Grid.Row="2" Orientation="Horizontal" Margin="16,0,16,8"
+              Visibility="Collapsed">
+    <Button x:Name="ZoneFeed" Content="推荐" Background="Transparent" BorderThickness="0" Padding="0,2"
+            Margin="0,0,18,0" FontSize="14" />
+    <Button x:Name="ZoneRank" Content="排行" Background="Transparent" BorderThickness="0" Padding="0,2"
+            FontSize="14" />
+  </StackPanel>
+  <Grid x:Name="Grids" Grid.Row="3" />
 </Grid>"##;
 
 fn tab_source(tab: usize) -> Option<Source> {
@@ -86,6 +94,9 @@ pub struct HomePage {
     root: IFrameworkElement,
     grids: [Rc<CardGrid>; 4],
     current: Cell<usize>,
+    /// The zone 分区 shows, and whether it shows that zone's ranking.
+    zone_region: Cell<u32>,
+    zone_rank: Cell<bool>,
     /// The 影视 专区 opened so far, by season type, and the one 影视 shows.
     pgc: RefCell<HashMap<u32, Rc<PgcZone>>>,
     pgc_on: Cell<u32>,
@@ -111,7 +122,15 @@ impl HomePage {
         for grid in &grids {
             holder.Append(&grid.element().cast::<UIElement>()?)?;
         }
-        let page = Rc::new(Self { root, grids, current: Cell::new(0), pgc: RefCell::default(), pgc_on: Cell::new(0) });
+        let page = Rc::new(Self {
+            root,
+            grids,
+            current: Cell::new(0),
+            zone_region: Cell::new(0),
+            zone_rank: Cell::new(false),
+            pgc: RefCell::default(),
+            pgc_on: Cell::new(0),
+        });
         for tab in 0..=PGC_TAB {
             let weak = Rc::downgrade(&page);
             on_click(&page.root, &format!("Tab{tab}"), move || {
@@ -124,6 +143,18 @@ impl HomePage {
         on_click(&page.root, "Refresh", move || {
             if let Some(page) = weak.upgrade() {
                 let _ = page.refresh();
+            }
+        })?;
+        let feeding = Rc::downgrade(&page);
+        on_click(&page.root, "ZoneFeed", move || {
+            if let Some(page) = feeding.upgrade() {
+                let _ = page.show_zone(false);
+            }
+        })?;
+        let ranking = Rc::downgrade(&page);
+        on_click(&page.root, "ZoneRank", move || {
+            if let Some(page) = ranking.upgrade() {
+                let _ = page.show_zone(true);
             }
         })?;
         let turning = Rc::downgrade(&page);
@@ -221,6 +252,14 @@ impl HomePage {
             Visibility::Collapsed
         })?;
         // The button says what a click gives, not what is on.
+        named::<IUIElement>(&self.root, "ZoneModes")?.SetVisibility(if self.current.get() == ZONES_TAB {
+            Visibility::Visible
+        } else {
+            Visibility::Collapsed
+        })?;
+        let tint = |on: bool| SolidColorBrush::CreateInstanceWithColor(if on { COBALT } else { DIM });
+        named::<IControl>(&self.root, "ZoneFeed")?.SetForeground(&tint(!self.zone_rank.get())?)?;
+        named::<IControl>(&self.root, "ZoneRank")?.SetForeground(&tint(self.zone_rank.get())?)?;
         let single = shell().is_some_and(|s| s.prefs().single_column);
         let word = if single { "双列" } else { "单列" };
         named::<IContentControl>(&self.root, "Columns")?.SetContent(&PropertyValue::CreateString(word)?)
@@ -376,8 +415,29 @@ impl HomePage {
     fn open_zone(&self, name: &str, region: u32) -> Result<()> {
         named::<IContentControl>(&self.root, "Tab3")?.SetContent(&PropertyValue::CreateString(name)?)?;
         self.current.set(ZONES_TAB);
-        if self.grids[ZONES_TAB].source() != Some(Source::Zone(region)) {
-            self.grids[ZONES_TAB].open(Source::Zone(region))?;
+        self.zone_region.set(region);
+        let source = self.zone_source();
+        if self.grids[ZONES_TAB].source() != Some(source.clone()) {
+            self.grids[ZONES_TAB].open(source)?;
+        }
+        self.show_tab()
+    }
+
+    /// What 分区 should show: the zone's feed, or its ranking.
+    fn zone_source(&self) -> Source {
+        let region = self.zone_region.get();
+        if self.zone_rank.get() { Source::ZoneRanking(region) } else { Source::Zone(region) }
+    }
+
+    /// Switches 分区 between its feed and its ranking.
+    fn show_zone(&self, ranking: bool) -> Result<()> {
+        if self.zone_rank.get() == ranking {
+            return Ok(());
+        }
+        self.zone_rank.set(ranking);
+        let source = self.zone_source();
+        if self.grids[ZONES_TAB].source() != Some(source.clone()) {
+            self.grids[ZONES_TAB].open(source)?;
         }
         self.show_tab()
     }
