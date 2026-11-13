@@ -191,6 +191,32 @@ pub struct SearchPage {
     matches_all: Cell<bool>,
 }
 
+/// The video a pasted address names: a BV id, or an av id turned into one.
+fn video_in(text: &str) -> Option<String> {
+    let bytes = text.as_bytes();
+    let mut at = 0;
+    while at + 2 <= bytes.len() {
+        if text[at..].starts_with("BV") {
+            let rest: String = text[at + 2..].chars().take(10).collect();
+            if rest.len() == 10 && rest.chars().all(|c| c.is_ascii_alphanumeric()) {
+                return Some(format!("BV{rest}"));
+            }
+        }
+        if text[at..].starts_with("av") {
+            let digits: String = text[at + 2..].chars().take_while(char::is_ascii_digit).collect();
+            if !digits.is_empty() {
+                if let Ok(aid) = digits.parse::<u64>() {
+                    if let Some(bvid) = rubi_model::bvid_of_aid(aid) {
+                        return Some(bvid);
+                    }
+                }
+            }
+        }
+        at += 1;
+    }
+    None
+}
+
 impl SearchPage {
     fn new() -> Result<Rc<Self>> {
         let root = load(
@@ -472,6 +498,11 @@ impl SearchPage {
         let term = typed.trim().to_owned();
         if term.is_empty() {
             return self.show_mode(false);
+        }
+        // A pasted video address opens the video instead of looking for it.
+        if let Some(bvid) = video_in(&term) {
+            let _ = crate::ui::player::open(false, &bvid, "", "");
+            return Ok(());
         }
         self.search(term)
     }
