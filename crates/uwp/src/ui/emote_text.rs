@@ -52,12 +52,22 @@ pub fn inlines<'a>(text: &'a str, lookup: impl Fn(&str) -> Option<&'a str>, size
     for piece in pieces(text, lookup) {
         match piece {
             Piece::Text(run) => {
-                for (at, line) in run.split('\n').enumerate() {
-                    if at > 0 {
-                        out.push_str("<LineBreak />");
+                for (is_link, part) in split_links(run) {
+                    if is_link {
+                        out.push_str(&format!(
+                            r##"<Hyperlink NavigateUri="{}"><Run Text="{}" Foreground="#0050EF" /></Hyperlink>"##,
+                            escape(part),
+                            escape(&link_label(part))
+                        ));
+                        continue;
                     }
-                    if !line.is_empty() {
-                        out.push_str(&format!(r#"<Run Text="{}" />"#, escape(line)));
+                    for (at, line) in part.split('\n').enumerate() {
+                        if at > 0 {
+                            out.push_str("<LineBreak />");
+                        }
+                        if !line.is_empty() {
+                            out.push_str(&format!(r#"<Run Text="{}" />"#, escape(line)));
+                        }
                     }
                 }
             }
@@ -81,4 +91,35 @@ pub fn show(rich: &IRichTextBlock, text: &str, own: &BTreeMap<String, String>, s
     let blocks = rich.Blocks()?.cast::<IVector<Block>>()?;
     blocks.Clear()?;
     blocks.Append(&load_object(&paragraph)?.cast::<Block>()?)
+}
+
+/// Cuts `run` into plain and link pieces: a link ends at the next blank or 中文 punctuation.
+fn split_links(run: &str) -> Vec<(bool, &str)> {
+    let mut out = Vec::new();
+    let mut at = 0;
+    while let Some(found) = run[at..].find("http") {
+        let start = at + found;
+        let rest = &run[start..];
+        if !(rest.starts_with("https://") || rest.starts_with("http://")) {
+            at = start + 4;
+            continue;
+        }
+        let end = rest.find(|c: char| c.is_whitespace() || "，。！？；、）】".contains(c)).map_or(run.len(), |i| start + i);
+        if start > at {
+            out.push((false, &run[at..start]));
+        }
+        out.push((true, &run[start..end]));
+        at = end;
+    }
+    if at < run.len() {
+        out.push((false, &run[at..]));
+    }
+    out
+}
+
+/// What a link reads as: its host, and an ellipsis when there is a path behind it.
+fn link_label(url: &str) -> String {
+    let rest = url.split_once("://").map_or(url, |(_, r)| r);
+    let host = rest.split('/').next().unwrap_or(rest);
+    if rest.contains('/') { format!("{host}/…") } else { host.to_owned() }
 }

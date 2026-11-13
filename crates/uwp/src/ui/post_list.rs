@@ -356,6 +356,10 @@ impl PostList {
             (self.leaving)();
             return feed::route(&clip.bvid, &clip.title, &clip.owner);
         }
+        if let Some(room) = live_room_of(&post.link) {
+            (self.leaving)();
+            return crate::ui::live_room::open(room, &post.line, &post.name, 0);
+        }
         if post.readable && !post.link.is_empty() {
             (self.leaving)();
             return article::open(&post.link);
@@ -365,4 +369,9 @@ impl PostList {
         }
         Ok(())
     }
+}
+
+/// The room id in a live room link, if the link is one.
+fn live_room_of(link: &str) -> Option<u64> {
+    link.strip_prefix("https://live.bilibili.com/")?.split(['?', '/']).next()?.parse().ok()
 }
