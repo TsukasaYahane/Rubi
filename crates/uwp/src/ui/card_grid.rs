@@ -139,6 +139,8 @@ pub enum Source {
     Search(Arc<str>),
     /// An UP's uploads.
     Uploads(u64, UpOrder),
+    /// An UP's uploads matching a keyword (空间内搜索).
+    UpSearch(u64, UpOrder, Arc<str>),
 }
 
 impl Source {
@@ -200,6 +202,10 @@ impl Source {
             }
             Self::Uploads(mid, order) => {
                 let found = services.space.uploads(*mid, page, *order).await?;
+                Ok((videos(found.items), found.has_more, None))
+            }
+            Self::UpSearch(mid, order, keyword) => {
+                let found = services.space.search_uploads(*mid, page, *order, keyword).await?;
                 Ok((videos(found.items), found.has_more, None))
             }
             Self::Rooms(None) => {

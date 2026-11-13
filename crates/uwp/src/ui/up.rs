@@ -96,6 +96,11 @@ const LAYOUT: &str = r##"
       </StackPanel>
       <TextBlock x:Name="Status" Grid.Column="1" FontSize="12" VerticalAlignment="Center" TextTrimming="CharacterEllipsis"
                  Foreground="{ThemeResource SystemControlForegroundBaseMediumBrush}" />
+      <StackPanel Grid.Column="2" Orientation="Horizontal" VerticalAlignment="Center">
+        <TextBox x:Name="UpQuery" Width="180" FontSize="12" PlaceholderText="在这个空间里搜索" MaxLength="40" />
+        <Button x:Name="UpSearch" Content="搜索" Margin="6,0,0,0" FontSize="12" Background="#0050EF"
+                Foreground="White" BorderThickness="0" Padding="12,4" />
+      </StackPanel>
     </Grid>
     <StackPanel x:Name="Orders" Grid.Row="1" Orientation="Horizontal" Margin="16,0,16,6">
       <Button x:Name="Order0" Content="最新" Background="Transparent" BorderThickness="0" Padding="0" Margin="0,0,16,0"
@@ -153,6 +158,8 @@ pub struct UpPage {
     articles_loading: Cell<bool>,
     tab: Cell<usize>,
     order: Cell<UpOrder>,
+    /// What 空间内搜索 found, if the box holds something.
+    keyword: RefCell<Option<String>>,
     followed: Cell<bool>,
     /// 取消关注 was asked once.
     confirming: Cell<bool>,
@@ -236,6 +243,7 @@ impl UpPage {
             articles_loading: Cell::new(false),
             tab: Cell::new(0),
             order: Cell::new(UpOrder::Pubdate),
+            keyword: RefCell::default(),
             followed: Cell::new(false),
             confirming: Cell::new(false),
             covers: Covers::default(),
@@ -258,11 +266,23 @@ impl UpPage {
             on_click(&page.root, &format!("Order{at}"), move || {
                 if let Some(page) = weak.upgrade() {
                     page.order.set(order);
-                    let _ = page.uploads.open(Source::Uploads(page.mid, order));
+                    let _ = page.open_uploads();
                     let _ = page.mark();
                 }
             })?;
         }
+        let searching = Rc::downgrade(&page);
+        on_click(&page.root, "UpSearch", move || {
+            if let Some(page) = searching.upgrade() {
+                let _ = page.search();
+            }
+        })?;
+        let typing = Rc::downgrade(&page);
+        crate::ui::on_enter(&page.root, "UpQuery", move || {
+            if let Some(page) = typing.upgrade() {
+                let _ = page.search();
+            }
+        })?;
         let weak = Rc::downgrade(&page);
         on_click(&page.root, "FollowUp", move || {
             if let Some(page) = weak.upgrade() {
@@ -283,6 +303,30 @@ impl UpPage {
             }
         })?;
         Ok(page)
+    }
+
+    /// What 投稿 shows: the whole space, or what a keyword finds in it.
+    fn upload_source(&self) -> Source {
+        let keyword = self.keyword.borrow().clone();
+        match keyword {
+            Some(word) if !word.is_empty() => Source::UpSearch(self.mid, self.order.get(), word.into()),
+            _ => Source::Uploads(self.mid, self.order.get()),
+        }
+    }
+
+    /// Reads 投稿 from the top with what the box holds.
+    fn open_uploads(&self) -> Result<()> {
+        self.uploads.open(self.upload_source())
+    }
+
+    /// Takes the box as the keyword and reads 投稿 again.
+    fn search(&self) -> Result<()> {
+        let word = named::<crate::xaml::ITextBox>(&self.root, "UpQuery")?.Text()?.to_string();
+        let word = word.trim().to_owned();
+        *self.keyword.borrow_mut() = (!word.is_empty()).then_some(word);
+        self.tab.set(0);
+        self.arrange()?;
+        self.open_uploads()
     }
 
     fn arrange(&self) -> Result<()> {
@@ -313,7 +357,7 @@ impl UpPage {
         named::<IUIElement>(&self.root, "Orders")?.SetVisibility(shown(tab == 0))?;
         match tab {
             0 if self.uploads.source().is_none() => {
-                let source = Source::Uploads(self.mid, self.order.get());
+                let source = self.upload_source();
                 self.uploads.open(source)?;
             }
             POSTS_TAB if !self.posts.started() => self.posts.show_up(self.mid)?,
