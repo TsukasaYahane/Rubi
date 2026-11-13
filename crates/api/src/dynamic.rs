@@ -14,6 +14,8 @@ use crate::parse::{card_of_dynamic, https_image, image_of, str_of, u64_of};
 const PORTAL: &str = "https://api.bilibili.com/x/polymer/web-dynamic/v1/portal";
 const FEED: &str = "https://api.bilibili.com/x/polymer/web-dynamic/v1/feed/all";
 /// `feed/all` with `host_mid` only knows followed UPs; this one knows everyone.
+/// What to ask the feed for: the 图文 style the web page uses.
+const OPUS_FEATURES: &str = "itemOpusStyle,listOnlyfans,opusBigCover,onlyfansVote";
 const SPACE: &str = "https://api.bilibili.com/x/polymer/web-dynamic/v1/feed/space";
 const SPACE_SEARCH: &str = "https://api.bilibili.com/x/polymer/web-dynamic/v1/feed/space/search";
 
@@ -87,7 +89,7 @@ pub(crate) fn dynamic_of(item: &Value) -> Dynamic {
         author_name: str_of(&author["name"]),
         author_face: image_of(&author["face"]),
         published_at: u64_of(&author["pub_ts"]) as i64,
-        text: str_of(&md["desc"]["text"]),
+        text: str_of(&md["desc"]["text"]).trim().to_owned(),
         comment_kind: u64_of(&item["basic"]["comment_type"]) as u32,
         comment_oid: u64_of(&item["basic"]["comment_id_str"]),
         comment_count: u64_of(&item["modules"]["module_stat"]["comment"]["count"]),
@@ -116,7 +118,7 @@ pub(crate) fn dynamic_of(item: &Value) -> Dynamic {
             d.kind = if d.kind == DynamicKind::Article { DynamicKind::Article } else { DynamicKind::Opus };
             d.title = str_of(&o["title"]);
             if d.text.is_empty() {
-                d.text = str_of(&o["summary"]["text"]);
+                d.text = str_of(&o["summary"]["text"]).trim().to_owned();
             }
             d.pictures = pics(&o["pics"], "url");
             d.link = link_of(&o["jump_url"]);
@@ -135,7 +137,7 @@ pub(crate) fn dynamic_of(item: &Value) -> Dynamic {
             let c = &major["common"];
             d.title = str_of(&c["title"]);
             if d.text.is_empty() {
-                d.text = str_of(&c["desc"]);
+                d.text = str_of(&c["desc"]).trim().to_owned();
             }
             d.pictures = Some(image_of(&c["cover"])).filter(|u| !u.is_empty()).into_iter().collect();
             d.link = link_of(&c["jump_url"]);
@@ -203,17 +205,24 @@ impl DynamicApi for WebDynamic {
     }
 
     async fn up_dynamics(&self, mid: u64, offset: Option<&str>) -> Result<(Vec<Dynamic>, Option<String>)> {
-        self.feed(SPACE, params!["host_mid" => mid, "timezone_offset" => -480], offset, true).await
+        // itemOpusStyle asks for the 图文 shape, where the words live in major.opus rather than
+        // in a desc the plain shape leaves null.
+        self.feed(SPACE, params!["host_mid" => mid, "timezone_offset" => -480, "features" => OPUS_FEATURES], offset, true)
+            .await
     }
 
     async fn followed_posts(&self, offset: Option<&str>) -> Result<(Vec<Dynamic>, Option<String>)> {
-        self.feed(FEED, params!["type" => "all", "timezone_offset" => -480], offset, false).await
+        self.feed(FEED, params!["type" => "all", "timezone_offset" => -480, "features" => OPUS_FEATURES], offset, false).await
     }
 
     async fn search_up(&self, mid: u64, keyword: &str, page: u32) -> Result<(Vec<Dynamic>, bool)> {
         let d = self
             .http
-            .get_json(SPACE_SEARCH, params!["host_mid" => mid, "keyword" => keyword, "page" => page.max(1)], false)
+            .get_json(
+                SPACE_SEARCH,
+                params!["host_mid" => mid, "keyword" => keyword, "page" => page.max(1), "features" => OPUS_FEATURES],
+                false,
+            )
             .await?;
         let items = d["items"].as_array().map(|a| a.iter().map(dynamic_of).collect()).unwrap_or_default();
         Ok((items, d["has_more"].as_bool().unwrap_or(false)))
