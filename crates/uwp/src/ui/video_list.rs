@@ -219,7 +219,7 @@ impl VideoList {
             let rows = shown.rows.borrow();
             let row = rows.get(at)?;
             let later = (shown.source.get() != Source::Later).then(|| row.bvid.clone());
-            Some(card_menu::Target { later, link: video_link(&row.bvid), recommended: None })
+            Some(card_menu::Target { later, link: video_link(&row.bvid), recommended: None, add_list: Some(row.bvid.clone()) })
         })?;
         let counting = Rc::downgrade(&shown);
         keep(list.cast::<ISelector>()?.SelectionChanged(

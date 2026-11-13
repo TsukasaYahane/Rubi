@@ -22355,6 +22355,50 @@ impl windows_core::RuntimeType for IMenuFlyoutItemBase {
 pub struct IMenuFlyoutItemBase_Vtbl {
     pub base__: windows_core::IInspectable_Vtbl,
 }
+windows_core::imp::define_interface!(
+    IMenuFlyoutSubItem,
+    IMenuFlyoutSubItem_Vtbl,
+    0xe5386550_fe2c_43e2_a73f_62168f619973
+);
+impl windows_core::RuntimeType for IMenuFlyoutSubItem {
+    const SIGNATURE: windows_core::imp::ConstBuffer = windows_core::imp::ConstBuffer::for_interface::<Self>();
+}
+impl IMenuFlyoutSubItem {
+    pub fn Items(&self) -> windows_core::Result<IVector<MenuFlyoutItemBase>> {
+        unsafe {
+            let mut result__ = core::mem::zeroed();
+            (windows_core::Interface::vtable(self).Items)(windows_core::Interface::as_raw(self), &mut result__)
+                .and_then(|| windows_core::imp::Type::from_abi(result__))
+        }
+    }
+    pub fn Text(&self) -> windows_core::Result<String> {
+        unsafe {
+            let mut result__ = core::mem::zeroed();
+            (windows_core::Interface::vtable(self).Text)(windows_core::Interface::as_raw(self), &mut result__).map(
+                || {
+                    let hstring: windows_core::HSTRING = core::mem::transmute(result__);
+                    hstring.to_string_lossy()
+                },
+            )
+        }
+    }
+    pub fn SetText(&self, value: &str) -> windows_core::Result<()> {
+        unsafe {
+            (windows_core::Interface::vtable(self).SetText)(
+                windows_core::Interface::as_raw(self),
+                core::mem::transmute_copy(&windows_core::HSTRING::from(value)),
+            )
+            .ok()
+        }
+    }
+}
+#[repr(C)]
+pub struct IMenuFlyoutSubItem_Vtbl {
+    pub base__: windows_core::IInspectable_Vtbl,
+    pub Items: unsafe extern "system" fn(*mut core::ffi::c_void, *mut *mut core::ffi::c_void) -> windows_core::HRESULT,
+    pub Text: unsafe extern "system" fn(*mut core::ffi::c_void, *mut *mut core::ffi::c_void) -> windows_core::HRESULT,
+    pub SetText: unsafe extern "system" fn(*mut core::ffi::c_void, *mut core::ffi::c_void) -> windows_core::HRESULT,
+}
 windows_core::imp::define_interface!(IMseStreamSource, IMseStreamSource_Vtbl, 0xb0b4198d_02f4_4923_88dd_81bc3f360ffa);
 impl windows_core::RuntimeType for IMseStreamSource {
     const SIGNATURE: windows_core::imp::ConstBuffer = windows_core::imp::ConstBuffer::for_interface::<Self>();
@@ -32474,6 +32518,37 @@ impl windows_core::RuntimeName for MenuFlyoutItemBase {
 }
 unsafe impl Send for MenuFlyoutItemBase {}
 unsafe impl Sync for MenuFlyoutItemBase {}
+#[repr(transparent)]
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct MenuFlyoutSubItem(windows_core::IUnknown);
+windows_core::imp::interface_hierarchy!(MenuFlyoutSubItem, windows_core::IUnknown, windows_core::IInspectable);
+windows_core::imp::required_hierarchy!(
+    MenuFlyoutSubItem,
+    MenuFlyoutItemBase,
+    Control,
+    FrameworkElement,
+    UIElement,
+    DependencyObject
+);
+impl windows_core::RuntimeType for MenuFlyoutSubItem {
+    const SIGNATURE: windows_core::imp::ConstBuffer =
+        windows_core::imp::ConstBuffer::for_class::<Self, IMenuFlyoutSubItem>();
+}
+unsafe impl windows_core::Interface for MenuFlyoutSubItem {
+    type Vtable = <IMenuFlyoutSubItem as windows_core::Interface>::Vtable;
+    const IID: windows_core::GUID = <IMenuFlyoutSubItem as windows_core::Interface>::IID;
+}
+impl core::ops::Deref for MenuFlyoutSubItem {
+    type Target = IMenuFlyoutSubItem;
+    fn deref(&self) -> &Self::Target {
+        unsafe { core::mem::transmute(self) }
+    }
+}
+impl windows_core::RuntimeName for MenuFlyoutSubItem {
+    const NAME: &'static str = "Windows.UI.Xaml.Controls.MenuFlyoutSubItem";
+}
+unsafe impl Send for MenuFlyoutSubItem {}
+unsafe impl Sync for MenuFlyoutSubItem {}
 #[repr(transparent)]
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct MseStreamSource(windows_core::IUnknown);

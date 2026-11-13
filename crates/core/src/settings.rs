@@ -246,7 +246,14 @@ impl<S: KvRepo + Send + Sync> RuleSource for SettingsService<S> {
 
 impl<S: KvRepo + Send + Sync> FeedConfig for SettingsService<S> {
     fn feed_settings(&self) -> FeedSettings {
-        self.current().settings.feed.clone()
+        let mut feed = self.current().settings.feed.clone();
+        // 0.15 was the old default for 重复曝光, far too small to move a card the user passed
+        // over. Settings saved back then carry it, so a stored default is lifted to the new one;
+        // a weight the user picked on purpose is anything else and stays.
+        if feed.weights.0.get(&rubi_recommend::FactorId::RepeatExposure).is_some_and(|w| *w == 0.15) {
+            feed.weights.0.insert(rubi_recommend::FactorId::RepeatExposure, 0.50);
+        }
+        feed
     }
 }
 

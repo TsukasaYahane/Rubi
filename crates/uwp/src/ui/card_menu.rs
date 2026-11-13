@@ -27,6 +27,8 @@ pub struct Target {
     pub link: String,
     /// The video as the feed sees it, when 为什么推荐 fits it.
     pub recommended: Option<Recommended>,
+    /// The video, when 加入播放列表 fits it.
+    pub add_list: Option<String>,
 }
 
 /// A card of the feed: enough to explain its score and to mark it not interesting.
@@ -38,10 +40,40 @@ pub struct Recommended {
 /// One line of a menu and what it does.
 pub type Choice = (String, Rc<dyn Fn()>);
 
+/// One line of a card's menu: something it does, or a submenu of further lines.
+pub struct Item {
+    pub label: String,
+    pub act: Option<Rc<dyn Fn()>>,
+    pub children: Vec<Item>,
+}
+
+impl Item {
+    /// A line that runs `act`.
+    pub fn act(label: impl Into<String>, act: impl Fn() + 'static) -> Self {
+        Self { label: label.into(), act: Some(Rc::new(act)), children: Vec::new() }
+    }
+
+    /// A line that opens `children`.
+    pub fn sub(label: impl Into<String>, children: Vec<Item>) -> Self {
+        Self { label: label.into(), act: None, children }
+    }
+}
+
 /// Offers a card's menu on `list`, whose rows are numbered by their data; `target` says what row is
 /// what.
 pub fn attach(list: &IFrameworkElement, target: impl Fn(usize) -> Option<Target> + 'static) -> Result<()> {
-    attach_choices(list, move |at| target(at).map(card_choices))
+    attach_items(list, move |at| target(at).map(card_choices))
+}
+
+/// Offers on `list` the card menu `items` gives for a row; none for an empty one.
+fn attach_items(list: &IFrameworkElement, choices: impl Fn(usize) -> Option<Vec<Item>> + 'static) -> Result<()> {
+    keep(list.cast::<IUIElement4>()?.ContextRequested(
+        move |sender: Ref<UIElement>, args: Ref<ContextRequestedEventArgs>| {
+            let (Ok(sender), Ok(args)) = (sender.ok(), args.ok()) else { return };
+            let _ = request(sender, &args, &choices);
+        },
+    )?);
+    Ok(())
 }
 
 /// Offers on `list` the menu `choices` gives for a row; none for an empty one.
@@ -68,7 +100,8 @@ pub fn show_grid_under(button: &FrameworkElement, choices: Vec<Choice>, chosen: 
     let cells: String = choices
         .iter()
         .enumerate()
-        .map(|(at, (label, _))| {
+        .map(|(at, choice)| {
+            let (label, _) = choice;
             let tint = if chosen == Some(at) { r##" Foreground="#0050EF" BorderBrush="#0050EF""## } else { "" };
             format!(
                 r##"<Button AutomationProperties.AutomationId="Pick{at}" Content="{}" Margin="3" Padding="8,4" FontSize="13" BorderThickness="1"
@@ -136,9 +169,30 @@ fn requested(
     show_menu(list, &source, args, choices)
 }
 
+/// The same, for a card's tree menu.
+fn request(
+    list: &UIElement,
+    args: &ContextRequestedEventArgs,
+    choices: &impl Fn(usize) -> Option<Vec<Item>>,
+) -> Result<()> {
+    let source = args.cast::<IRoutedEventArgs>()?.OriginalSource()?;
+    let Some(row) = row_of(&source) else { return Ok(()) };
+    let Some(items) = choices(row) else { return Ok(()) };
+    let asked = args.cast::<IContextRequestedEventArgs>()?;
+    asked.SetHandled(true)?;
+    let mut point = Point::default();
+    let by_pointer = asked.TryGetPosition(list, &mut point)?;
+    let menu = menu_items(&items)?;
+    if by_pointer {
+        menu.cast::<IMenuFlyout2>()?.ShowAt(list, point)
+    } else {
+        menu.cast::<IFlyoutBase>()?.ShowAt(&source.cast::<FrameworkElement>()?)
+    }
+}
+
 /// The row index carried by `source` or its nearest ancestor that has one: a click lands on a
 /// cover or a title inside the row, which carry no data of their own.
-fn row_of(source: &IInspectable) -> Option<usize> {
+pub fn row_of(source: &IInspectable) -> Option<usize> {
     let mut element = source.cast::<IFrameworkElement>().ok();
     while let Some(current) = element {
         if let Ok(context) = current.DataContext() {
@@ -174,40 +228,94 @@ fn show_menu(
     }
 }
 
-fn item(label: &str) -> String {
-    format!(r##"<MenuFlyoutItem Text="{}" />"##, escape(label))
+fn item_xaml(item: &Item) -> String {
+    if item.children.is_empty() {
+        return format!(r##"<MenuFlyoutItem Text="{}" />"##, escape(&item.label));
+    }
+    let inner: String = item.children.iter().map(item_xaml).collect();
+    format!(r##"<MenuFlyoutSubItem Text="{}">{}</MenuFlyoutSubItem>"##, escape(&item.label), inner)
 }
 
-fn card_choices(target: Target) -> Vec<Choice> {
-    let Target { later, link, recommended } = target;
-    let mut choices: Vec<Choice> = Vec::new();
+/// A flat choice as a leaf item.
+fn leaf(choice: &Choice) -> Item {
+    let (label, act) = choice;
+    Item { label: label.clone(), act: Some(act.clone()), children: Vec::new() }
+}
+
+/// The actions of `items` in the order their lines appear, submenus flattened.
+fn actions(items: &[Item], out: &mut Vec<Rc<dyn Fn()>>) {
+    for item in items {
+        if item.children.is_empty() {
+            if let Some(act) = &item.act {
+                out.push(act.clone());
+            }
+        } else {
+            actions(&item.children, out);
+        }
+    }
+}
+
+fn card_choices(target: Target) -> Vec<Item> {
+    let Target { later, link, recommended, add_list } = target;
+    let mut choices: Vec<Item> = Vec::new();
     if let Some(rec) = recommended {
         let (bvid, title) = (rec.bvid.clone(), rec.title.clone());
-        choices.push(("为什么推荐".to_owned(), Rc::new(move || why::show(&bvid, &title))));
-        choices.push(("不感兴趣".to_owned(), Rc::new(move || why::ask_dislike(&rec.bvid))));
+        choices.push(Item::act("为什么推荐", move || why::show(&bvid, &title)));
+        let dislike = rec.bvid.clone();
+        choices.push(Item::act("不感兴趣", move || why::ask_dislike(&dislike)));
     }
     if let Some(bvid) = later {
-        choices.push(("稍后再看".to_owned(), Rc::new(move || save_for_later(&bvid))));
+        choices.push(Item::act("稍后再看", move || save_for_later(&bvid)));
     }
-    choices.push(("复制链接".to_owned(), Rc::new(move || copy(&link))));
+    if let Some(bvid) = add_list {
+        let children = list_choices(&bvid);
+        if !children.is_empty() {
+            choices.push(Item::sub("加入播放列表", children));
+        }
+    }
+    choices.push(Item::act("复制链接", move || copy(&link)));
     choices
 }
 
 fn menu(choices: Vec<Choice>) -> Result<IInspectable> {
-    let items: String = choices.iter().map(|(label, _)| item(label)).collect();
+    let items: Vec<Item> = choices.iter().map(leaf).collect();
+    menu_items(&items)
+}
+
+/// Builds the flyout for `items` and binds each leaf to its action.
+fn menu_items(items: &[Item]) -> Result<IInspectable> {
+    let lines: String = items.iter().map(item_xaml).collect();
     let menu = load_object(&format!(
-        r##"<MenuFlyout xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation">{items}</MenuFlyout>"##
+        r##"<MenuFlyout xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation">{lines}</MenuFlyout>"##
     ))?;
     let listed = menu.cast::<IMenuFlyout>()?.Items()?;
-    for (at, (_, act)) in choices.into_iter().enumerate() {
-        keep(
-            listed
-                .GetAt(at as u32)?
-                .cast::<IMenuFlyoutItem>()?
-                .Click(move |_: Ref<IInspectable>, _: Ref<RoutedEventArgs>| act())?,
-        );
+    let mut leaves: Vec<Rc<dyn Fn()>> = Vec::new();
+    actions(items, &mut leaves);
+    let mut at = 0usize;
+    for slot in 0..listed.Size()? {
+        let element = listed.GetAt(slot)?;
+        match element.cast::<crate::xaml::IMenuFlyoutSubItem>() {
+            Ok(sub) => {
+                let inner = sub.Items()?;
+                for row in 0..inner.Size()? {
+                    bind(&inner.GetAt(row)?, &leaves, &mut at);
+                }
+            }
+            Err(_) => bind(&element, &leaves, &mut at),
+        }
     }
     Ok(menu)
+}
+
+/// Binds the next leaf action to `element`.
+fn bind(element: &crate::xaml::MenuFlyoutItemBase, leaves: &[Rc<dyn Fn()>], at: &mut usize) {
+    let Some(act) = leaves.get(*at).cloned() else { return };
+    *at += 1;
+    if let Ok(line) = element.cast::<IMenuFlyoutItem>() {
+        if let Ok(revoker) = line.Click(move |_: Ref<IInspectable>, _: Ref<RoutedEventArgs>| act()) {
+            keep(revoker);
+        }
+    }
 }
 
 fn save_for_later(bvid: &str) {
@@ -217,6 +325,52 @@ fn save_for_later(bvid: &str) {
     backend.spawn(async move {
         let said = match core.services.actions.watch_later(&bvid).await {
             Ok(()) => "已加入稍后再看".to_owned(),
+            Err(problem) => format!("加入失败：{problem}"),
+        };
+        post(&dispatcher, move || toast(&said));
+    });
+}
+
+/// The play lists to choose from, as menu lines.
+fn list_choices(bvid: &str) -> Vec<Item> {
+    let Some(shell) = shell() else { return Vec::new() };
+    let Some(backend) = shell.backend.get() else { return Vec::new() };
+    let lists = backend.services.playlists.lists().unwrap_or_default();
+    lists
+        .into_iter()
+        .map(|list| {
+            let label = format!("{} · {}", list.name, list.count);
+            let bvid = bvid.to_owned();
+            let id = list.id;
+            Item::act(label, move || add_to(id, &bvid))
+        })
+        .collect()
+}
+
+/// Puts `bvid` in list `list`.
+fn add_to(list: i64, bvid: &str) {
+    let Some(shell) = shell() else { return };
+    let Some(backend) = shell.backend.get().cloned() else { return };
+    let (bvid, dispatcher, core) = (bvid.to_owned(), shell.dispatcher.clone(), backend.clone());
+    backend.spawn(async move {
+        let said = match core.services.playlists.add(list, &bvid).await {
+            Ok(true) => "已加入播放列表".to_owned(),
+            Ok(false) => "已经在播放列表里".to_owned(),
+            Err(problem) => format!("加入失败：{problem}"),
+        };
+        post(&dispatcher, move || toast(&said));
+    });
+}
+
+/// Puts `bvid` in the default play list, which 播放全部 plays.
+pub fn add_to_default(bvid: &str) {
+    let Some(shell) = shell() else { return };
+    let Some(backend) = shell.backend.get().cloned() else { return };
+    let (bvid, dispatcher, core) = (bvid.to_owned(), shell.dispatcher.clone(), backend.clone());
+    backend.spawn(async move {
+        let said = match core.services.playlists.add(rubi_core::DEFAULT_PLAYLIST, &bvid).await {
+            Ok(true) => "已加入播放列表".to_owned(),
+            Ok(false) => "已经在播放列表里".to_owned(),
             Err(problem) => format!("加入失败：{problem}"),
         };
         post(&dispatcher, move || toast(&said));

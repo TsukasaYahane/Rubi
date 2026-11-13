@@ -317,12 +317,30 @@ impl CardGrid {
                     later: Some(bvid.clone()),
                     link: video_link(bvid),
                     recommended: recommended(bvid),
+                    add_list: Some(bvid.clone()),
                 },
-                Target::Room { id, .. } => {
-                    card_menu::Target { later: None, link: room_link(*id), recommended: None }
+                Target::Room { id, .. } => card_menu::Target {
+                    later: None,
+                    link: room_link(*id),
+                    recommended: None,
+                    add_list: None,
                 }
             })
         })?;
+        // Holding a card puts it in the default play list, as Android does.
+        let holding = Rc::downgrade(&shown);
+        keep(grid.cast::<IUIElement>()?.Holding(move |_: Ref<IInspectable>, args: Ref<crate::xaml::HoldingRoutedEventArgs>| {
+            let Some(shown) = holding.upgrade() else { return };
+            let Ok(args) = args.ok() else { return };
+            let source = args.cast::<crate::xaml::IRoutedEventArgs>().and_then(|a| a.OriginalSource());
+            let Ok(source) = source else { return };
+            let Some(at) = card_menu::row_of(&source) else { return };
+            let bvid = match shown.cards.borrow().get(at).map(|c| c.target.clone()) {
+                Some(Target::Video { bvid, .. }) => bvid,
+                _ => return,
+            };
+            card_menu::add_to_default(&bvid);
+        })?);
         let sizing = Rc::downgrade(&shown);
         keep(grid.SizeChanged(move |_: Ref<IInspectable>, _: Ref<SizeChangedEventArgs>| {
             if let Some(shown) = sizing.upgrade() {

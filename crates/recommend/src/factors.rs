@@ -187,7 +187,9 @@ impl Factor for RepeatExposureFactor {
 
     fn score(&self, item: &VideoCard, ctx: &ScoringContext) -> f32 {
         let n = ctx.exposures.get(&item.bvid).copied().unwrap_or(0);
-        -(n as f32 * 0.2).min(1.0)
+        // One showing costs as much as a whole factor: a card the user passed over gives way to
+        // ones they have not seen yet, which is what a fresh page should offer.
+        -(n as f32 * 0.85).min(1.6)
     }
 }
 

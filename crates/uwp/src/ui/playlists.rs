@@ -136,6 +136,11 @@ fn wire(page: &Rc<Page>) -> Result<()> {
     on_click(root, "DeleteList", || delete_list())?;
     on_click(root, "PlayAll", || play_all())?;
     let list = named::<IFrameworkElement>(root, "Items")?;
+    crate::ui::rows::on_row_click(&list, |at| {
+        let Some(page) = open_page() else { return };
+        let Some(row) = page.rows.borrow().get(at).cloned() else { return };
+        let _ = crate::ui::player::open(false, &row.bvid, &row.title, &row.line);
+    })?;
     on_row(&list, |at, parts| {
         let Some(page) = open_page() else { return Ok(()) };
         let rows = page.rows.borrow();

@@ -354,3 +354,6 @@ Windows.Storage.FileAccessMode
 Windows.Storage.Streams.DataReader
 Windows.Storage.Streams.IDataReader
 Windows.Storage.Streams.IDataReaderStatics
+Windows.UI.Xaml.Controls.IMenuFlyoutSubItem
+Windows.UI.Xaml.Controls.MenuFlyoutSubItem
+Windows.UI.Xaml.Controls.IMenuFlyoutItemBase

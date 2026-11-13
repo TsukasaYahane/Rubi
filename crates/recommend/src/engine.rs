@@ -35,7 +35,7 @@ impl Default for Weights {
             (Quality, 0.20),
             (Explore, 0.10),
             (Dislike, 0.40),
-            (RepeatExposure, 0.15),
+            (RepeatExposure, 0.50),
         ]))
     }
 }
