@@ -63,6 +63,34 @@ fn emotes_of(nodes: &Value, into: &mut std::collections::BTreeMap<String, String
     }
 }
 
+/// Fills `d` in from a live room's fields, wherever they were nested.
+fn fill_live(d: &mut Dynamic, info: &Value) {
+    let title = str_of(&info["title"]);
+    if !title.is_empty() {
+        d.title = title;
+    }
+    let cover = image_of(&info["cover"]);
+    if !cover.is_empty() && d.pictures.is_empty() {
+        d.pictures.push(cover);
+    }
+    let link = str_of(&info["link"]);
+    if link.starts_with("https://") {
+        d.link = link;
+    } else if let Some(room) = info["room_id"].as_u64().or_else(|| str_of(&info["room_id"]).parse().ok())
+        && room > 0
+    {
+        d.link = format!("https://live.bilibili.com/{room}");
+    }
+    let mut line = "正在直播".to_owned();
+    for field in ["uname", "area_name"] {
+        let part = str_of(&info[field]);
+        if !part.is_empty() {
+            line = format!("{line} · {part}");
+        }
+    }
+    d.text = line;
+}
+
 /// The words of a rich-text node list, joined as they read.
 pub(crate) fn nodes_text(nodes: &Value) -> String {
     nodes
@@ -142,21 +170,18 @@ pub(crate) fn dynamic_of(item: &Value) -> Dynamic {
             d.pictures = Some(image_of(&c["cover"])).filter(|u| !u.is_empty()).into_iter().collect();
             d.link = link_of(&c["jump_url"]);
         }
-        "MAJOR_TYPE_LIVE_RCMD" => {
-            // The room comes as a JSON string inside content.
-            let raw = str_of(&major["live_rcmd"]["content"]);
-            if let Ok(value) = serde_json::from_str::<Value>(&raw) {
-                let info = &value["live_play_info"];
-                d.title = str_of(&info["title"]);
-                let cover = image_of(&info["cover"]);
-                if !cover.is_empty() {
-                    d.pictures.push(cover);
+        "MAJOR_TYPE_LIVE" | "MAJOR_TYPE_LIVE_RCMD" => {
+            // The room may sit in major.live, in major.live_rcmd, or as a JSON string in the
+            // content field of either, depending on the shape asked for.
+            for slot in [&major["live"], &major["live_rcmd"]] {
+                if slot.is_null() {
+                    continue;
                 }
-                let uname = str_of(&info["uname"]);
-                d.text = if uname.is_empty() { "正在直播".to_owned() } else { format!("正在直播 · {uname}") };
-                let area = str_of(&info["area_name"]);
-                if !area.is_empty() {
-                    d.text = format!("{} · {area}", d.text);
+                let unpacked = serde_json::from_str::<Value>(&str_of(&slot["content"])).ok();
+                let info = unpacked.as_ref().map_or(slot, |v| &v["live_play_info"]);
+                fill_live(&mut d, info);
+                if !d.link.is_empty() {
+                    break;
                 }
             }
         }
