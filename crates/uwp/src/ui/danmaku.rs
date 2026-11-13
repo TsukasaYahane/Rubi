@@ -58,7 +58,7 @@ const EMOTE_PER_FONT: f64 = 1.27;
 const LAYERS: u32 = 5;
 
 /// How long the size must hold still before danmaku are placed again.
-const SETTLE: Duration = Duration::from_millis(200);
+const SETTLE: Duration = Duration::from_millis(500);
 /// Live danmaku kept for placing.
 const LIVE_KEPT: usize = 200;
 /// Segments loaded together after the first.
@@ -393,6 +393,9 @@ impl Overlay {
         // the clip and the placing follow the size seen here.
         if self.clipped.get() != (width, height) {
             self.clip()?;
+            // Place at once for the size as it is now, and again once it settles: a fullscreen
+            // switch animates its layout, so the size seen mid-way is not the one to keep.
+            self.place();
             self.place_when_settled();
         }
         let items = self.items.borrow();
