@@ -264,6 +264,8 @@ pub struct CardGrid {
     said: RefCell<String>,
     /// What the last refresh did, for the 摘要 line.
     note: RefCell<Option<Note>>,
+    /// A held card added the video, so the click that follows it is ignored.
+    swallowed: Cell<bool>,
     /// The cells have been set for the grid's width.
     sized: Cell<bool>,
     /// The grid width and columns the cells were last set for.
@@ -289,6 +291,7 @@ impl CardGrid {
             turn: Cell::new(0),
             said: RefCell::default(),
             note: RefCell::default(),
+            swallowed: Cell::new(false),
             sized: Cell::new(false),
             fitted: Cell::new((0.0, 0)),
             covers: Covers::default(),
@@ -327,6 +330,25 @@ impl CardGrid {
                 }
             })
         })?;
+        // Holding a card puts it in the default play list, as Android does. Only a finger or a
+        // pen raises Holding: a mouse long press does nothing.
+        let holding = Rc::downgrade(&shown);
+        keep(grid.cast::<IUIElement>()?.Holding(
+            move |_: Ref<IInspectable>, args: Ref<crate::xaml::HoldingRoutedEventArgs>| {
+                let Some(shown) = holding.upgrade() else { return };
+                let Ok(args) = args.ok() else { return };
+                let Ok(source) = args.cast::<crate::xaml::IRoutedEventArgs>().and_then(|a| a.OriginalSource()) else {
+                    return;
+                };
+                let Some(at) = card_menu::row_of(&source) else { return };
+                let bvid = match shown.cards.borrow().get(at).map(|c| c.target.clone()) {
+                    Some(Target::Video { bvid, .. }) => bvid,
+                    _ => return,
+                };
+                shown.swallowed.set(true);
+                card_menu::add_to_default(&bvid);
+            },
+        )?);
         let sizing = Rc::downgrade(&shown);
         keep(grid.SizeChanged(move |_: Ref<IInspectable>, _: Ref<SizeChangedEventArgs>| {
             if let Some(shown) = sizing.upgrade() {
@@ -530,6 +552,10 @@ impl CardGrid {
     }
 
     fn open_row(&self, at: usize) -> Result<()> {
+        // A hold that just added the video is not also a click.
+        if self.swallowed.replace(false) {
+            return Ok(());
+        }
         let Some(card) = self.cards.borrow().get(at).cloned() else { return Ok(()) };
         if let Some(leaving) = self.leaving.borrow().as_ref() {
             leaving();

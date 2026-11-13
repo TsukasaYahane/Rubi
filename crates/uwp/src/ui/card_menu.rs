@@ -362,6 +362,21 @@ fn add_to(list: i64, bvid: &str) {
     });
 }
 
+/// Puts `bvid` in the default play list, which a held card and 播放全部 use.
+pub fn add_to_default(bvid: &str) {
+    let Some(shell) = shell() else { return };
+    let Some(backend) = shell.backend.get().cloned() else { return };
+    let (bvid, dispatcher, core) = (bvid.to_owned(), shell.dispatcher.clone(), backend.clone());
+    backend.spawn(async move {
+        let said = match core.services.playlists.add(rubi_core::DEFAULT_PLAYLIST, &bvid).await {
+            Ok(true) => "已加入播放列表".to_owned(),
+            Ok(false) => "已经在播放列表里".to_owned(),
+            Err(problem) => format!("加入失败：{problem}"),
+        };
+        post(&dispatcher, move || toast(&said));
+    });
+}
+
 fn copy(link: &str) {
     copy_text(link, "已复制链接");
 }
