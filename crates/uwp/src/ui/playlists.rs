@@ -35,7 +35,7 @@ const LAYOUT: &str = r##"<Grid xmlns="http://schemas.microsoft.com/winfx/2006/xa
     <Button x:Name="NewList" BorderThickness="0" Grid.Column="1" Content="＋ 新建" Margin="8,0,0,0" Background="Transparent"
             Foreground="#0050EF" Padding="10,4" />
     <Button x:Name="RenameList" BorderThickness="0" Grid.Column="2" Content="重命名" Margin="8,0,0,0" Background="Transparent"
-            BorderThickness="1" BorderBrush="#3A3A3A" Padding="10,4" />
+            Padding="10,4" />
     <Button x:Name="DeleteList" BorderThickness="0" Grid.Column="3" Content="删除" Margin="8,0,0,0" Background="Transparent"
             Foreground="#C04A4A" Padding="10,4" />
   </Grid>
