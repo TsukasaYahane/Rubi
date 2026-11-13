@@ -110,6 +110,10 @@ pub struct PostList {
     posts: RefCell<Vec<Post>>,
     /// The UP whose posts show; 0 for everyone.
     mid: Cell<u64>,
+    /// What to search this UP's posts for; empty for all of them.
+    keyword: RefCell<String>,
+    /// The search page being read.
+    at: Cell<u32>,
     next: RefCell<Option<String>>,
     ended: Cell<bool>,
     loading: Cell<bool>,
@@ -130,6 +134,8 @@ impl PostList {
             comments_asked: RefCell::default(),
             posts: RefCell::default(),
             mid: Cell::new(0),
+            keyword: RefCell::default(),
+            at: Cell::new(1),
             next: RefCell::default(),
             ended: Cell::new(false),
             loading: Cell::new(false),
@@ -173,7 +179,22 @@ impl PostList {
     }
 
     /// Shows `mid`'s posts, or everyone's for 0.
+    /// Shows what a keyword finds in `mid`'s posts; an empty one lists them all.
+    pub fn search_in(&self, mid: u64, keyword: &str) -> Result<()> {
+        *self.keyword.borrow_mut() = keyword.trim().to_owned();
+        self.at.set(1);
+        self.show_up(mid)
+    }
+
     pub fn show_up(&self, mid: u64) -> Result<()> {
+        self.keyword.borrow_mut().clear();
+        self.at.set(1);
+        self.restart(mid)
+    }
+
+
+    /// Reads `mid`'s posts from the top.
+    fn restart(&self, mid: u64) -> Result<()> {
         self.started.set(true);
         self.mid.set(mid);
         self.turn.set(self.turn.get() + 1);
@@ -182,7 +203,7 @@ impl PostList {
         self.ended.set(false);
         self.loading.set(false);
         self.list.cast::<IItemsControl>()?.Items()?.cast::<IVector<IInspectable>>()?.Clear()?;
-        self.say("正在读取…");
+        self.say(if self.keyword.borrow().is_empty() { "正在读取…" } else { "正在搜索动态…" });
         self.load();
         Ok(())
     }
@@ -194,13 +215,24 @@ impl PostList {
             return;
         }
         let (id, mid, turn, cursor) = (self.id, self.mid.get(), self.turn.get(), self.next.borrow().clone());
+        let keyword = self.keyword.borrow().clone();
+        let at = self.at.get().max(1);
+        self.at.set(at + 1);
         let (dispatcher, core) = (shell.dispatcher.clone(), backend.clone());
         backend.spawn(async move {
             let following = &core.services.following;
-            let page = if mid == 0 {
-                following.posts(cursor.as_deref()).await
+            let page = if keyword.is_empty() {
+                if mid == 0 {
+                    following.posts(cursor.as_deref()).await
+                } else {
+                    following.up_posts(mid, cursor.as_deref()).await
+                }
             } else {
-                following.up_posts(mid, cursor.as_deref()).await
+                // The space search pages by number, not by cursor.
+                following
+                    .search_up_posts(mid, &keyword, at)
+                    .await
+                    .map(|(items, more)| (items, more.then(String::new)))
             };
             let page = page.map_err(|e| e.to_string()).map(|(posts, next)| {
                 let now = now();

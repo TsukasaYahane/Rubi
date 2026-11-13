@@ -323,9 +323,11 @@ impl UpPage {
     fn search(&self) -> Result<()> {
         let word = named::<crate::xaml::ITextBox>(&self.root, "UpQuery")?.Text()?.to_string();
         let word = word.trim().to_owned();
-        *self.keyword.borrow_mut() = (!word.is_empty()).then_some(word);
+        *self.keyword.borrow_mut() = (!word.is_empty()).then_some(word.clone());
         self.tab.set(0);
         self.arrange()?;
+        // 投稿 and 动态 are searched together: the space's own search covers videos, 专栏 and 图文.
+        self.posts.search_in(self.mid, &word)?;
         self.open_uploads()
     }
 
