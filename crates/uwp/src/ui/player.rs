@@ -102,7 +102,12 @@ const LAYOUT: &str = r##"
     <Grid Grid.Row="1" <!--second--> />
     <Canvas x:Name="Danmaku" Grid.Row="1" IsHitTestVisible="False" />
     <Button x:Name="ResumeHint" Grid.Row="1" Visibility="Collapsed" HorizontalAlignment="Left" VerticalAlignment="Bottom"
-            Margin="12,0,0,76" Background="#99000000" Foreground="White" BorderThickness="0" Padding="12,6" FontSize="13" />
+            Margin="12,0,0,76" Background="#99000000" Foreground="White" BorderThickness="0" Padding="12,6" FontSize="13">
+      <Button.Resources>
+        <SolidColorBrush x:Key="ButtonForegroundPointerOver" Color="#FFFFFF" />
+        <SolidColorBrush x:Key="ButtonForegroundPressed" Color="#FFFFFF" />
+      </Button.Resources>
+    </Button>
     <!--controls-->
     <ContentControl x:Name="SendBelowVideo" Grid.Row="2" IsTabStop="False" HorizontalContentAlignment="Stretch">
     <Grid x:Name="SendBar" Background="#111111" Padding="12,6" RequestedTheme="Dark">
@@ -862,9 +867,17 @@ fn count_resume(left: u32, run: u64) {
         hide_resume();
         return;
     }
-    let text = format!("上次看到 {} · 点此继续　{left} 秒后隐藏", clock((at_ms / 1000) as i64));
-    if let Ok(button) = named::<IContentControl>(&page.root, "ResumeHint") {
-        let _ = PropertyValue::CreateString(&text).and_then(|t| button.SetContent(&t));
+    // The action stands out in cobalt; the rest stays white when the pointer is over it.
+    let at = clock((at_ms / 1000) as i64);
+    let hint = format!(
+        r##"<TextBlock xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+              xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml" FontSize="13" Foreground="#FFFFFF"><Run Text="上次看到 {at} · " /><Run Text="点此继续" Foreground="#0050EF" /><Run Text="　{left} 秒后隐藏" /></TextBlock>"##
+    );
+    if let Ok(button) = named::<IContentControl>(&page.root, "ResumeHint")
+        && let Ok(content) = crate::ui::load(&hint)
+        && let Ok(element) = content.cast::<crate::xaml::UIElement>()
+    {
+        let _ = button.SetContent(&element);
     }
     let (Some(shell), Some(backend)) = (shell(), shell().and_then(|s| s.backend.get().cloned())) else { return };
     let dispatcher = shell.dispatcher.clone();
