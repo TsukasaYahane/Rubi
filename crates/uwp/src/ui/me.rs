@@ -96,6 +96,9 @@ const ACCOUNT: &str = r##"
 </StackPanel>"##;
 
 fn cat_buttons() -> String {
+    // 设置 is a page of its own; 我的 has no category row.
+    return String::new();
+    #[allow(unreachable_code)]
     Category::ALL
         .iter()
         .enumerate()
@@ -219,7 +222,8 @@ pub fn show() -> Result<()> {
         return open_shelf(shelf, false);
     }
     let signed_in = shell.backend.get().is_some_and(|b| b.services.account.is_logged_in());
-    let category = CATEGORY.get().unwrap_or(if signed_in { Category::Look } else { Category::Account });
+    let _ = signed_in;
+    let category = Category::Account;
     open(category)
 }
 

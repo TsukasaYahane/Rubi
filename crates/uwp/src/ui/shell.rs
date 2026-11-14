@@ -517,6 +517,7 @@ impl Shell {
     fn apply_class(&self) -> Result<()> {
         let class = self.class.get();
         self.apply_rail()?;
+        self.apply_words_icons()?;
         let bare = self.immersive.get();
         let title = GridLength { value: if bare { 0.0 } else { TITLE_HEIGHT }, grid_unit_type: GridUnitType::Pixel };
         named::<IRowDefinition>(&self.root, "TitleRow")?.SetHeight(title)?;
@@ -537,6 +538,23 @@ impl Shell {
             home.style()?;
         }
         self.mark_tab()
+    }
+
+    /// In the words style the rail and the bottom bar keep to type: no icons.
+    fn apply_words_icons(&self) -> Result<()> {
+        let words = self.prefs().words;
+        let shown = if words { Visibility::Collapsed } else { Visibility::Visible };
+        let mut names: Vec<String> = vec!["RailIconSearch".to_owned()];
+        for (_, name) in TABS {
+            names.push(format!("RailIcon{name}"));
+            names.push(format!("BarIcon{name}"));
+        }
+        for name in names {
+            if let Ok(icon) = named::<IUIElement>(&self.root, &name) {
+                icon.SetVisibility(shown)?;
+            }
+        }
+        Ok(())
     }
 
     fn mark_tab(&self) -> Result<()> {
