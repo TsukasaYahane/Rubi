@@ -10,6 +10,9 @@ use crate::ui::{keep, post};
 use crate::xaml::{IMediaPlayer, MediaPlayer};
 
 thread_local! {
+    /// Set while the next video is being fetched, so one ending moves on once.
+    static ADVANCING: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
+
     /// The player making the sound, and the video it is playing.
     static HEARD: RefCell<Option<(MediaPlayer, String)>> = const { RefCell::new(None) };
 }
@@ -76,21 +79,35 @@ fn play(bvid: &str, title: &str, url: &str, headers: &[(String, String)]) {
         toast(&format!("放不出来：{problem}"));
         return;
     }
-    // The next video starts when this one ends.
-    if let Ok(ended) = player.cast::<IMediaPlayer>() {
-        if let Ok(revoker) =
-            ended.MediaEnded(move |_: Ref<MediaPlayer>, _: Ref<IInspectable>| advance())
-        {
+    // The next video starts when this one ends. MediaEnded is not raised for a single audio
+    // file played through an adaptive source, so the session's own state is watched instead.
+    if let Ok(session) = media::session_of(&player) {
+        let watched = session.clone();
+        if let Ok(revoker) = session.PlaybackStateChanged(
+            move |_: Ref<crate::xaml::MediaPlaybackSession>, _: Ref<IInspectable>| {
+                let finished = watched
+                    .cast::<crate::xaml::IMediaPlaybackSession>()
+                    .and_then(|s| s.PlaybackState())
+                    .is_ok_and(|state| state == crate::xaml::MediaPlaybackState::None);
+                if finished && !ADVANCING.replace(true) {
+                    advance();
+                }
+            },
+        ) {
             keep(revoker);
         }
     }
+
     HEARD.with_borrow_mut(|slot| *slot = Some((player, bvid.to_owned())));
     let _ = title;
 }
 
 /// Reads the next video of the listening queue and plays it.
 fn advance() {
-    let Some(shell) = shell() else { return };
+    let Some(shell) = shell() else {
+        ADVANCING.set(false);
+        return;
+    };
     let Some(backend) = shell.backend.get().cloned() else { return };
     let dispatcher = shell.dispatcher.clone();
     let core = backend.clone();
