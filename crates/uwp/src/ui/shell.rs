@@ -191,6 +191,8 @@ pub fn start() -> Result<()> {
             on_click(&root, &format!("{prefix}{name}"), move || show_tab(tab))?;
         }
     }
+    // 设置 sits in the rail, not inside 我的.
+    on_click(&root, "RailSettings", || crate::ui::me::open_settings())?;
     let revoker = window.SizeChanged(|_: Ref<IInspectable>, _: Ref<WindowSizeChangedEventArgs>| {
         let _ = window_resized();
     })?;
