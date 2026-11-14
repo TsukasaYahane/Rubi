@@ -10,36 +10,33 @@ use crate::xaml::{Clipboard, IDataPackageView};
 
 static LAST: Mutex<String> = Mutex::new(String::new());
 
-/// Looks at the clipboard's newest item once: a video address in it opens that video.
+const ASK: &str = r##"<Grid xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+      xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml" Background="#99000000">
+  <Grid HorizontalAlignment="Center" VerticalAlignment="Center" Width="420" Padding="18"
+        Background="{ThemeResource ApplicationPageBackgroundThemeBrush}">
+    <Grid.Resources><CornerRadius x:Key="ControlCornerRadius">0</CornerRadius></Grid.Resources>
+    <Grid.RowDefinitions><RowDefinition Height="Auto" /><RowDefinition Height="Auto" />
+      <RowDefinition Height="Auto" /></Grid.RowDefinitions>
+    <TextBlock Text="剪贴板里有一个视频" FontSize="18" FontWeight="Light" />
+    <TextBlock x:Name="What" Grid.Row="1" Margin="0,8,0,0" FontSize="13" TextWrapping="Wrap"
+               Foreground="{ThemeResource SystemControlForegroundBaseMediumBrush}" />
+    <StackPanel Grid.Row="2" Orientation="Horizontal" HorizontalAlignment="Right" Margin="0,14,0,0">
+      <Button x:Name="Ignore" Content="忽略" Margin="0,0,8,0" Background="Transparent" BorderThickness="0" />
+      <Button x:Name="Open" Content="打开" Background="#0050EF" Foreground="White" BorderThickness="0" />
+    </StackPanel>
+  </Grid>
+</Grid>"##;
+
+/// Remembers what the clipboard holds now, without asking: starting up says nothing.
+pub fn prime() {
+    if let Some(text) = current_text() {
+        *LAST.lock().unwrap_or_else(|e| e.into_inner()) = text;
+    }
+}
+
+/// Looks at the clipboard's newest item; a video address there asks before opening it.
 pub fn check() {
-    handle(current_text());
-}
-
-/// Starts watching, once; a change that holds a video address opens that video.
-pub fn watch() -> windows_core::Result<()> {
-    static STARTED: std::sync::OnceLock<()> = std::sync::OnceLock::new();
-    if STARTED.set(()).is_err() {
-        return Ok(());
-    }
-    keep(Clipboard::ContentChanged(move |_: Ref<IInspectable>, _: Ref<IInspectable>| {
-        // The text is local, so it is read here first; a worker only if that gives nothing.
-        let here = current_text();
-        if here.is_none() {
-            std::thread::spawn(|| handle(current_text()));
-            return;
-        }
-        handle(here);
-    })?);
-    Ok(())
-}
-
-fn handle(text: Option<String>) {
-    // TEMP-PROBE: says the event fired and what came with it.
-    match &text {
-        Some(t) => crate::ui::shell::toast(&format!("剪贴板：{}", t.chars().take(24).collect::<String>())),
-        None => crate::ui::shell::toast("剪贴板：读不到文本"),
-    }
-    let Some(text) = text else { return };
+    let Some(text) = current_text() else { return };
     if text.trim().is_empty() {
         return;
     }
@@ -51,8 +48,23 @@ fn handle(text: Option<String>) {
         *last = text.clone();
     }
     if let Some(bvid) = crate::ui::search::video_in(&text) {
-        let _ = crate::ui::search::open_video(&bvid);
+        let _ = ask(&bvid, &text);
     }
+}
+
+fn ask(bvid: &str, text: &str) -> windows_core::Result<()> {
+    let root = crate::ui::load(ASK)?;
+    let shown: String = text.chars().take(80).collect();
+    let _ = crate::ui::set_text(&root, "What", &shown);
+    let wanted = bvid.to_owned();
+    crate::ui::on_click(&root, "Open", move || {
+        let _ = crate::ui::popup::hide();
+        let _ = crate::ui::search::open_video(&wanted);
+    })?;
+    crate::ui::on_click(&root, "Ignore", || {
+        let _ = crate::ui::popup::hide();
+    })?;
+    crate::ui::popup::show(&root)
 }
 
 /// The clipboard's text, if it has any.
@@ -60,7 +72,6 @@ fn current_text() -> Option<String> {
     let view = Clipboard::GetContent().ok()?;
     let view = view.cast::<IDataPackageView>().ok()?;
     let operation = view.GetTextAsync().ok()?;
-    // Waited for from a worker thread: the UI thread must not block on the clipboard.
     for _ in 0..100 {
         if let Ok(text) = operation.GetResults() {
             return Some(text.to_string_lossy());
