@@ -25,6 +25,11 @@ fn play_current() -> Result<()> {
 }
 
 /// A video page opens `bvid`: the queue goes on only if that is its own.
+/// Forgets the queue: leaving the player page takes a temporary one with it.
+pub fn clear() {
+    QUEUE.with_borrow_mut(|q| *q = None);
+}
+
 pub fn opening(bvid: &str) {
     QUEUE.with_borrow_mut(|q| {
         if q.as_ref().is_some_and(|q| !q.holds(bvid)) {

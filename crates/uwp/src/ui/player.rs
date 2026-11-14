@@ -1479,6 +1479,8 @@ fn open_up() {
 }
 
 fn go_back() {
+    // A queue belongs to the player page: leaving it takes the temporary one with it.
+    queue::clear();
     if let Some(shell) = shell() {
         shell.back();
     }
