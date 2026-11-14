@@ -52,9 +52,6 @@ const WIDE: &str = r##"
       <TextBlock Text="内容" FontSize="12" Margin="16,8,16,2"
                  Foreground="{ThemeResource SystemControlForegroundBaseMediumBrush}" />
       <!--shelves-->
-      <TextBlock Text="设置" FontSize="12" Margin="16,8,16,2"
-                 Foreground="{ThemeResource SystemControlForegroundBaseMediumBrush}" />
-      <!--cats-->
     </StackPanel></ScrollViewer>
   </Border>
   <ScrollViewer x:Name="SettingsHost" Grid.Column="1">
@@ -75,8 +72,6 @@ const NARROW: &str = r##"
     <StackPanel>
       <!--head-->
       <!--shelves-->
-      <ScrollViewer HorizontalScrollBarVisibility="Hidden" HorizontalScrollMode="Enabled" VerticalScrollMode="Disabled"
-                    VerticalScrollBarVisibility="Disabled"><StackPanel Orientation="Horizontal"><!--cats--></StackPanel></ScrollViewer>
       <ContentControl x:Name="Body" IsTabStop="False" HorizontalContentAlignment="Stretch" />
     </StackPanel>
   </ScrollViewer>
@@ -96,21 +91,10 @@ const ACCOUNT: &str = r##"
 </StackPanel>"##;
 
 fn cat_buttons() -> String {
-    // 设置 is a page of its own; 我的 has no category row.
-    return String::new();
-    #[allow(unreachable_code)]
-    Category::ALL
-        .iter()
-        .enumerate()
-        .map(|(at, c)| {
-            format!(
-                r##"<Button x:Name="Cat{at}" Content="{}" Background="Transparent" BorderThickness="0" Height="44"
-                     Padding="16,0" HorizontalAlignment="Stretch" HorizontalContentAlignment="Left" />"##,
-                escape(c.label())
-            )
-        })
-        .collect()
+    // 设置 is a page of its own: 我的 has no category row at all.
+    String::new()
 }
+#[allow(dead_code)]
 
 fn shelf_buttons(narrow: bool) -> String {
     let (arrow, line) = if narrow {
@@ -144,7 +128,7 @@ fn layout(class: WindowClass) -> String {
         .replace("<!--max-->", max)
         .replace("<!--head-->", HEAD)
         .replace("<!--shelves-->", &shelf_buttons(class == WindowClass::Narrow))
-        .replace("<!--cats-->", &cat_buttons())
+        
 }
 
 /// What the head of the page shows of the account.
@@ -238,10 +222,6 @@ fn mark() -> Result<()> {
     let Some(page) = shown() else { return Ok(()) };
     let shelf = SHELF.get();
     let tint = |on: bool| SolidColorBrush::CreateInstanceWithColor(if on { COBALT } else { DIM });
-    for (at, each) in Category::ALL.into_iter().enumerate() {
-        let on = shelf.is_none() && CATEGORY.get() == Some(each);
-        named::<IControl>(&page.root, &format!("Cat{at}"))?.SetForeground(&tint(on)?)?;
-    }
     if page.class != WindowClass::Narrow {
         for (at, each) in Shelf::ALL.into_iter().enumerate() {
             named::<IControl>(&page.root, &format!("Shelf{at}"))?.SetForeground(&tint(shelf == Some(each))?)?;
