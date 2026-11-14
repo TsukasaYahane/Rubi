@@ -170,7 +170,7 @@ const LAYOUT: &str = r##"
           <FontIcon Glyph="&#xE72D;" FontSize="20" /><TextBlock Text="分享" FontSize="12" Margin="0,3,0,0" HorizontalAlignment="Center" /></StackPanel></Button>
         <Button x:Name="ActLater"><StackPanel>
           <FontIcon Glyph="&#xE823;" FontSize="20" /><TextBlock x:Name="LaterText" Text="稍后" FontSize="12" Margin="0,3,0,0" HorizontalAlignment="Center" /></StackPanel></Button>
-        <Button x:Name="ActListen"><StackPanel><FontIcon Glyph="&#xE8D6;" FontSize="20" /><TextBlock Text="听" FontSize="12" Margin="0,3,0,0" HorizontalAlignment="Center" /></StackPanel></Button>
+        <Button x:Name="ActListen"><StackPanel><FontIcon x:Name="ListenIcon" Glyph="&#xE8D6;" FontSize="20" /><TextBlock Text="听" FontSize="12" Margin="0,3,0,0" HorizontalAlignment="Center" /></StackPanel></Button>
       <Button x:Name="ActDanmaku"><StackPanel>
           <FontIcon Glyph="&#xE8BD;" FontSize="20" /><TextBlock x:Name="DanmakuText" Text="弹幕 开" FontSize="12" Margin="0,3,0,0" HorizontalAlignment="Center" /></StackPanel></Button>
         <Button x:Name="ActFollow"><StackPanel>
@@ -1246,6 +1246,7 @@ pub fn open(feed: bool, bvid: &str, title: &str, uploader: &str) -> Result<()> {
         if let Some(page) = page() {
             let bvid = page.bvid.clone();
             crate::ui::listening::start(&bvid);
+            crate::ui::listening::open_panel();
         }
     })?;
     on_click(&root, "ActDanmaku", toggle_danmaku)?;
@@ -1428,7 +1429,9 @@ pub fn open(feed: bool, bvid: &str, title: &str, uploader: &str) -> Result<()> {
 fn settle_buttons(root: &IFrameworkElement) -> Result<()> {
     let words = shell().is_some_and(|s| s.prefs().words);
     let plain = ["Back", "Full", "SendButton", "Prev", "Next", "Normal", "TabComments", "TabRelated", "TabQueue"];
-    let acting = ["ActLike", "ActCoin", "ActFav", "ActShare", "ActLater", "ActDanmaku", "ActFollow", "ActComment"];
+    let acting = [
+        "ActLike", "ActCoin", "ActFav", "ActShare", "ActLater", "ActDanmaku", "ActFollow", "ActComment", "ActListen",
+    ];
     for name in plain.into_iter().chain(acting) {
         if let Ok(button) = named::<IFrameworkElement4>(root, name) {
             button.SetAllowFocusOnInteraction(false)?;
