@@ -1345,12 +1345,22 @@ pub fn open(feed: bool, bvid: &str, title: &str, uploader: &str) -> Result<()> {
     let (info_dispatcher, info_core, info_bvid) = (dispatcher.clone(), core.clone(), bvid.clone());
     backend.spawn(async move {
         let services = &info_core.services;
-        let (detail, related) = tokio::join!(services.videos.detail(&info_bvid), services.discover.related(&info_bvid));
+        // Four reads, one round trip each: they wait on nothing but the network, so they go out
+        // together instead of one after another.
+        let wants_resume = episode.is_none() && !feed;
+        let signed_in = services.account.is_logged_in();
+        let (detail, related, resume, relation) = tokio::join!(
+            services.videos.detail(&info_bvid),
+            services.discover.related(&info_bvid),
+            async {
+                if wants_resume { services.videos.resume_point(&info_bvid).await } else { None }
+            },
+            async {
+                if signed_in { services.actions.relation(&info_bvid).await.ok() } else { None }
+            },
+        );
         let detail = detail.ok();
         let related = related.unwrap_or_default();
-        let resume = if episode.is_none() && !feed { services.videos.resume_point(&info_bvid).await } else { None };
-        let relation =
-            if services.account.is_logged_in() { services.actions.relation(&info_bvid).await.ok() } else { None };
         post(&info_dispatcher, move || {
             let Some(page) = (run == self::run()).then(page).flatten() else { return };
             if let Some(info) = detail {
