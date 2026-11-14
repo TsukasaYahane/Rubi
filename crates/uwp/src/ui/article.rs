@@ -133,7 +133,10 @@ fn show_article(
         }
     });
     host.SetContent(&comments.element().cast::<IInspectable>()?)?;
-    comments.show(CommentArea { kind, oid }, total)?;
+    // A failure here used to be swallowed, leaving the page without comments and no reason.
+    if let Err(problem) = comments.show(CommentArea { kind, oid }, total) {
+        set_text(root, "Status", &format!("评论加载失败：{problem}"))?;
+    }
     COMMENTS.with_borrow_mut(|c| *c = Some(comments));
     Ok(())
 }
