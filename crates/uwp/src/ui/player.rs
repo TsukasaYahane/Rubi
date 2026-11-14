@@ -170,7 +170,8 @@ const LAYOUT: &str = r##"
           <FontIcon Glyph="&#xE72D;" FontSize="20" /><TextBlock Text="分享" FontSize="12" Margin="0,3,0,0" HorizontalAlignment="Center" /></StackPanel></Button>
         <Button x:Name="ActLater"><StackPanel>
           <FontIcon Glyph="&#xE823;" FontSize="20" /><TextBlock x:Name="LaterText" Text="稍后" FontSize="12" Margin="0,3,0,0" HorizontalAlignment="Center" /></StackPanel></Button>
-        <Button x:Name="ActDanmaku"><StackPanel>
+        <Button x:Name="ActListen"><StackPanel><FontIcon Glyph="&#xE8D6;" FontSize="20" /><TextBlock Text="听" FontSize="12" Margin="0,3,0,0" HorizontalAlignment="Center" /></StackPanel></Button>
+      <Button x:Name="ActDanmaku"><StackPanel>
           <FontIcon Glyph="&#xE8BD;" FontSize="20" /><TextBlock x:Name="DanmakuText" Text="弹幕 开" FontSize="12" Margin="0,3,0,0" HorizontalAlignment="Center" /></StackPanel></Button>
         <Button x:Name="ActFollow"><StackPanel>
           <FontIcon Glyph="&#xE8FA;" FontSize="20" /><TextBlock x:Name="FollowText" Text="关注" FontSize="12" Margin="0,3,0,0" HorizontalAlignment="Center" /></StackPanel></Button>
@@ -1241,6 +1242,12 @@ pub fn open(feed: bool, bvid: &str, title: &str, uploader: &str) -> Result<()> {
         filling: Rc::default(),
     };
     PAGE.with(|p| *p.borrow_mut() = Some(opened));
+    on_click(&root, "ActListen", || {
+        if let Some(page) = page() {
+            let bvid = page.bvid.clone();
+            crate::ui::listening::start(&bvid);
+        }
+    })?;
     on_click(&root, "ActDanmaku", toggle_danmaku)?;
     on_click(&root, "Full", toggle_full)?;
     on_click(&root, "WindowFull", toggle_window_full)?;
