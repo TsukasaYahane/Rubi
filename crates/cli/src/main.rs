@@ -88,6 +88,7 @@ async fn run() -> Res<()> {
         "log" => log(&app, arg(1).and_then(|n| n.parse().ok()).unwrap_or(30)),
         "signal" => signal(&app, arg(1).ok_or("缺少 bvid")?, arg(2).ok_or("缺少信号")?).await,
         "dm" => dm(&app, arg(1).ok_or("缺少 bvid")?).await,
+        "dcup" => dcup(&app).await,
         "play" => play(&app, arg(1).ok_or("缺少 bvid")?).await,
         "login" => login(&app, &dir).await,
         "whoami" => {
@@ -195,6 +196,27 @@ async fn signal(app: &Services, bvid: &str, kind: &str) -> Res<()> {
     };
     app.home.record(bvid, signal).await?;
     println!("已记录 {kind} → {}（标签 {:?}）", short(&card.title, 30), card.tags);
+    Ok(())
+}
+
+async fn dcup(app: &Services) -> Res<()> {
+    let ups = app.following.ups().await?;
+    let Some(first) = ups.first() else { println!("没有关注"); return Ok(()) };
+    let (posts, _) = app.following.up_posts(first.mid, None).await?;
+    println!("up {} 动态 {} 条", first.name, posts.len());
+    for post in posts.iter().take(6) {
+        println!(
+            "  id={} kind={:?} ckind={} coid={} count={}",
+            post.id, post.kind, post.comment_kind, post.comment_oid, post.comment_count
+        );
+        if post.comment_oid > 0 {
+            let area = rubi_core::CommentArea { kind: post.comment_kind, oid: post.comment_oid };
+            match app.comments.page(area, false, None).await {
+                Ok(page) => println!("    → {} 楼", page.threads.len()),
+                Err(e) => println!("    → 错 {e}"),
+            }
+        }
+    }
     Ok(())
 }
 

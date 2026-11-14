@@ -29,6 +29,11 @@ pub fn watch() -> windows_core::Result<()> {
 }
 
 fn handle(text: Option<String>) {
+    // TEMP-PROBE: says the event fired and what came with it.
+    match &text {
+        Some(t) => crate::ui::shell::toast(&format!("剪贴板：{}", t.chars().take(24).collect::<String>())),
+        None => crate::ui::shell::toast("剪贴板：读不到文本"),
+    }
     let Some(text) = text else { return };
     if text.trim().is_empty() {
         return;

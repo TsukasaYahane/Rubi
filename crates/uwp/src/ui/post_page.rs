@@ -25,7 +25,7 @@ const LAYOUT: &str = r##"<Grid xmlns="http://schemas.microsoft.com/winfx/2006/xa
     <Grid.Resources><CornerRadius x:Key="ControlCornerRadius">0</CornerRadius></Grid.Resources>
     <Grid.RowDefinitions>
       <RowDefinition Height="Auto" /><RowDefinition Height="Auto" /><RowDefinition Height="*" />
-      <RowDefinition Height="Auto" />
+      <RowDefinition Height="Auto" /><RowDefinition Height="Auto" />
     </Grid.RowDefinitions>
     <StackPanel Orientation="Horizontal">
       <Border Width="36" Height="36" Background="#222"><Image x:Name="Face" Stretch="UniformToFill" /></Border>
@@ -44,10 +44,13 @@ const LAYOUT: &str = r##"<Grid xmlns="http://schemas.microsoft.com/winfx/2006/xa
                          Foreground="{ThemeResource SystemControlForegroundBaseMediumBrush}" />
         </Border>
         <StackPanel x:Name="Pictures" Orientation="Horizontal" Margin="0,10,0,0" Visibility="Collapsed" />
-        <ContentControl x:Name="CommentsHost" Margin="0,14,0,0" IsTabStop="False" Visibility="Collapsed" />
       </StackPanel>
     </ScrollViewer>
-    <StackPanel Grid.Row="3" Orientation="Horizontal" HorizontalAlignment="Right" Margin="0,14,0,0">
+    <Border x:Name="CommentsBox" Grid.Row="3" Height="420" Margin="0,12,0,0" Visibility="Collapsed"
+            BorderThickness="0,1,0,0" BorderBrush="{ThemeResource SystemControlForegroundBaseLowBrush}">
+      <ContentControl x:Name="CommentsHost" IsTabStop="False" VerticalAlignment="Stretch" />
+    </Border>
+    <StackPanel Grid.Row="4" Orientation="Horizontal" HorizontalAlignment="Right" Margin="0,14,0,0">
       <Button x:Name="Close" Content="关闭" Background="#0050EF" Foreground="White" BorderThickness="0" />
     </StackPanel>
   </Grid>
@@ -120,7 +123,7 @@ impl Sheet {
         let list = crate::ui::comment_list::CommentList::new()?;
         named::<crate::xaml::IContentControl>(&self.root, "CommentsHost")?
             .SetContent(&list.element().cast::<crate::xaml::UIElement>()?)?;
-        named::<IUIElement>(&self.root, "CommentsHost")?.SetVisibility(Visibility::Visible)?;
+        named::<IUIElement>(&self.root, "CommentsBox")?.SetVisibility(Visibility::Visible)?;
         list.show(rubi_core::CommentArea { kind, oid }, self.post.comment_count)?;
         COMMENTS.with_borrow_mut(|slot| *slot = Some(list));
         Ok(())
