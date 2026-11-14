@@ -17,25 +17,32 @@ pub fn watch() -> windows_core::Result<()> {
         return Ok(());
     }
     keep(Clipboard::ContentChanged(move |_: Ref<IInspectable>, _: Ref<IInspectable>| {
-        // Reading needs the clipboard's own thread, so it is done off the UI thread.
-        std::thread::spawn(|| {
-            let Some(text) = current_text() else { return };
-            if text.trim().is_empty() {
-                return;
-            }
-            {
-                let mut last = LAST.lock().unwrap_or_else(|e| e.into_inner());
-                if *last == text {
-                    return;
-                }
-                *last = text.clone();
-            }
-            if let Some(bvid) = crate::ui::search::video_in(&text) {
-                let _ = crate::ui::search::open_video(&bvid);
-            }
-        });
+        // The text is local, so it is read here first; a worker only if that gives nothing.
+        let here = current_text();
+        if here.is_none() {
+            std::thread::spawn(|| handle(current_text()));
+            return;
+        }
+        handle(here);
     })?);
     Ok(())
+}
+
+fn handle(text: Option<String>) {
+    let Some(text) = text else { return };
+    if text.trim().is_empty() {
+        return;
+    }
+    {
+        let mut last = LAST.lock().unwrap_or_else(|e| e.into_inner());
+        if *last == text {
+            return;
+        }
+        *last = text.clone();
+    }
+    if let Some(bvid) = crate::ui::search::video_in(&text) {
+        let _ = crate::ui::search::open_video(&bvid);
+    }
 }
 
 /// The clipboard's text, if it has any.

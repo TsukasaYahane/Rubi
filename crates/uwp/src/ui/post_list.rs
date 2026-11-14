@@ -183,7 +183,8 @@ impl PostList {
     pub fn search_in(&self, mid: u64, keyword: &str) -> Result<()> {
         *self.keyword.borrow_mut() = keyword.trim().to_owned();
         self.at.set(1);
-        self.show_up(mid)
+        // restart, not show_up: show_up clears the keyword again.
+        self.restart(mid)
     }
 
     pub fn show_up(&self, mid: u64) -> Result<()> {

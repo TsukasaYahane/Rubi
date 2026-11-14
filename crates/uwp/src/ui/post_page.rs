@@ -25,7 +25,7 @@ const LAYOUT: &str = r##"<Grid xmlns="http://schemas.microsoft.com/winfx/2006/xa
     <Grid.Resources><CornerRadius x:Key="ControlCornerRadius">0</CornerRadius></Grid.Resources>
     <Grid.RowDefinitions>
       <RowDefinition Height="Auto" /><RowDefinition Height="Auto" /><RowDefinition Height="*" />
-      <RowDefinition Height="Auto" /><RowDefinition Height="Auto" />
+      <RowDefinition Height="Auto" />
     </Grid.RowDefinitions>
     <StackPanel Orientation="Horizontal">
       <Border Width="36" Height="36" Background="#222"><Image x:Name="Face" Stretch="UniformToFill" /></Border>
@@ -44,10 +44,10 @@ const LAYOUT: &str = r##"<Grid xmlns="http://schemas.microsoft.com/winfx/2006/xa
                          Foreground="{ThemeResource SystemControlForegroundBaseMediumBrush}" />
         </Border>
         <StackPanel x:Name="Pictures" Orientation="Horizontal" Margin="0,10,0,0" Visibility="Collapsed" />
+        <ContentControl x:Name="CommentsHost" Margin="0,14,0,0" IsTabStop="False" Visibility="Collapsed" />
       </StackPanel>
     </ScrollViewer>
-    <ContentControl x:Name="CommentsHost" Grid.Row="3" Visibility="Collapsed" IsTabStop="False" />
-    <StackPanel Grid.Row="4" Orientation="Horizontal" HorizontalAlignment="Right" Margin="0,14,0,0">
+    <StackPanel Grid.Row="3" Orientation="Horizontal" HorizontalAlignment="Right" Margin="0,14,0,0">
       <Button x:Name="Close" Content="关闭" Background="#0050EF" Foreground="White" BorderThickness="0" />
     </StackPanel>
   </Grid>
