@@ -203,7 +203,12 @@ impl PostList {
         self.ended.set(false);
         self.loading.set(false);
         self.list.cast::<IItemsControl>()?.Items()?.cast::<IVector<IInspectable>>()?.Clear()?;
-        self.say(if self.keyword.borrow().is_empty() { "正在读取…" } else { "正在搜索动态…" });
+        // Says which word is being searched, so an empty result is told from a busy one.
+        let said = match self.keyword.borrow().as_str() {
+            "" => "正在读取…".to_owned(),
+            word => format!("正在搜索「{word}」…"),
+        };
+        self.say(&said);
         self.load();
         Ok(())
     }
