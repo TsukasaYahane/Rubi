@@ -38,12 +38,8 @@ const ASK: &str = r##"<Grid xmlns="http://schemas.microsoft.com/winfx/2006/xaml/
   </Grid>
 </Grid>"##;
 
-/// Remembers what the clipboard holds now, without asking: starting up says nothing.
-pub fn prime() {
-    if let Some(text) = current_text() {
-        *LAST.lock().unwrap_or_else(|e| e.into_inner()) = text;
-    }
-}
+/// Starting up says nothing: the first look records what is there instead of asking.
+pub fn prime() {}
 
 /// Looks at the clipboard's newest item; a video address there asks before opening it.
 pub fn check() {
@@ -53,6 +49,11 @@ pub fn check() {
     }
     {
         let mut last = LAST.lock().unwrap_or_else(|e| e.into_inner());
+        if last.is_empty() {
+            // What was copied before Rubi opened is not news.
+            *last = text;
+            return;
+        }
         if *last == text {
             return;
         }
