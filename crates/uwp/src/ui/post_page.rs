@@ -119,6 +119,11 @@ impl Sheet {
 
     /// Puts the post's comment area under its words.
     fn show_comments(&self) -> Result<()> {
+        // TEMP-PROBE: says whether the post got a comment area at all.
+        match self.post.comments {
+            Some((kind, oid)) => crate::ui::shell::toast(&format!("评论 {kind}/{oid} · {} 条", self.post.comment_count)),
+            None => crate::ui::shell::toast("这条动态没有评论区"),
+        }
         let Some((kind, oid)) = self.post.comments else { return Ok(()) };
         let list = crate::ui::comment_list::CommentList::new()?;
         named::<crate::xaml::IContentControl>(&self.root, "CommentsHost")?

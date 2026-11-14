@@ -10,6 +10,11 @@ use crate::xaml::{Clipboard, IDataPackageView};
 
 static LAST: Mutex<String> = Mutex::new(String::new());
 
+/// Looks at the clipboard's newest item once: a video address in it opens that video.
+pub fn check() {
+    handle(current_text());
+}
+
 /// Starts watching, once; a change that holds a video address opens that video.
 pub fn watch() -> windows_core::Result<()> {
     static STARTED: std::sync::OnceLock<()> = std::sync::OnceLock::new();

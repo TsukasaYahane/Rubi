@@ -215,6 +215,9 @@ pub fn start() -> Result<()> {
                 player::focus_changed(active);
                 if active {
                     crate::ui::inbox::read_unread();
+                    // Clipboard.ContentChanged never fires in this app, so the moment the window
+                    // comes back is when its newest item is looked at.
+                    crate::ui::clip::check();
                 }
             }
         },
