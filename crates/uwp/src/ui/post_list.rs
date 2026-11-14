@@ -400,7 +400,7 @@ impl PostList {
         }
         if post.readable && !post.link.is_empty() {
             (self.leaving)();
-            return article::open(&post.link);
+            return article::open_with(&post.link, post.comments, post.comment_count);
         }
         // Anything with words or pictures of its own opens as a page: the whole text, then comments.
         if !post.text.is_empty() || !post.quote.is_empty() || !post.pictures.is_empty() {

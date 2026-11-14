@@ -91,17 +91,26 @@ fn body_xaml(article: &Article) -> String {
 }
 
 /// The article, then its comments under it in one scroll (none: the article alone).
-fn show_article(root: &IFrameworkElement, article: &Article, link: &str) -> Result<()> {
+fn show_article(
+    root: &IFrameworkElement,
+    article: &Article,
+    link: &str,
+    fallback: Option<(u32, u64)>,
+    total: u64,
+) -> Result<()> {
     let body = load(&body_xaml(article))?;
     set_text(root, "Status", "")?;
     let host = named::<IContentControl>(root, "Body")?;
-    if article.comment_kind == 0 || article.comment_oid == 0 {
+    let area = (article.comment_kind > 0 && article.comment_oid > 0)
+        .then_some((article.comment_kind, article.comment_oid))
+        .or(fallback);
+    let Some((kind, oid)) = area else {
         let scroll = load(
             r#"<ScrollViewer xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation" />"#,
         )?;
         scroll.cast::<IContentControl>()?.SetContent(&body.cast::<IInspectable>()?)?;
         return host.SetContent(&scroll.cast::<IInspectable>()?);
-    }
+    };
     let comments = CommentList::new()?;
     comments.put_above(&body.cast::<UIElement>()?)?;
     let back = link.to_owned();
@@ -114,7 +123,7 @@ fn show_article(root: &IFrameworkElement, article: &Article, link: &str) -> Resu
         }
     });
     host.SetContent(&comments.element().cast::<IInspectable>()?)?;
-    comments.show(CommentArea { kind: article.comment_kind, oid: article.comment_oid }, 0)?;
+    comments.show(CommentArea { kind, oid }, total)?;
     COMMENTS.with_borrow_mut(|c| *c = Some(comments));
     Ok(())
 }
@@ -132,6 +141,12 @@ fn go_back() {
 
 /// Opens the article at `link`: an `opus/ID` or `read/cvN` link, or `cvN`.
 pub fn open(link: &str) -> Result<()> {
+    open_with(link, None, 0)
+}
+
+/// Opens `link`, using `area` for the comments when the article itself names none: a 图文
+/// dynamic carries its own comment area, the 专栏 it points at may not.
+pub fn open_with(link: &str, area: Option<(u32, u64)>, total: u64) -> Result<()> {
     let Some(host) = shell() else { return Ok(()) };
     let Some(backend) = host.backend.get().cloned() else { return Ok(()) };
     let root = load(LAYOUT)?;
@@ -149,7 +164,7 @@ pub fn open(link: &str) -> Result<()> {
             }
             let Ok(root) = shell.current_page() else { return };
             let _ = match &article {
-                Ok(article) => show_article(&root, article, &link),
+                Ok(article) => show_article(&root, article, &link, area, total),
                 Err(problem) => set_text(&root, "Status", &format!("打不开：{problem}")),
             };
         });
