@@ -99,17 +99,7 @@ fn show_article(
     total: u64,
 ) -> Result<()> {
     let body = load(&body_xaml(article))?;
-    // TEMP-PROBE: what the article itself carried, and what the dynamic handed over.
-    let probe = format!(
-        "article {}/{} · 传入 {} · {total} 条",
-        article.comment_kind,
-        article.comment_oid,
-        match fallback {
-            Some((k, o)) => format!("{k}/{o}"),
-            None => "无".to_owned(),
-        }
-    );
-    set_text(root, "Status", &probe)?;
+    set_text(root, "Status", "")?;
     let host = named::<IContentControl>(root, "Body")?;
     let area = (article.comment_kind > 0 && article.comment_oid > 0)
         .then_some((article.comment_kind, article.comment_oid))
