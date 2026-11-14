@@ -272,6 +272,8 @@ pub struct CommentList {
 impl CommentList {
     pub fn new() -> Result<Rc<Self>> {
         let root = load(LAYOUT)?;
+        // A list inside a scroller has no height of its own: give it a floor, or it collapses.
+        root.cast::<crate::xaml::IFrameworkElement>()?.SetMinHeight(420.0)?;
         let shown = Rc::new(Self {
             id: NEXT_ID.fetch_add(1, Ordering::Relaxed),
             root: root.clone(),

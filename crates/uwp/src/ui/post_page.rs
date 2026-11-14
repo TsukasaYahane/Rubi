@@ -46,7 +46,7 @@ const LAYOUT: &str = r##"<Grid xmlns="http://schemas.microsoft.com/winfx/2006/xa
         <StackPanel x:Name="Pictures" Orientation="Horizontal" Margin="0,10,0,0" Visibility="Collapsed" />
       </StackPanel>
     </ScrollViewer>
-    <Border x:Name="CommentsBox" Grid.Row="3" Height="420" Margin="0,12,0,0" Visibility="Collapsed"
+    <Border x:Name="CommentsBox" Grid.Row="3" Height="300" Margin="0,12,0,0" Visibility="Collapsed"
             BorderThickness="0,1,0,0" BorderBrush="{ThemeResource SystemControlForegroundBaseLowBrush}">
       <ContentControl x:Name="CommentsHost" IsTabStop="False" VerticalAlignment="Stretch" />
     </Border>
