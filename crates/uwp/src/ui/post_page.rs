@@ -121,8 +121,8 @@ impl Sheet {
     fn show_comments(&self) -> Result<()> {
         // TEMP-PROBE: the popup covers the toast layer, so the line itself says it.
         let said = match self.post.comments {
-            Some((kind, oid)) => format!("{} · 评论 {kind}/{oid} · {} 条", self.post.line, self.post.comment_count),
-            None => format!("{} · 没有评论区", self.post.line),
+            Some((kind, oid)) => format!("评论区 {kind}/{oid} · {} 条", self.post.comment_count),
+            None => "这条动态没有评论区".to_owned(),
         };
         let _ = set_text(&self.root, "Line", &said);
         let Some((kind, oid)) = self.post.comments else { return Ok(()) };
