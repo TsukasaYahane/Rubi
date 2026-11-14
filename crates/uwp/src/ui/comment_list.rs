@@ -410,9 +410,13 @@ impl CommentList {
         self.counts.borrow_mut().clear();
         *self.next.borrow_mut() = None;
         self.loading.set(false);
-        self.set_target(None)?;
+        // A success code comes back as an error from here, which used to abort the whole
+        // load: clearing the rows is best effort, the page goes on either way.
+        let _ = self.set_target(None);
         self.focus_pending.set(self.focus.get().is_some());
-        self.items()?.Clear()?;
+        if let Ok(items) = self.items() {
+            let _ = items.Clear();
+        }
         self.say("正在读取…");
         self.load();
         Ok(())
