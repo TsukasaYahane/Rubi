@@ -118,8 +118,15 @@ pub(crate) fn dynamic_of(item: &Value) -> Dynamic {
         author_face: image_of(&author["face"]),
         published_at: u64_of(&author["pub_ts"]) as i64,
         text: str_of(&md["desc"]["text"]).trim().to_owned(),
-        comment_kind: u64_of(&item["basic"]["comment_type"]) as u32,
-        comment_oid: u64_of(&item["basic"]["comment_id_str"]),
+        // Newer shapes leave basic out: a dynamic's own comment area is type 17 on its id.
+        comment_kind: {
+            let kind = u64_of(&item["basic"]["comment_type"]);
+            if kind == 0 { 17 } else { kind as u32 }
+        },
+        comment_oid: {
+            let oid = u64_of(&item["basic"]["comment_id_str"]);
+            if oid == 0 { u64_of(&item["id_str"]) } else { oid }
+        },
         comment_count: u64_of(&item["modules"]["module_stat"]["comment"]["count"]),
         ..Default::default()
     };
