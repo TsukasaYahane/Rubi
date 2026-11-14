@@ -43,7 +43,8 @@ pub fn show() -> Result<()> {
     PAGE.with_borrow_mut(|slot| *slot = Some(page.clone()));
     let row = named::<IPanel>(&root, "Cats")?.Children()?.cast::<IVector<UIElement>>()?;
     row.Clear()?;
-    for category in Category::ALL {
+    // 账号 shows on 我的: this page is the settings alone.
+    for category in Category::ALL.into_iter().filter(|c| *c != Category::Account) {
         let button = load(&format!(
             r##"<Button xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
                   xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml" Content="{}" Margin="0,0,18,0"

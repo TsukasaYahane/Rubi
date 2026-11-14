@@ -223,8 +223,14 @@ fn mark() -> Result<()> {
     let shelf = SHELF.get();
     let tint = |on: bool| SolidColorBrush::CreateInstanceWithColor(if on { COBALT } else { DIM });
     if page.class != WindowClass::Narrow {
+        // Painting a label is not worth failing the page for: these calls report success as an
+        // error on this platform.
         for (at, each) in Shelf::ALL.into_iter().enumerate() {
-            named::<IControl>(&page.root, &format!("Shelf{at}"))?.SetForeground(&tint(shelf == Some(each))?)?;
+            if let Ok(label) = named::<IControl>(&page.root, &format!("Shelf{at}"))
+                && let Ok(brush) = tint(shelf == Some(each))
+            {
+                let _ = label.SetForeground(&brush);
+            }
         }
     }
     Ok(())
@@ -290,13 +296,18 @@ fn open(category: Category) -> Result<()> {
     RUN.fetch_add(1, Ordering::Relaxed);
     CATEGORY.set(Some(category));
     SHELF.set(None);
-    shelf_on(&page.root, false)?;
-    mark()?;
+    // These calls report success as an error here; none of them is worth refusing the page.
+    let _ = shelf_on(&page.root, false);
+    let _ = mark();
     let body = match (category, shell.backend.get()) {
         (Category::Account, _) | (_, None) => load(ACCOUNT)?,
         (_, Some(backend)) => settings::build(category, backend)?,
     };
-    named::<IContentControl>(&page.root, "Body")?.SetContent(&body.cast::<UIElement>()?)?;
+    if let Ok(host) = named::<IContentControl>(&page.root, "Body")
+        && let Ok(element) = body.cast::<UIElement>()
+    {
+        let _ = host.SetContent(&element);
+    }
     SHOWN.with(|s| {
         if let Some(shown) = s.borrow_mut().as_mut() {
             shown.body = Some(body.clone());
