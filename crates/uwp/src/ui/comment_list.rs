@@ -403,7 +403,9 @@ impl CommentList {
     }
 
     fn restart(&self) -> Result<()> {
-        self.mark()?;
+        // Painting the header is not worth stopping for: a success code comes back as an error
+        // from one of these calls, and that used to cancel the whole load.
+        let _ = self.mark();
         self.turn.set(self.turn.get() + 1);
         self.blocks.borrow_mut().clear();
         self.lines.borrow_mut().clear();
