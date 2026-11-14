@@ -402,7 +402,9 @@ impl VideoList {
 
     /// 稍后再看 plays through from the first, outside managing.
     fn show_play_all(&self) -> Result<()> {
-        let on = self.source.get() == Source::Later && !self.managing.get() && !self.rows.borrow().is_empty();
+        // 稍后再看 and any 收藏夹 can be played straight through.
+        let playable = matches!(self.source.get(), Source::Later | Source::Folder(_));
+        let on = playable && !self.managing.get() && !self.rows.borrow().is_empty();
         self.show(&self.root, "PlayAll", on)
     }
 
