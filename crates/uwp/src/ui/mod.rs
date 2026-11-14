@@ -45,6 +45,7 @@ pub mod schedule;
 pub mod search;
 pub mod series;
 pub mod settings;
+pub mod settings_page;
 pub mod share_card;
 pub mod share_friend;
 pub mod sharing;

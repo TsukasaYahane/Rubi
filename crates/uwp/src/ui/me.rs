@@ -260,10 +260,11 @@ fn open_shelf(shelf: Shelf, fresh: bool) -> Result<()> {
 }
 
 /// From a shelf back to the page it was opened from, on a narrow window.
-/// Opens the settings page, the way the 我的 page shows it.
-pub fn open_settings() {
-    crate::ui::shell::show_tab(crate::ui::shell::Tab::Me);
-    let _ = open(crate::state::settings::Category::Look);
+/// Shows the settings page itself, as its own tab does.
+pub fn show_settings() -> Result<()> {
+    SHELF.set(None);
+    CATEGORY.set(Some(Category::Look));
+    show()
 }
 
 pub fn back_from_shelf() {

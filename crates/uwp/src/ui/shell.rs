@@ -38,6 +38,7 @@ pub enum Tab {
     Live,
     Inbox,
     Me,
+    Settings,
 }
 
 /// How long a toast stays.
@@ -46,8 +47,15 @@ const TOAST_FOR: Duration = Duration::from_secs(2);
 static TOASTS: AtomicU64 = AtomicU64::new(0);
 static PAGE_TURN: AtomicU64 = AtomicU64::new(0);
 
-const TABS: [(Tab, &str); 5] =
-    [(Tab::Home, "Home"), (Tab::Follow, "Follow"), (Tab::Live, "Live"), (Tab::Inbox, "Inbox"), (Tab::Me, "Me")];
+const TABS: [(Tab, &str); 6] =
+    [
+    (Tab::Home, "Home"),
+    (Tab::Follow, "Follow"),
+    (Tab::Live, "Live"),
+    (Tab::Inbox, "Inbox"),
+    (Tab::Me, "Me"),
+    (Tab::Settings, "Settings"),
+];
 /// The unread count on the 消息 icon.
 const BADGE: &str = r##"<Border x:Name="{}" Visibility="Collapsed" Background="#E33333" MinWidth="16" Height="16" Padding="4,0"
             HorizontalAlignment="Left" VerticalAlignment="Top" Margin="{}" IsHitTestVisible="False">
@@ -102,6 +110,8 @@ const LAYOUT: &str = r##"
       <TextBlock x:Name="LabelInbox" Margin="12,0,0,0" Text="消息" /></StackPanel></Button>
     <Button x:Name="RailMe" Style="{StaticResource Nav}"><StackPanel Orientation="Horizontal">
       <FontIcon x:Name="RailIconMe" Glyph="&#xE77B;" FontSize="20" /><TextBlock x:Name="LabelMe" Margin="12,0,0,0" Text="我的" /></StackPanel></Button>
+    <Button x:Name="RailSettings" Style="{StaticResource Nav}"><StackPanel Orientation="Horizontal">
+      <FontIcon x:Name="RailIconSettings" Glyph="&#xE713;" FontSize="20" /><TextBlock x:Name="LabelSettings" Margin="12,0,0,0" Text="设置" /></StackPanel></Button>
   </StackPanel>
   <ContentControl x:Name="Page" Grid.Column="2" Grid.Row="1" HorizontalContentAlignment="Stretch"
                   VerticalContentAlignment="Stretch" IsTabStop="False" />
@@ -115,6 +125,7 @@ const LAYOUT: &str = r##"
         BorderBrush="{ThemeResource SystemControlForegroundBaseLowBrush}">
     <Grid.ColumnDefinitions>
       <ColumnDefinition /><ColumnDefinition /><ColumnDefinition /><ColumnDefinition /><ColumnDefinition />
+      <ColumnDefinition />
     </Grid.ColumnDefinitions>
     <Button x:Name="BarHome" Style="{StaticResource Bar}"><StackPanel>
       <FontIcon x:Name="BarIconHome" Glyph="&#xE80F;" FontSize="20" /><TextBlock Text="首页" FontSize="11" /></StackPanel></Button>
@@ -127,6 +138,8 @@ const LAYOUT: &str = r##"
       <!--bar-badge--></Grid></Button>
     <Button x:Name="BarMe" Grid.Column="4" Style="{StaticResource Bar}"><StackPanel>
       <FontIcon x:Name="BarIconMe" Glyph="&#xE77B;" FontSize="20" /><TextBlock Text="我的" FontSize="11" /></StackPanel></Button>
+    <Button x:Name="BarSettings" Grid.Column="5" Style="{StaticResource Bar}"><StackPanel>
+      <FontIcon x:Name="BarIconSettings" Glyph="&#xE713;" FontSize="20" /><TextBlock Text="设置" FontSize="11" /></StackPanel></Button>
   </Grid>
 </Grid>"##;
 
@@ -364,6 +377,7 @@ pub fn show_tab(tab: Tab) {
         Tab::Live => live::show(),
         Tab::Follow => follow::show(),
         Tab::Inbox => crate::ui::inbox::show(),
+        Tab::Settings => crate::ui::settings_page::show(),
     };
     if let Err(problem) = shown.and_then(|()| shell.mark_tab()) {
         toast(&format!("打不开：{}", problem.message()));
