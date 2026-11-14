@@ -450,6 +450,26 @@ fn play_all() {
         toast("这个列表还是空的");
         return;
     }
+    // The player page shows a queue only when it was opened as one, so the list is handed to
+    // the queue module too, the way 稍后再看 does it.
+    let entries: Vec<crate::ui::queue::Entry> = page
+        .rows
+        .borrow()
+        .iter()
+        .map(|row| crate::ui::queue::Entry {
+            bvid: row.bvid.clone(),
+            title: row.title.clone(),
+            owner: row.line.split(" · ").next().unwrap_or_default().to_owned(),
+        })
+        .collect();
+    let name = page
+        .lists
+        .borrow()
+        .iter()
+        .find(|l| l.id == *page.list.borrow())
+        .map(|l| l.name.clone())
+        .unwrap_or_default();
+    let _ = crate::ui::queue::start(&name, entries, 0);
     let list = *page.list.borrow();
     let Some(shell) = shell() else { return };
     let Some(backend) = shell.backend.get().cloned() else { return };
@@ -459,6 +479,7 @@ fn play_all() {
         post(&dispatcher, move || match first {
             Ok(Some(card)) => {
                 core.services.play_queue.play(list);
+                let _ = &card;
                 let _ = crate::ui::player::open(false, &card.bvid, &card.title, &card.owner.name);
             }
             Ok(None) => toast("这个列表还是空的"),

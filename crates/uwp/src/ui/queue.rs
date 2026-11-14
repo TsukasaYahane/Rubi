@@ -4,7 +4,8 @@ use std::cell::RefCell;
 
 use windows_core::Result;
 
-use crate::state::queue::{Entry, Queue};
+pub use crate::state::queue::Entry;
+use crate::state::queue::Queue;
 use crate::ui::player;
 
 thread_local! {
