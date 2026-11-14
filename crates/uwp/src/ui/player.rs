@@ -1345,22 +1345,12 @@ pub fn open(feed: bool, bvid: &str, title: &str, uploader: &str) -> Result<()> {
     let (info_dispatcher, info_core, info_bvid) = (dispatcher.clone(), core.clone(), bvid.clone());
     backend.spawn(async move {
         let services = &info_core.services;
-        // Four reads, one round trip each: they wait on nothing but the network, so they go out
-        // together instead of one after another.
-        let wants_resume = episode.is_none() && !feed;
-        let signed_in = services.account.is_logged_in();
-        let (detail, related, resume, relation) = tokio::join!(
-            services.videos.detail(&info_bvid),
-            services.discover.related(&info_bvid),
-            async {
-                if wants_resume { services.videos.resume_point(&info_bvid).await } else { None }
-            },
-            async {
-                if signed_in { services.actions.relation(&info_bvid).await.ok() } else { None }
-            },
-        );
-        let detail = detail.ok();
-        let related = related.unwrap_or_default();
+        // What the first screen needs goes out first: the picture is fetched on its own task and
+        // this only adds what the title row shows. The second screen's reads wait their turn, so
+        // they never hold up the page.
+        let detail = services.videos.detail(&info_bvid).await.ok();
+        let after = info_dispatcher.clone();
+        let slow = page.clone();
         post(&info_dispatcher, move || {
             let Some(page) = (run == self::run()).then(page).flatten() else { return };
             if let Some(info) = detail {
@@ -1376,6 +1366,21 @@ pub fn open(feed: bool, bvid: &str, title: &str, uploader: &str) -> Result<()> {
                 let _ = show_up_link(&page, card.owner.mid, &card.owner.name);
                 let _ = show_detail(&page.root, &card);
             }
+        });
+        let wants_resume = episode.is_none() && !feed;
+        let signed_in = services.account.is_logged_in();
+        let (related, resume, relation) = tokio::join!(
+            services.discover.related(&info_bvid),
+            async {
+                if wants_resume { services.videos.resume_point(&info_bvid).await } else { None }
+            },
+            async {
+                if signed_in { services.actions.relation(&info_bvid).await.ok() } else { None }
+            },
+        );
+        let related = related.unwrap_or_default();
+        post(&after, move || {
+            let Some(page) = (run == self::run()).then(slow.clone()).flatten() else { return };
             if let Some(relation) = relation {
                 page.actions.set_relation(relation);
             }
