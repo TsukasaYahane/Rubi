@@ -104,6 +104,7 @@ pub struct HomePage {
 
 impl HomePage {
     pub fn new() -> Result<Rc<Self>> {
+        let _ = crate::ui::clip::watch();
         let root = load(&LAYOUT.replace("<!--refresh-->", REFRESH_BUTTON))?;
         let told = |tab: usize| {
             move || {

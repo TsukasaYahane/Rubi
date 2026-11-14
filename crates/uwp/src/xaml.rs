@@ -4116,6 +4116,29 @@ unsafe impl Send for DataPackagePropertySet {}
 unsafe impl Sync for DataPackagePropertySet {}
 #[repr(transparent)]
 #[derive(Clone, Debug, Eq, PartialEq)]
+pub struct DataPackagePropertySetView(windows_core::IUnknown);
+windows_core::imp::interface_hierarchy!(DataPackagePropertySetView, windows_core::IUnknown, windows_core::IInspectable);
+impl windows_core::RuntimeType for DataPackagePropertySetView {
+    const SIGNATURE: windows_core::imp::ConstBuffer =
+        windows_core::imp::ConstBuffer::for_class::<Self, IDataPackagePropertySetView>();
+}
+unsafe impl windows_core::Interface for DataPackagePropertySetView {
+    type Vtable = <IDataPackagePropertySetView as windows_core::Interface>::Vtable;
+    const IID: windows_core::GUID = <IDataPackagePropertySetView as windows_core::Interface>::IID;
+}
+impl core::ops::Deref for DataPackagePropertySetView {
+    type Target = IDataPackagePropertySetView;
+    fn deref(&self) -> &Self::Target {
+        unsafe { core::mem::transmute(self) }
+    }
+}
+impl windows_core::RuntimeName for DataPackagePropertySetView {
+    const NAME: &'static str = "Windows.ApplicationModel.DataTransfer.DataPackagePropertySetView";
+}
+unsafe impl Send for DataPackagePropertySetView {}
+unsafe impl Sync for DataPackagePropertySetView {}
+#[repr(transparent)]
+#[derive(Clone, Debug, Eq, PartialEq)]
 pub struct DataPackageView(windows_core::IUnknown);
 windows_core::imp::interface_hierarchy!(DataPackageView, windows_core::IUnknown, windows_core::IInspectable);
 impl windows_core::RuntimeType for DataPackageView {
@@ -14793,13 +14816,202 @@ pub struct IDataPackagePropertySet_Vtbl {
     pub SetApplicationListingUri:
         unsafe extern "system" fn(*mut core::ffi::c_void, *mut core::ffi::c_void) -> windows_core::HRESULT,
 }
+windows_core::imp::define_interface!(
+    IDataPackagePropertySetView,
+    IDataPackagePropertySetView_Vtbl,
+    0xb94cec01_0c1a_4c57_be55_75d01289735d
+);
+impl windows_core::RuntimeType for IDataPackagePropertySetView {
+    const SIGNATURE: windows_core::imp::ConstBuffer = windows_core::imp::ConstBuffer::for_interface::<Self>();
+}
+#[repr(C)]
+pub struct IDataPackagePropertySetView_Vtbl {
+    pub base__: windows_core::IInspectable_Vtbl,
+}
 windows_core::imp::define_interface!(IDataPackageView, IDataPackageView_Vtbl, 0x7b840471_5900_4d85_a90b_10cb85fe3552);
 impl windows_core::RuntimeType for IDataPackageView {
     const SIGNATURE: windows_core::imp::ConstBuffer = windows_core::imp::ConstBuffer::for_interface::<Self>();
 }
+impl IDataPackageView {
+    pub fn Properties(&self) -> windows_core::Result<DataPackagePropertySetView> {
+        unsafe {
+            let mut result__ = core::mem::zeroed();
+            (windows_core::Interface::vtable(self).Properties)(windows_core::Interface::as_raw(self), &mut result__)
+                .and_then(|| windows_core::imp::Type::from_abi(result__))
+        }
+    }
+    pub fn RequestedOperation(&self) -> windows_core::Result<DataPackageOperation> {
+        unsafe {
+            let mut result__ = core::mem::zeroed();
+            (windows_core::Interface::vtable(self).RequestedOperation)(
+                windows_core::Interface::as_raw(self),
+                &mut result__,
+            )
+            .map(|| result__)
+        }
+    }
+    pub fn ReportOperationCompleted(&self, value: DataPackageOperation) -> windows_core::Result<()> {
+        unsafe {
+            (windows_core::Interface::vtable(self).ReportOperationCompleted)(
+                windows_core::Interface::as_raw(self),
+                value,
+            )
+            .ok()
+        }
+    }
+    pub fn AvailableFormats(&self) -> windows_core::Result<windows_collections::IVectorView<windows_core::HSTRING>> {
+        unsafe {
+            let mut result__ = core::mem::zeroed();
+            (windows_core::Interface::vtable(self).AvailableFormats)(
+                windows_core::Interface::as_raw(self),
+                &mut result__,
+            )
+            .and_then(|| windows_core::imp::Type::from_abi(result__))
+        }
+    }
+    pub fn Contains(&self, formatid: &str) -> windows_core::Result<bool> {
+        unsafe {
+            let mut result__ = core::mem::zeroed();
+            (windows_core::Interface::vtable(self).Contains)(
+                windows_core::Interface::as_raw(self),
+                core::mem::transmute_copy(&windows_core::HSTRING::from(formatid)),
+                &mut result__,
+            )
+            .map(|| result__)
+        }
+    }
+    pub fn GetDataAsync(
+        &self,
+        formatid: &str,
+    ) -> windows_core::Result<windows_future::IAsyncOperation<windows_core::IInspectable>> {
+        unsafe {
+            let mut result__ = core::mem::zeroed();
+            (windows_core::Interface::vtable(self).GetDataAsync)(
+                windows_core::Interface::as_raw(self),
+                core::mem::transmute_copy(&windows_core::HSTRING::from(formatid)),
+                &mut result__,
+            )
+            .and_then(|| windows_core::imp::Type::from_abi(result__))
+        }
+    }
+    pub fn GetTextAsync(&self) -> windows_core::Result<windows_future::IAsyncOperation<windows_core::HSTRING>> {
+        unsafe {
+            let mut result__ = core::mem::zeroed();
+            (windows_core::Interface::vtable(self).GetTextAsync)(windows_core::Interface::as_raw(self), &mut result__)
+                .and_then(|| windows_core::imp::Type::from_abi(result__))
+        }
+    }
+    pub fn GetCustomTextAsync(
+        &self,
+        formatid: &str,
+    ) -> windows_core::Result<windows_future::IAsyncOperation<windows_core::HSTRING>> {
+        unsafe {
+            let mut result__ = core::mem::zeroed();
+            (windows_core::Interface::vtable(self).GetCustomTextAsync)(
+                windows_core::Interface::as_raw(self),
+                core::mem::transmute_copy(&windows_core::HSTRING::from(formatid)),
+                &mut result__,
+            )
+            .and_then(|| windows_core::imp::Type::from_abi(result__))
+        }
+    }
+    pub fn GetUriAsync(&self) -> windows_core::Result<windows_future::IAsyncOperation<Uri>> {
+        unsafe {
+            let mut result__ = core::mem::zeroed();
+            (windows_core::Interface::vtable(self).GetUriAsync)(windows_core::Interface::as_raw(self), &mut result__)
+                .and_then(|| windows_core::imp::Type::from_abi(result__))
+        }
+    }
+    pub fn GetHtmlFormatAsync(&self) -> windows_core::Result<windows_future::IAsyncOperation<windows_core::HSTRING>> {
+        unsafe {
+            let mut result__ = core::mem::zeroed();
+            (windows_core::Interface::vtable(self).GetHtmlFormatAsync)(
+                windows_core::Interface::as_raw(self),
+                &mut result__,
+            )
+            .and_then(|| windows_core::imp::Type::from_abi(result__))
+        }
+    }
+    pub fn GetResourceMapAsync(
+        &self,
+    ) -> windows_core::Result<
+        windows_future::IAsyncOperation<
+            windows_collections::IMapView<windows_core::HSTRING, RandomAccessStreamReference>,
+        >,
+    > {
+        unsafe {
+            let mut result__ = core::mem::zeroed();
+            (windows_core::Interface::vtable(self).GetResourceMapAsync)(
+                windows_core::Interface::as_raw(self),
+                &mut result__,
+            )
+            .and_then(|| windows_core::imp::Type::from_abi(result__))
+        }
+    }
+    pub fn GetRtfAsync(&self) -> windows_core::Result<windows_future::IAsyncOperation<windows_core::HSTRING>> {
+        unsafe {
+            let mut result__ = core::mem::zeroed();
+            (windows_core::Interface::vtable(self).GetRtfAsync)(windows_core::Interface::as_raw(self), &mut result__)
+                .and_then(|| windows_core::imp::Type::from_abi(result__))
+        }
+    }
+    pub fn GetBitmapAsync(&self) -> windows_core::Result<windows_future::IAsyncOperation<RandomAccessStreamReference>> {
+        unsafe {
+            let mut result__ = core::mem::zeroed();
+            (windows_core::Interface::vtable(self).GetBitmapAsync)(windows_core::Interface::as_raw(self), &mut result__)
+                .and_then(|| windows_core::imp::Type::from_abi(result__))
+        }
+    }
+    pub fn GetStorageItemsAsync(
+        &self,
+    ) -> windows_core::Result<windows_future::IAsyncOperation<windows_collections::IVectorView<IStorageItem>>> {
+        unsafe {
+            let mut result__ = core::mem::zeroed();
+            (windows_core::Interface::vtable(self).GetStorageItemsAsync)(
+                windows_core::Interface::as_raw(self),
+                &mut result__,
+            )
+            .and_then(|| windows_core::imp::Type::from_abi(result__))
+        }
+    }
+}
 #[repr(C)]
 pub struct IDataPackageView_Vtbl {
     pub base__: windows_core::IInspectable_Vtbl,
+    pub Properties:
+        unsafe extern "system" fn(*mut core::ffi::c_void, *mut *mut core::ffi::c_void) -> windows_core::HRESULT,
+    pub RequestedOperation:
+        unsafe extern "system" fn(*mut core::ffi::c_void, *mut DataPackageOperation) -> windows_core::HRESULT,
+    pub ReportOperationCompleted:
+        unsafe extern "system" fn(*mut core::ffi::c_void, DataPackageOperation) -> windows_core::HRESULT,
+    pub AvailableFormats:
+        unsafe extern "system" fn(*mut core::ffi::c_void, *mut *mut core::ffi::c_void) -> windows_core::HRESULT,
+    pub Contains:
+        unsafe extern "system" fn(*mut core::ffi::c_void, *mut core::ffi::c_void, *mut bool) -> windows_core::HRESULT,
+    pub GetDataAsync: unsafe extern "system" fn(
+        *mut core::ffi::c_void,
+        *mut core::ffi::c_void,
+        *mut *mut core::ffi::c_void,
+    ) -> windows_core::HRESULT,
+    pub GetTextAsync:
+        unsafe extern "system" fn(*mut core::ffi::c_void, *mut *mut core::ffi::c_void) -> windows_core::HRESULT,
+    pub GetCustomTextAsync: unsafe extern "system" fn(
+        *mut core::ffi::c_void,
+        *mut core::ffi::c_void,
+        *mut *mut core::ffi::c_void,
+    ) -> windows_core::HRESULT,
+    pub GetUriAsync:
+        unsafe extern "system" fn(*mut core::ffi::c_void, *mut *mut core::ffi::c_void) -> windows_core::HRESULT,
+    pub GetHtmlFormatAsync:
+        unsafe extern "system" fn(*mut core::ffi::c_void, *mut *mut core::ffi::c_void) -> windows_core::HRESULT,
+    pub GetResourceMapAsync:
+        unsafe extern "system" fn(*mut core::ffi::c_void, *mut *mut core::ffi::c_void) -> windows_core::HRESULT,
+    pub GetRtfAsync:
+        unsafe extern "system" fn(*mut core::ffi::c_void, *mut *mut core::ffi::c_void) -> windows_core::HRESULT,
+    pub GetBitmapAsync:
+        unsafe extern "system" fn(*mut core::ffi::c_void, *mut *mut core::ffi::c_void) -> windows_core::HRESULT,
+    pub GetStorageItemsAsync:
+        unsafe extern "system" fn(*mut core::ffi::c_void, *mut *mut core::ffi::c_void) -> windows_core::HRESULT,
 }
 windows_core::imp::define_interface!(
     IDataProviderRequest,

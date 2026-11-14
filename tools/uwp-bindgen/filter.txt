@@ -357,3 +357,4 @@ Windows.Storage.Streams.IDataReaderStatics
 Windows.UI.Xaml.Controls.IMenuFlyoutSubItem
 Windows.UI.Xaml.Controls.MenuFlyoutSubItem
 Windows.UI.Xaml.Controls.IMenuFlyoutItemBase
+Windows.ApplicationModel.DataTransfer.IDataPackageView

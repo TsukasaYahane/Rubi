@@ -25,7 +25,7 @@ const LAYOUT: &str = r##"<Grid xmlns="http://schemas.microsoft.com/winfx/2006/xa
     <Grid.Resources><CornerRadius x:Key="ControlCornerRadius">0</CornerRadius></Grid.Resources>
     <Grid.RowDefinitions>
       <RowDefinition Height="Auto" /><RowDefinition Height="Auto" /><RowDefinition Height="*" />
-      <RowDefinition Height="Auto" />
+      <RowDefinition Height="Auto" /><RowDefinition Height="Auto" />
     </Grid.RowDefinitions>
     <StackPanel Orientation="Horizontal">
       <Border Width="36" Height="36" Background="#222"><Image x:Name="Face" Stretch="UniformToFill" /></Border>
@@ -46,13 +46,17 @@ const LAYOUT: &str = r##"<Grid xmlns="http://schemas.microsoft.com/winfx/2006/xa
         <StackPanel x:Name="Pictures" Orientation="Horizontal" Margin="0,10,0,0" Visibility="Collapsed" />
       </StackPanel>
     </ScrollViewer>
-    <StackPanel Grid.Row="3" Orientation="Horizontal" HorizontalAlignment="Right" Margin="0,14,0,0">
-      <Button x:Name="Comments" Content="评论" Margin="0,0,8,0" Background="Transparent" BorderThickness="0"
-              Foreground="#0050EF" />
+    <ContentControl x:Name="CommentsHost" Grid.Row="3" Visibility="Collapsed" IsTabStop="False" />
+    <StackPanel Grid.Row="4" Orientation="Horizontal" HorizontalAlignment="Right" Margin="0,14,0,0">
       <Button x:Name="Close" Content="关闭" Background="#0050EF" Foreground="White" BorderThickness="0" />
     </StackPanel>
   </Grid>
 </Grid>"##;
+
+thread_local! {
+    /// The comment list of the post on show.
+    static COMMENTS: RefCell<Option<Rc<crate::ui::comment_list::CommentList>>> = const { RefCell::new(None) };
+}
 
 struct Sheet {
     root: crate::xaml::IFrameworkElement,
@@ -77,17 +81,7 @@ pub fn open(post: &Post) -> Result<()> {
     on_click(&root, "Close", || {
         let _ = popup::hide();
     })?;
-    on_click(&root, "Comments", || {
-        if let Some(sheet) = sheet() {
-            let _ = popup::hide();
-            if let Some((kind, oid)) = sheet.post.comments {
-                let _ = crate::ui::comment_list::open_page(
-                    rubi_core::CommentArea { kind, oid },
-                    sheet.post.comment_count,
-                );
-            }
-        }
-    })?;
+    opened.show_comments()?;
     popup::show(&root)
 }
 
@@ -118,6 +112,18 @@ impl Sheet {
         }
 
         self.show_pictures()
+    }
+
+    /// Puts the post's comment area under its words.
+    fn show_comments(&self) -> Result<()> {
+        let Some((kind, oid)) = self.post.comments else { return Ok(()) };
+        let list = crate::ui::comment_list::CommentList::new()?;
+        named::<crate::xaml::IContentControl>(&self.root, "CommentsHost")?
+            .SetContent(&list.element().cast::<crate::xaml::UIElement>()?)?;
+        named::<IUIElement>(&self.root, "CommentsHost")?.SetVisibility(Visibility::Visible)?;
+        list.show(rubi_core::CommentArea { kind, oid }, self.post.comment_count)?;
+        COMMENTS.with_borrow_mut(|slot| *slot = Some(list));
+        Ok(())
     }
 
     fn show_pictures(&self) -> Result<()> {

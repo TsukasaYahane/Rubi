@@ -191,8 +191,13 @@ pub struct SearchPage {
     matches_all: Cell<bool>,
 }
 
+/// Opens the video a address names, from the clipboard or the search box.
+pub fn open_video(bvid: &str) -> Result<()> {
+    crate::ui::player::open(false, bvid, "", "")
+}
+
 /// The video a pasted address names: a BV id, or an av id turned into one.
-fn video_in(text: &str) -> Option<String> {
+pub fn video_in(text: &str) -> Option<String> {
     let bytes = text.as_bytes();
     let mut at = 0;
     while at + 2 <= bytes.len() {

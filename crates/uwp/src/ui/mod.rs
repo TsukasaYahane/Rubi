@@ -4,6 +4,7 @@
 pub mod article;
 pub mod card_grid;
 pub mod card_menu;
+pub mod clip;
 pub mod comment_list;
 pub mod contacts;
 pub mod control_bar;
