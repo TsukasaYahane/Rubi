@@ -280,7 +280,10 @@ fn step(forward: bool) {
             core.services.listening.previous().ok().flatten()
         };
         let Some(card) = moved else {
-            crate::ui::post(&dispatcher, || toast("没有下一首了"));
+            crate::ui::post(&dispatcher, || {
+                say("队列里没有下一首了");
+                toast("没有下一首了");
+            });
             return;
         };
         let quality = core.services.preferences.settings().playback.preferred_quality;
@@ -420,11 +423,15 @@ pub fn close_window() {
 fn toggle() {
     let heard = HEARD.with_borrow(Clone::clone);
     let Some((player, _)) = heard else {
-        let queued = shell()
+        let (current, queued) = shell()
             .and_then(|s| s.backend.get().cloned())
-            .map(|core| core.services.listening.items().map(|i| i.len()).unwrap_or(0))
-            .unwrap_or(0);
-        toast(&format!("播放器还没准备好 · 队列 {queued} 首"));
+            .map(|core| {
+                let current = core.services.listening.current().map(|c| c.title).unwrap_or_default();
+                let queued = core.services.listening.items().map(|i| i.len()).unwrap_or(0);
+                (current, queued)
+            })
+            .unwrap_or_default();
+        say(&format!("播放器没就绪 · 当前「{current}」· 队列 {queued} 首"));
         return;
     };
     let playing = media::session_of(&player)
