@@ -12,15 +12,16 @@ use crate::backend::Backend;
 use crate::session;
 use crate::state::layout::WindowClass;
 use crate::state::panes::{self, Widths};
-use crate::state::settings::Prefs;
+use crate::state::settings::{Prefs, Skin};
 use crate::ui::home::HomePage;
 use crate::ui::keep;
 use crate::ui::splitter;
 use crate::ui::{follow, live, live_room, load, me, named, on_click, player, post, search, set_text, up};
 use crate::xaml::{
     ApplicationData, ApplicationView, Color, CoreApplication, CoreDispatcher, CoreWindow, CoreWindowActivationState,
-    GridLength, GridUnitType, IApplicationData, IApplicationView3, IContentControl, IControl, ICoreApplicationView3,
-    ICoreWindow, IFrameworkElement, IRowDefinition, IStorageItem, IUIElement, IUISettings3, IWindow, IWindow2,
+    ElementTheme, GridLength, GridUnitType, IApplicationData, IApplicationView3, IContentControl, IControl, ICoreApplicationView3,
+    ICoreWindow, IFrameworkElement, IFrameworkElement2, IRowDefinition, IStorageItem, IUIElement, IUISettings3, IWindow,
+    IWindow2,
     IWindowActivatedEventArgs, KeyEventArgs, SolidColorBrush, UIColorType, UIElement, UISettings, Visibility, Window,
     WindowActivatedEventArgs, WindowSizeChangedEventArgs,
 };
@@ -182,6 +183,10 @@ pub fn start() -> Result<()> {
     let data_dir = folder.cast::<IStorageItem>()?.Path()?;
     let widths = std::fs::read_to_string(panes_file(&data_dir)).map(|t| Widths::parse(&t)).unwrap_or_default();
     let prefs = std::fs::read_to_string(prefs_file(&data_dir)).map(|t| Prefs::parse(&t)).unwrap_or_default();
+    // The skin is asked for before the window is on screen, which is when it still counts.
+    if let Ok(element) = root.cast::<IFrameworkElement2>() {
+        let _ = element.SetRequestedTheme(skin_of(prefs.theme));
+    }
     let shell = Rc::new(Shell {
         dispatcher: dispatcher.clone(),
         backend: OnceCell::new(),
@@ -271,6 +276,15 @@ fn extend_into_title_bar(window: &IWindow, root: &IFrameworkElement) -> Result<(
 
 fn prefs_file(data_dir: &str) -> std::path::PathBuf {
     std::path::Path::new(data_dir).join("prefs.txt")
+}
+
+/// The theme to ask XAML for.
+fn skin_of(skin: Skin) -> ElementTheme {
+    match skin {
+        Skin::Light => ElementTheme::Light,
+        Skin::Dark => ElementTheme::Dark,
+        Skin::System => ElementTheme::Default,
+    }
 }
 
 fn panes_file(data_dir: &str) -> std::path::PathBuf {
@@ -429,9 +443,26 @@ impl Shell {
 
     /// Keeps `prefs` for the next start, and shows the style at once.
     pub fn set_prefs(&self, prefs: Prefs) -> Result<()> {
+        let skinned = prefs.theme != self.prefs.get().theme;
         self.prefs.set(prefs);
         let _ = std::fs::write(prefs_file(&self.folder), prefs.to_text());
-        self.apply_rail()
+        let _ = self.apply_skin();
+        let shown = self.apply_rail();
+        // A page keeps the skin it was loaded with, so the one on show is built again.
+        if skinned {
+            show_tab(self.tab.get());
+        }
+        shown
+    }
+
+    /// The light or dark skin to ask for.
+    fn theme(&self) -> ElementTheme {
+        skin_of(self.prefs.get().theme)
+    }
+
+    /// Light, dark, or what Windows is set to: the window's navigation goes by it.
+    fn apply_skin(&self) -> Result<()> {
+        self.root.cast::<IFrameworkElement2>()?.SetRequestedTheme(self.theme())
     }
 
     fn rail_width(&self) -> f64 {
@@ -473,6 +504,10 @@ impl Shell {
     }
 
     pub fn set_page(&self, page: &IFrameworkElement) -> Result<()> {
+        // A page keeps the skin it is loaded with: this has to come before it goes in.
+        if let Ok(element) = page.cast::<IFrameworkElement2>() {
+            let _ = element.SetRequestedTheme(self.theme());
+        }
         self.page.SetContent(&page.cast::<IInspectable>()?)
     }
 
@@ -516,6 +551,7 @@ impl Shell {
     /// Lays the navigation out for the window's width.
     fn apply_class(&self) -> Result<()> {
         let class = self.class.get();
+        let _ = self.apply_skin();
         self.apply_rail()?;
         self.apply_words_icons()?;
         let bare = self.immersive.get();

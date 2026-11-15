@@ -175,7 +175,12 @@ pub fn build(category: Category, backend: &Arc<Backend>) -> Result<IFrameworkEle
 
 fn look() -> Result<IFrameworkElement> {
     const LABELS: [&str; 2] = ["图形", "文字"];
-    let rows = row("界面风格", "图形用线条图标配文字；文字只用文字", &picks("Style", &LABELS));
+    const SKINS: [&str; 3] = ["跟随系统", "浅色", "深色"];
+    let rows = [
+        row("界面风格", "图形用线条图标配文字；文字只用文字", &picks("Style", &LABELS)),
+        row("主题", "跟随系统时按 Windows 的设置；手动选了就一直用它", &picks("Skin", &SKINS)),
+    ]
+    .concat();
     let root = load(&page(Category::Look, &rows))?;
     let words = shell().is_some_and(|s| s.prefs().words);
     mark(&root, "Style", LABELS.len(), usize::from(words))?;
@@ -184,6 +189,15 @@ fn look() -> Result<IFrameworkElement> {
         on_click(&root, &format!("Style{at}"), move || {
             change_prefs(|p| p.words = at == 1);
             let _ = mark(&shown, "Style", LABELS.len(), at);
+        })?;
+    }
+    let skin = shell().map(|s| s.prefs().theme).unwrap_or_default();
+    mark(&root, "Skin", SKINS.len(), skin.index())?;
+    for (at, _) in SKINS.iter().enumerate() {
+        let shown = root.clone();
+        on_click(&root, &format!("Skin{at}"), move || {
+            change_prefs(|p| p.theme = crate::state::settings::Skin::at(at));
+            let _ = mark(&shown, "Skin", SKINS.len(), at);
         })?;
     }
     Ok(root)

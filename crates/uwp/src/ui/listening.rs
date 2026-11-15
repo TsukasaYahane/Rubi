@@ -132,6 +132,30 @@ fn report(outcome: windows_core::Result<()>, name: &str) {
     }
 }
 
+/// The two styles: picture buttons carry their icon, the words style the word alone.
+fn style_buttons(root: &crate::xaml::IFrameworkElement) {
+    let words = shell().is_some_and(|s| s.prefs().words);
+    for name in ["CloseShape", "PrevShape", "NextShape", "WatchShape"] {
+        show_part(root, name, !words);
+    }
+    for name in ["CloseWords", "PrevWords", "NextWords", "WatchWords"] {
+        show_part(root, name, words);
+    }
+    show_part(root, "ModeWords", words);
+    // The mode has three shapes, so its own drawing decides which one shows: see `write_mode`.
+    if words {
+        for name in ["ModeSeq", "ModeLoop", "ModeShuffle"] {
+            show_part(root, name, false);
+        }
+    }
+}
+
+fn show_part(root: &crate::xaml::IFrameworkElement, name: &str, on: bool) {
+    if let Ok(part) = crate::ui::named::<crate::xaml::IUIElement>(root, name) {
+        let _ = part.SetVisibility(if on { crate::xaml::Visibility::Visible } else { crate::xaml::Visibility::Collapsed });
+    }
+}
+
 /// Says what is going on in the window itself: a toast would be under the page it opened.
 fn say(text: &str) {
     let Some(root) = WINDOW_ROOT.with_borrow(Clone::clone) else { return };
@@ -289,8 +313,6 @@ thread_local! {
 
 /// Shows what is being listened to.
 pub fn open_panel() {
-    let Some(shell) = shell() else { return };
-    let Some(backend) = shell.backend.get().cloned() else { return };
     let root = match crate::ui::load(PANEL) {
         Ok(root) => root,
         Err(problem) => {
@@ -387,28 +409,39 @@ fn step(forward: bool) {
 // The listening window: the whole window becomes a player, with no navigation.
 
 const WINDOW: &str = r##"<Grid xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
-      xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml" Background="#FFFFFF">
+      xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+      Background="{ThemeResource ApplicationPageBackgroundThemeBrush}">
   <Grid.Resources>
+    <!-- Metro buttons have square corners. -->
+    <CornerRadius x:Key="ControlCornerRadius">0</CornerRadius>
     <!-- The pointer only fades a button: nothing is repainted under it, and pressing is the
          feedback. -->
-    <SolidColorBrush x:Key="ButtonForegroundPointerOver" Color="#8A8A8A" />
+    <SolidColorBrush x:Key="ButtonForegroundPointerOver" Color="{ThemeResource SystemBaseHighColor}" Opacity="0.5" />
     <SolidColorBrush x:Key="ButtonBackgroundPointerOver" Color="Transparent" />
     <SolidColorBrush x:Key="ButtonBorderBrushPointerOver" Color="Transparent" />
     <SolidColorBrush x:Key="ButtonForegroundPressed" Color="#0050EF" />
     <SolidColorBrush x:Key="ButtonBackgroundPressed" Color="Transparent" />
     <!-- The centre is the cover, frosted: acrylic takes what it is laid over. -->
-    <AcrylicBrush x:Key="Frost" BackgroundSource="Backdrop" TintColor="#FFFFFF" TintOpacity="0.62"
-                  FallbackColor="#D9FFFFFF" />
+    <AcrylicBrush x:Key="Frost" BackgroundSource="Backdrop" TintColor="{ThemeResource SystemAltHighColor}"
+                  TintOpacity="0.62" FallbackColor="#D9FFFFFF" />
   </Grid.Resources>
   <Grid.RowDefinitions><RowDefinition Height="Auto" /><RowDefinition Height="*" /></Grid.RowDefinitions>
   <MediaPlayerElement x:Name="Sound" Width="1" Height="1" Opacity="0" IsHitTestVisible="False"
                       AreTransportControlsEnabled="False" />
   <Grid Margin="24,16,24,8">
     <Grid.ColumnDefinitions><ColumnDefinition Width="Auto" /><ColumnDefinition Width="*" /></Grid.ColumnDefinitions>
-    <Button x:Name="Close" Content="‹ 退出" Background="Transparent" BorderThickness="0"
-            Foreground="#141414" FontSize="15" Padding="0" />
+    <Button x:Name="Close" Background="Transparent" BorderThickness="0" Padding="0"
+            Foreground="{ThemeResource SystemControlForegroundBaseHighBrush}">
+      <StackPanel Orientation="Horizontal">
+        <Path x:Name="CloseShape" Data="M20,12 L5,12 M11,6 L5,12 L11,18" Width="20" Height="20"
+              Stretch="Uniform" StrokeThickness="2" StrokeStartLineCap="Square" StrokeEndLineCap="Square"
+              StrokeLineJoin="Miter" VerticalAlignment="Center" Margin="0,0,8,0"
+              Stroke="{ThemeResource SystemControlForegroundBaseHighBrush}" />
+        <TextBlock x:Name="CloseWords" Text="退出" FontSize="15" VerticalAlignment="Center" />
+      </StackPanel>
+    </Button>
     <TextBlock Grid.Column="1" Text="听视频" FontSize="15" Margin="16,0,0,0" VerticalAlignment="Center"
-               Foreground="#8A8A8A" />
+               Foreground="{ThemeResource SystemControlForegroundBaseMediumBrush}" />
   </Grid>
   <Grid Grid.Row="1" Margin="24,0,24,24">
     <Grid.ColumnDefinitions><ColumnDefinition Width="*" /><ColumnDefinition x:Name="QueueColumn" Width="340" /></Grid.ColumnDefinitions>
@@ -416,55 +449,112 @@ const WINDOW: &str = r##"<Grid xmlns="http://schemas.microsoft.com/winfx/2006/xa
       <Image x:Name="StageCover" Stretch="UniformToFill" Opacity="0.9" />
       <Border Background="{StaticResource Frost}" />
       <StackPanel VerticalAlignment="Center" HorizontalAlignment="Center" MaxWidth="560">
-        <Border Width="340" Height="191" HorizontalAlignment="Center" Background="#E8E8E8"
-                BorderBrush="#FFFFFF" BorderThickness="2">
+        <Border Width="340" Height="191" HorizontalAlignment="Center"
+                Background="{ThemeResource SystemControlForegroundBaseLowBrush}"
+                BorderBrush="{ThemeResource ApplicationPageBackgroundThemeBrush}" BorderThickness="2">
           <Image x:Name="Cover" Stretch="UniformToFill" />
         </Border>
         <TextBlock x:Name="Song" Margin="0,22,0,0" FontSize="20" FontWeight="SemiBold" TextAlignment="Center"
-                   TextWrapping="Wrap" MaxLines="2" TextTrimming="CharacterEllipsis" Foreground="#141414" />
+                   TextWrapping="Wrap" MaxLines="2" TextTrimming="CharacterEllipsis"
+                   Foreground="{ThemeResource SystemControlForegroundBaseHighBrush}" />
         <TextBlock x:Name="Who" Margin="0,8,0,0" FontSize="13" TextAlignment="Center" TextTrimming="CharacterEllipsis"
-                   Foreground="#5A5A5A" />
+                   Foreground="{ThemeResource SystemControlForegroundBaseMediumBrush}" />
         <Grid Margin="0,20,0,0">
           <Grid.ColumnDefinitions><ColumnDefinition Width="*" /><ColumnDefinition Width="Auto" /></Grid.ColumnDefinitions>
           <Slider x:Name="Bar" Minimum="0" Maximum="1" StepFrequency="1" Margin="0,0,0,0"
-                  VerticalAlignment="Center" Foreground="#0050EF" Background="#DFE3EA" />
-          <TextBlock x:Name="Clock" Grid.Column="1" Margin="12,0,0,0" FontSize="11" Foreground="#8A8A8A"
-                     FontFamily="Consolas" VerticalAlignment="Center" />
+                  VerticalAlignment="Center" Foreground="#0050EF"
+                  Background="{ThemeResource SystemControlForegroundBaseLowBrush}" />
+          <TextBlock x:Name="Clock" Grid.Column="1" Margin="12,0,0,0" FontSize="11" FontFamily="Consolas"
+                     Foreground="{ThemeResource SystemControlForegroundBaseMediumBrush}"
+                     VerticalAlignment="Center" />
         </Grid>
         <StackPanel Orientation="Horizontal" HorizontalAlignment="Center" Margin="0,22,0,0">
-          <Button x:Name="Mode" Width="96" Background="Transparent" BorderThickness="0" Foreground="#5A5A5A"
-                  FontSize="13" VerticalAlignment="Center" />
-          <Button x:Name="Prev" Content="上一首" Width="72" Background="Transparent" BorderThickness="0"
-                  Foreground="#5A5A5A" FontSize="14" Margin="8,0,16,0" />
+          <Button x:Name="Mode" Background="Transparent" BorderThickness="0" Padding="12,10" VerticalAlignment="Center"
+                  Foreground="{ThemeResource SystemControlForegroundBaseMediumBrush}">
+            <StackPanel Orientation="Horizontal">
+              <Grid Width="20" Height="20" VerticalAlignment="Center">
+                <Path x:Name="ModeSeq" Data="M3,12 L19,12 M14,7 L19,12 L14,17" Stretch="Uniform"
+                      StrokeThickness="2" StrokeStartLineCap="Square" StrokeEndLineCap="Square" StrokeLineJoin="Miter"
+                      Stroke="{ThemeResource SystemControlForegroundBaseMediumBrush}" />
+                <Path x:Name="ModeLoop" Data="M4,11 L4,7 L19,7 M16,4 L19,7 L16,10 M20,13 L20,17 L5,17 M8,14 L5,17 L8,20 M11,10.5 L12.5,10.5 L12.5,14"
+                      Stretch="Uniform" Visibility="Collapsed" StrokeThickness="2" StrokeStartLineCap="Square"
+                      StrokeEndLineCap="Square" StrokeLineJoin="Miter"
+                      Stroke="{ThemeResource SystemControlForegroundBaseMediumBrush}" />
+                <Path x:Name="ModeShuffle" Data="M3,7 L7,7 L15,17 L20,17 M17,14 L20,17 L17,20 M3,17 L7,17 L9.5,14 M12.5,10 L15,7 L20,7 M17,4 L20,7 L17,10"
+                      Stretch="Uniform" Visibility="Collapsed" StrokeThickness="2" StrokeStartLineCap="Square"
+                      StrokeEndLineCap="Square" StrokeLineJoin="Miter"
+                      Stroke="{ThemeResource SystemControlForegroundBaseMediumBrush}" />
+              </Grid>
+              <TextBlock x:Name="ModeWords" Text="顺序" FontSize="13" VerticalAlignment="Center" Margin="8,0,0,0" />
+            </StackPanel>
+          </Button>
+          <Button x:Name="Prev" Background="Transparent" BorderThickness="0" Padding="12,10" Margin="8,0,8,0"
+                  Foreground="{ThemeResource SystemControlForegroundBaseMediumBrush}" VerticalAlignment="Center">
+            <StackPanel Orientation="Horizontal">
+              <Path x:Name="PrevShape" Data="M3,4 L6,4 L6,20 L3,20 Z M21,4 L21,20 L7.5,12 Z" Width="20" Height="20"
+                    Stretch="Uniform" VerticalAlignment="Center" Margin="0,0,8,0"
+                    Fill="{ThemeResource SystemControlForegroundBaseMediumBrush}" />
+              <TextBlock x:Name="PrevWords" Text="上一首" FontSize="14" VerticalAlignment="Center" />
+            </StackPanel>
+          </Button>
           <Button x:Name="PlayPause" Width="64" Height="64" Background="#0050EF" BorderThickness="0"
-                  Foreground="#FFFFFF" FontSize="20">
+                  Foreground="#FFFFFF">
             <Button.Resources>
               <SolidColorBrush x:Key="ButtonBackgroundPointerOver" Color="#D90050EF" />
               <SolidColorBrush x:Key="ButtonBackgroundPressed" Color="#B30050EF" />
               <SolidColorBrush x:Key="ButtonForegroundPointerOver" Color="#FFFFFF" />
               <SolidColorBrush x:Key="ButtonForegroundPressed" Color="#FFFFFF" />
             </Button.Resources>
+            <Grid>
+              <Path x:Name="PlayShape" Data="M6,3.5 L6,20.5 L20.5,12 Z" Width="22" Height="22" Stretch="Uniform"
+                    Fill="#FFFFFF" />
+              <Path x:Name="PauseShape" Data="M5,4 L9.5,4 L9.5,20 L5,20 Z M14.5,4 L19,4 L19,20 L14.5,20 Z"
+                    Width="22" Height="22" Stretch="Uniform" Visibility="Collapsed" Fill="#FFFFFF" />
+            </Grid>
           </Button>
-          <Button x:Name="NextSong" Content="下一首" Width="72" Background="Transparent" BorderThickness="0"
-                  Foreground="#5A5A5A" FontSize="14" Margin="16,0,8,0" />
-          <Button x:Name="Watch" Content="看视频" Width="96" Background="Transparent" BorderThickness="0"
-                  Foreground="#0050EF" FontSize="14" VerticalAlignment="Center" />
+          <Button x:Name="NextSong" Background="Transparent" BorderThickness="0" Padding="12,10" Margin="8,0,8,0"
+                  Foreground="{ThemeResource SystemControlForegroundBaseMediumBrush}" VerticalAlignment="Center">
+            <StackPanel Orientation="Horizontal">
+              <Path x:Name="NextShape" Data="M3,4 L3,20 L16.5,12 Z M18,4 L21,4 L21,20 L18,20 Z" Width="20" Height="20"
+                    Stretch="Uniform" VerticalAlignment="Center" Margin="0,0,8,0"
+                    Fill="{ThemeResource SystemControlForegroundBaseMediumBrush}" />
+              <TextBlock x:Name="NextWords" Text="下一首" FontSize="14" VerticalAlignment="Center" />
+            </StackPanel>
+          </Button>
+          <Button x:Name="Watch" Background="Transparent" BorderThickness="0" Padding="12,10" VerticalAlignment="Center"
+                  Foreground="#0050EF">
+            <StackPanel Orientation="Horizontal">
+              <Path x:Name="WatchShape" Data="M2,5 L22,5 L22,18 L2,18 Z M8,21 L16,21 M10.5,8.5 L10.5,14.5 L15,11.5 Z"
+                    Width="20" Height="20" Stretch="Uniform" StrokeThickness="2" StrokeStartLineCap="Square"
+                    StrokeEndLineCap="Square" StrokeLineJoin="Miter" VerticalAlignment="Center" Margin="0,0,8,0"
+                    Stroke="#0050EF" />
+              <TextBlock x:Name="WatchWords" Text="看视频" FontSize="14" VerticalAlignment="Center" />
+            </StackPanel>
+          </Button>
         </StackPanel>
       </StackPanel>
     </Grid>
     <!-- The way back sits in the main column: the queue column is what folds to nothing, and a
          button in it would fold with it and never be hit again. -->
-    <Button x:Name="Unfold" Content="‹" HorizontalAlignment="Right" VerticalAlignment="Top"
-            Background="Transparent" BorderThickness="0" Foreground="#8A8A8A" FontSize="16" Padding="8,0"
-            Visibility="Collapsed" />
+    <Button x:Name="Unfold" HorizontalAlignment="Right" VerticalAlignment="Top" Background="Transparent"
+            BorderThickness="0" Padding="10,8" Visibility="Collapsed"
+            Foreground="{ThemeResource SystemControlForegroundBaseMediumBrush}">
+      <Path Data="M15,5 L8,12 L15,19" Width="16" Height="16" Stretch="Uniform" StrokeThickness="2"
+            StrokeStartLineCap="Square" StrokeEndLineCap="Square" StrokeLineJoin="Miter"
+            Stroke="{ThemeResource SystemControlForegroundBaseMediumBrush}" />
+    </Button>
     <Grid x:Name="QueuePane" Grid.Column="1" Margin="24,0,0,0">
       <Grid.RowDefinitions><RowDefinition Height="Auto" /><RowDefinition Height="*" /></Grid.RowDefinitions>
       <Grid>
         <Grid.ColumnDefinitions><ColumnDefinition Width="*" /><ColumnDefinition Width="Auto" /></Grid.ColumnDefinitions>
-        <TextBlock x:Name="QueueHead" Text="接下来" FontSize="16" FontWeight="Light" Foreground="#141414"
-                   Margin="0,0,0,10" />
-        <Button x:Name="Fold" Grid.Column="1" Content="›" Background="Transparent" BorderThickness="0"
-                Foreground="#8A8A8A" FontSize="16" Padding="8,0" VerticalAlignment="Top" />
+        <TextBlock x:Name="QueueHead" Text="接下来" FontSize="16" FontWeight="Light" Margin="0,0,0,10"
+                   Foreground="{ThemeResource SystemControlForegroundBaseHighBrush}" />
+        <Button x:Name="Fold" Grid.Column="1" Background="Transparent" BorderThickness="0" Padding="10,8"
+                VerticalAlignment="Top" Foreground="{ThemeResource SystemControlForegroundBaseMediumBrush}">
+          <Path Data="M9,5 L16,12 L9,19" Width="16" Height="16" Stretch="Uniform" StrokeThickness="2"
+                StrokeStartLineCap="Square" StrokeEndLineCap="Square" StrokeLineJoin="Miter"
+                Stroke="{ThemeResource SystemControlForegroundBaseMediumBrush}" />
+        </Button>
       </Grid>
       <ScrollViewer Grid.Row="1"><StackPanel x:Name="Queue" /></ScrollViewer>
     </Grid>
@@ -509,6 +599,7 @@ pub fn open_window() -> Result<()> {
     report(crate::ui::on_click(&root, "Mode", cycle_mode), "Mode");
     report(crate::ui::on_click(&root, "Fold", || fold(true)), "Fold");
     report(crate::ui::on_click(&root, "Unfold", || fold(false)), "Unfold");
+    style_buttons(&root);
     if let Ok(bar) = crate::ui::named::<crate::xaml::IRangeBase>(&root, "Bar")
         && let Ok(revoker) =
             bar.ValueChanged(move |_: Ref<IInspectable>, _: Ref<crate::xaml::RangeBaseValueChangedEventArgs>| {
@@ -638,12 +729,14 @@ fn paint_queue(root: &crate::xaml::IFrameworkElement, items: &[rubi_model::Video
     let _ = crate::ui::set_text(root, "QueueHead", &format!("接下来 · {} 首", items.len()));
     for item in items.iter().take(60) {
         let bright = on.as_deref() == Some(item.bvid.as_str());
+        // The one being heard is blue and heavy; the rest take the theme's own word colour.
+        let look = if bright { r##" Foreground="#0050EF" FontWeight="SemiBold""## } else { "" };
         let xaml = format!(
             r##"<TextBlock xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
                   xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml" Text="{}" FontSize="13" Margin="0,0,0,8"
-                  TextTrimming="CharacterEllipsis" Foreground="{}" />"##,
+                  TextTrimming="CharacterEllipsis"{} />"##,
             crate::state::settings::escape(&item.title),
-            if bright { "#0050EF" } else { "#5A5A5A" }
+            look
         );
         if let Ok(line) = crate::ui::load(&xaml)
             && let Ok(element) = line.cast::<crate::xaml::UIElement>()
@@ -770,20 +863,22 @@ fn paint() {
     let clock = format!("{} / {}", mmss(at), mmss(end));
     let _ = crate::ui::set_text(&root, "Clock", &clock);
     let playing = session.PlaybackState().is_ok_and(|s| s == MediaPlaybackState::Playing);
-    let label = if playing { "❚❚" } else { "▶" };
-    if let Ok(value) = crate::xaml::PropertyValue::CreateString(label) {
-        if let Ok(button) = crate::ui::named::<crate::xaml::IContentControl>(&root, "PlayPause") {
-            let _ = button.SetContent(&value);
-        }
-    }
+    show_part(&root, "PlayShape", !playing);
+    show_part(&root, "PauseShape", playing);
 }
 
-/// Writes the mode on its button: it is a button, so its content, not a TextBlock's text.
+/// Writes the mode on its button: one of the three shapes, or the word in the words style.
 fn write_mode(root: &crate::xaml::IFrameworkElement, mode: PlaylistMode) {
-    let Ok(value) = crate::xaml::PropertyValue::CreateString(mode_label(mode)) else { return };
-    if let Ok(button) = crate::ui::named::<crate::xaml::IContentControl>(root, "Mode") {
-        let _ = button.SetContent(&value);
-    }
+    let words = shell().is_some_and(|s| s.prefs().words);
+    let (sequential, looping, shuffled) = match mode {
+        PlaylistMode::Shuffle => (false, false, true),
+        PlaylistMode::LoopOne | PlaylistMode::LoopAll => (false, true, false),
+        PlaylistMode::Sequential => (true, false, false),
+    };
+    show_part(root, "ModeSeq", !words && sequential);
+    show_part(root, "ModeLoop", !words && looping);
+    show_part(root, "ModeShuffle", !words && shuffled);
+    let _ = crate::ui::set_text(root, "ModeWords", mode_label(mode));
 }
 
 /// Reads the mode once and shows it.

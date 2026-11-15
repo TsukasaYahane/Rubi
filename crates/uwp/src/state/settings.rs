@@ -77,6 +77,43 @@ pub const QUALITIES: [(u32, &str); 3] = [(80, "1080P"), (64, "720P"), (32, "480P
 
 const DEFAULT_VOLUME: u8 = 70;
 
+/// Light or dark, or whatever Windows is set to.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum Skin {
+    #[default]
+    System,
+    Light,
+    Dark,
+}
+
+impl Skin {
+    /// Where it sits among 跟随系统 / 浅色 / 深色.
+    pub fn index(self) -> usize {
+        match self {
+            Self::System => 0,
+            Self::Light => 1,
+            Self::Dark => 2,
+        }
+    }
+
+    pub fn at(index: usize) -> Self {
+        match index {
+            1 => Self::Light,
+            2 => Self::Dark,
+            _ => Self::System,
+        }
+    }
+
+    /// How it is written to the file.
+    fn code(self) -> u8 {
+        self.index() as u8
+    }
+
+    fn from_code(code: &str) -> Self {
+        Self::at(code.parse().unwrap_or_default())
+    }
+}
+
 /// This app's own preferences, kept in a small file beside the panes' widths.
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct Prefs {
@@ -91,6 +128,8 @@ pub struct Prefs {
     pub live_filter: LiveFilter,
     /// A narrow window shows the feed in one column instead of two.
     pub single_column: bool,
+    /// Light, dark, or what Windows is set to.
+    pub theme: Skin,
 }
 
 impl Default for Prefs {
@@ -100,6 +139,7 @@ impl Default for Prefs {
             danmaku: Look::default(),
             live_filter: LiveFilter::default(),
             single_column: false,
+            theme: Skin::default(),
         }
     }
 }
@@ -113,6 +153,7 @@ impl Prefs {
             let on = value == "1";
             match key {
                 "words" => prefs.words = on,
+                "theme" => prefs.theme = Skin::from_code(value),
                 "pause_on_blur" => prefs.pause_on_blur = on,
                 "shortcuts" => prefs.shortcuts = on,
                 "volume" | "live_volume" => prefs.volume = value.parse().map_or(DEFAULT_VOLUME, |v: u8| v.min(100)),
@@ -146,7 +187,7 @@ impl Prefs {
     pub fn to_text(self) -> String {
         let dm = self.danmaku;
         format!(
-            "words={} pause_on_blur={} shortcuts={} volume={} dm_area={} dm_speed={} dm_size={} dm_opacity={} dm_kinds={} live_filter={}",
+            "words={} pause_on_blur={} shortcuts={} volume={} dm_area={} dm_speed={} dm_size={} dm_opacity={} dm_kinds={} live_filter={} theme={}",
             u8::from(self.words),
             u8::from(self.pause_on_blur),
             u8::from(self.shortcuts),
@@ -156,7 +197,8 @@ impl Prefs {
             dm.size,
             dm.opacity,
             dm.kinds(),
-            u8::from(self.live_filter.gifts) | u8::from(self.live_filter.popups) << 1 | u8::from(self.live_filter.effects) << 2
+            u8::from(self.live_filter.gifts) | u8::from(self.live_filter.popups) << 1 | u8::from(self.live_filter.effects) << 2,
+            self.theme.code()
         )
     }
 }
@@ -196,7 +238,10 @@ mod tests {
     fn prefs_survive_a_round_trip() {
         let danmaku = Look { area: 1.0, speed: 1.5, size: 26.0, opacity: 0.6, top: false, ..Look::default() };
         let live_filter = LiveFilter { gifts: false, popups: true, effects: false };
-        let prefs = Prefs { words: true, pause_on_blur: false, shortcuts: true, volume: 35, danmaku, live_filter, single_column: false };
+        let prefs = Prefs {
+            words: true, pause_on_blur: false, shortcuts: true, volume: 35, danmaku, live_filter,
+            single_column: false, theme: Skin::Dark,
+        };
         assert_eq!(Prefs::parse(&prefs.to_text()), prefs);
         assert_eq!(Prefs::parse("live_volume=250").volume, 100);
         assert_eq!(Prefs::parse("live_volume=loud").volume, DEFAULT_VOLUME);
