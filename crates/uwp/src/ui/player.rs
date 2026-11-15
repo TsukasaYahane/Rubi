@@ -36,13 +36,12 @@ use crate::ui::up;
 use crate::ui::watch;
 use crate::ui::{load, named, on_click, on_enter, pip, post, series, set_text, soon};
 use crate::xaml::{
-    AdaptiveMediaSource, Color, DataWriter, FocusManager, FocusState, FrameworkElement, Grid, GridLength, GridUnitType,
-    IButtonBase, IColumnDefinition, IContentControl, IControl, IDataWriter, IFontIcon, IFrameworkElement,
-    IFrameworkElement4, IInputStream, IMediaPlaybackSession, IMediaPlayer, IMediaPlayer3, IMediaPlayerFailedEventArgs,
-    IOutputStream, IPanel, IRandomAccessStream, IRangeBase, IRangeBaseValueChangedEventArgs, IRowDefinition,
-    ITextBlock, ITextBox, IUIElement, InMemoryRandomAccessStream, MediaPlaybackSession, MediaPlaybackState,
-    MediaPlayer, MediaPlayerFailedEventArgs, MediaSource, PropertyValue, RangeBaseValueChangedEventArgs,
-    SizeChangedEventArgs, TappedRoutedEventArgs, Thickness, UIElement, Uri, VirtualKey, Visibility,
+    Color, FocusManager, FocusState, FrameworkElement, Grid, GridLength, GridUnitType, IButtonBase, IColumnDefinition,
+    IContentControl, IControl, IFontIcon, IFrameworkElement, IFrameworkElement4, IMediaPlaybackSession, IMediaPlayer,
+    IMediaPlayer3, IMediaPlayerFailedEventArgs, IPanel, IRangeBase, IRangeBaseValueChangedEventArgs, IRowDefinition,
+    ITextBlock, ITextBox, IUIElement, MediaPlaybackSession, MediaPlaybackState, MediaPlayer,
+    MediaPlayerFailedEventArgs, MediaSource, PropertyValue, RangeBaseValueChangedEventArgs, SizeChangedEventArgs,
+    TappedRoutedEventArgs, Thickness, UIElement, VirtualKey, Visibility,
 };
 use crate::xaml::{
     CompositionStretch, HoldingRoutedEventArgs, HoldingState, IBorder, IHoldingRoutedEventArgs, IPointer,
@@ -50,8 +49,6 @@ use crate::xaml::{
 };
 use rubi_core::{Season, VideoPart};
 
-/// Quality asked for; the core caps it to what the account may play.
-const DASH_TYPE: &str = "application/dash+xml";
 /// The player's 100 ns units.
 const TICKS_PER_SECOND: i64 = 10_000_000;
 /// How often the bar shows the position.
@@ -512,10 +509,14 @@ fn is_playing() -> bool {
 
 /// Stops the picture and its sound: listening plays the same video's audio alone.
 pub fn stop_video() {
-    pause(false);
+    pause(true);
 }
 
 fn pause(on: bool) {
+    // The video goes on: the audio-only track must not sound over it.
+    if !on {
+        crate::ui::listening::stop();
+    }
     PLAYING.with(|p| {
         if let Some(player) = p.borrow().as_ref().and_then(|m| m.cast::<IMediaPlayer>().ok()) {
             let _ = if on { player.Pause() } else { player.Play() };
@@ -1209,7 +1210,8 @@ pub fn open(feed: bool, bvid: &str, title: &str, uploader: &str) -> Result<()> {
     named::<IUIElement>(&root, "SeekRow")?.SetVisibility(Visibility::Visible)?;
     named::<IUIElement>(&root, "PlayPause")?.SetVisibility(Visibility::Visible)?;
     set_text(&root, "Title", title)?;
-    let opening = if uploader.is_empty() { "正在打开…".to_owned() } else { format!("{uploader} · 正在打开…") };
+    let opening =
+        if uploader.is_empty() { "正在打开…".to_owned() } else { format!("{uploader} · 正在打开…") };
     set_text(&root, "Meta", &opening)?;
     on_click(&root, "Back", go_back)?;
     settle_buttons(&root)?;
@@ -1263,7 +1265,10 @@ pub fn open(feed: bool, bvid: &str, title: &str, uploader: &str) -> Result<()> {
     on_click(&root, "ActListen", || {
         if let Some(page) = page() {
             let bvid = page.bvid.clone();
-            crate::ui::listening::start(&bvid);
+            // Already hearing this one: just bring the window back, its queue untouched.
+            if !crate::ui::listening::hearing(&bvid) {
+                crate::ui::listening::start(&bvid);
+            }
             let _ = crate::ui::listening::open_window();
         }
     })?;
@@ -1397,12 +1402,8 @@ pub fn open(feed: bool, bvid: &str, title: &str, uploader: &str) -> Result<()> {
         let signed_in = services.account.is_logged_in();
         let (related, resume, relation) = tokio::join!(
             services.discover.related(&info_bvid),
-            async {
-                if wants_resume { services.videos.resume_point(&info_bvid).await } else { None }
-            },
-            async {
-                if signed_in { services.actions.relation(&info_bvid).await.ok() } else { None }
-            },
+            async { if wants_resume { services.videos.resume_point(&info_bvid).await } else { None } },
+            async { if signed_in { services.actions.relation(&info_bvid).await.ok() } else { None } },
         );
         let related = related.unwrap_or_default();
         post(&after, move || {
@@ -1447,9 +1448,8 @@ pub fn open(feed: bool, bvid: &str, title: &str, uploader: &str) -> Result<()> {
 fn settle_buttons(root: &IFrameworkElement) -> Result<()> {
     let words = shell().is_some_and(|s| s.prefs().words);
     let plain = ["Back", "Full", "SendButton", "Prev", "Next", "Normal", "TabComments", "TabRelated", "TabQueue"];
-    let acting = [
-        "ActLike", "ActCoin", "ActFav", "ActShare", "ActLater", "ActDanmaku", "ActFollow", "ActComment", "ActListen",
-    ];
+    let acting =
+        ["ActLike", "ActCoin", "ActFav", "ActShare", "ActLater", "ActDanmaku", "ActFollow", "ActComment", "ActListen"];
     for name in plain.into_iter().chain(acting) {
         if let Ok(button) = named::<IFrameworkElement4>(root, name) {
             button.SetAllowFocusOnInteraction(false)?;
@@ -1876,25 +1876,7 @@ fn play(source: &MediaSource) -> Result<MediaPlaybackSession> {
 fn open_source(playback: &Playback) -> Result<MediaSource> {
     let (video, audio) = pick_streams(&playback.url);
     let manifest = video
-        .and_then(|v| dash_manifest(playback.url.duration_ms, v, audio))
+        .and_then(|v| dash_manifest(playback.url.duration_ms, Some(v), audio))
         .ok_or_else(|| Error::new(HRESULT(0x8000_4005_u32 as i32), "这个视频没有可用的 DASH 信息"))?;
-
-    let client = media::client(&playback.headers)?;
-
-    let stream = InMemoryRandomAccessStream::new()?;
-    let writer = DataWriter::CreateDataWriter(&stream.cast::<IOutputStream>()?)?.cast::<IDataWriter>()?;
-    writer.WriteBytes(manifest.as_bytes())?;
-    writer.StoreAsync()?.join()?;
-    writer.DetachStream()?;
-    stream.cast::<IRandomAccessStream>()?.Seek(0)?;
-
-    let base = Uri::CreateUri("https://www.bilibili.com/")?;
-    let created = AdaptiveMediaSource::CreateFromStreamWithDownloaderAsync(
-        &stream.cast::<IInputStream>()?,
-        &base,
-        DASH_TYPE,
-        &client,
-    )?
-    .join()?;
-    media::source_of(&created)
+    media::manifest_source(&manifest, &playback.headers)
 }

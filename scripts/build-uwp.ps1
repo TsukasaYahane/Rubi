@@ -18,7 +18,10 @@ param(
     [switch] $Package,
     [switch] $Store
 )
-$ErrorActionPreference = 'Stop'
+# Windows PowerShell 5.1 turns a native program's stderr into a terminating error, and cargo warns
+# on every run: a warning would end the build before cargo's exit code is read. There `Continue`
+# still stops on a real failure, since each cargo call is checked by itself.
+$ErrorActionPreference = if ($PSVersionTable.PSVersion.Major -ge 7) { 'Stop' } else { 'Continue' }
 if ($Package -and $Store) { throw '-Package and -Store each pack their own package; pick one.' }
 $Arch = @($Arch -split ',' | ForEach-Object { $_.Trim() } | Where-Object { $_ } | Select-Object -Unique)
 foreach ($cpu in $Arch) { if ($cpu -notin 'x64', 'arm64') { throw "Unknown -Arch '$cpu'; use x64 or arm64." } }

@@ -4,12 +4,13 @@ use std::cell::RefCell;
 
 use windows_core::{IInspectable, Interface, Ref, Result};
 
+use crate::state::manifest::dash_manifest;
 use crate::ui::media;
 use rubi_core::PlaylistMode;
 
 use crate::ui::shell::{shell, toast};
 use crate::ui::{keep, post};
-use crate::xaml::{IMediaPlayer, MediaPlaybackState, MediaPlayer};
+use crate::xaml::{IMediaPlayer, MediaPlaybackState, MediaPlayer, MediaSource};
 
 thread_local! {
     /// Set while the next video is being fetched, so one ending moves on once.
@@ -49,15 +50,14 @@ pub fn start(bvid: &str) {
         let found = core.services.videos.playback(&card.bvid, quality).await;
         say("正在取音轨…");
         let said = match found {
-            Ok(playback) => match playback.url.audio.first() {
-                Some(stream) => {
-                    let (url, headers, title, id) =
-                        (stream.url.clone(), playback.headers.clone(), card.title.clone(), card.bvid.clone());
+            Ok(playback) => match audio_source(&playback) {
+                Ok(source) => {
+                    let (title, id) = (card.title.clone(), card.bvid.clone());
                     let said = format!("正在听：{title}");
-                    post(&dispatcher, move || play(&id, &title, &url, &headers));
+                    post(&dispatcher, move || play(&id, &title, source));
                     said
                 }
-                None => "这个视频没有音轨".to_owned(),
+                Err(problem) => format!("打不开音轨：{problem}"),
             },
             Err(problem) => {
                 say(&format!("取音轨失败：{problem}"));
@@ -68,14 +68,21 @@ pub fn start(bvid: &str) {
     });
 }
 
-/// Stops the sound, if any.
+/// Stops the sound, if any, and lets the queue and where it got to go with it.
 pub fn stop() {
-    SOUND.with_borrow_mut(|slot| {
-        if let Some(player) = slot.take() {
-            let _ = player.Pause();
-        }
-    });
+    // The element lets go first: left holding a closed player, it brings the app down.
+    detach();
+    let player = SOUND.with_borrow_mut(|slot| slot.take());
     NOW.with_borrow_mut(|slot| *slot = None);
+    if let Some(player) = player {
+        media::close(Some(player), None);
+    }
+    let Some(shell) = shell() else { return };
+    let Some(backend) = shell.backend.get().cloned() else { return };
+    let core = backend.clone();
+    backend.spawn(async move {
+        core.services.listening.stop();
+    });
 }
 
 /// Folds the queue away to the left, or brings it back.
@@ -114,15 +121,20 @@ fn say(text: &str) {
     let _ = crate::ui::set_text(&root, "Who", text);
 }
 
-fn play(bvid: &str, title: &str, url: &str, headers: &[(String, String)]) {
-    let _ = headers;
-    let source = match media::file_source(url) {
-        Ok(source) => source,
-        Err(problem) => {
-            say(&format!("打不开音轨：{problem}"));
-            return;
-        }
-    };
+/// The DASH manifest of `playback`'s audio track alone, wrapped as a source the system player
+/// can drive. A bare mp4a file only ever made sound: no session, no position, no pause.
+fn audio_source(playback: &rubi_core::Playback) -> Result<MediaSource> {
+    let audio =
+        playback.url.audio.first().ok_or_else(|| {
+            windows_core::Error::new(windows_core::HRESULT(0x8000_4005_u32 as i32), "这个视频没有音轨")
+        })?;
+    let manifest = dash_manifest(playback.url.duration_ms, None, Some(audio)).ok_or_else(|| {
+        windows_core::Error::new(windows_core::HRESULT(0x8000_4005_u32 as i32), "这条音轨没有可用的 DASH 信息")
+    })?;
+    media::manifest_source(&manifest, &playback.headers)
+}
+
+fn play(bvid: &str, title: &str, source: MediaSource) {
     let outcome = SOUND.with_borrow_mut(|slot| {
         if let Some(player) = slot.as_ref() {
             let swap = player
@@ -132,6 +144,7 @@ fn play(bvid: &str, title: &str, url: &str, headers: &[(String, String)]) {
             player.Play()
         } else {
             let player = media::player(&source)?;
+            watch_end(&player)?;
             attach(&player);
             player.Play()?;
             *slot = Some(player);
@@ -144,9 +157,19 @@ fn play(bvid: &str, title: &str, url: &str, headers: &[(String, String)]) {
         return;
     }
     NOW.with_borrow_mut(|slot| *slot = Some(bvid.to_owned()));
-    PAUSED.set(false);
     let _ = title;
     fill_window();
+}
+
+/// The track ends: move on to whatever the queue holds next.
+fn watch_end(player: &MediaPlayer) -> Result<()> {
+    let Some(dispatcher) = shell().map(|s| s.dispatcher.clone()) else { return Ok(()) };
+    let revoker =
+        player.cast::<IMediaPlayer>()?.MediaEnded(move |_: Ref<MediaPlayer>, _: Ref<windows_core::IInspectable>| {
+            crate::ui::post(&dispatcher, advance);
+        })?;
+    keep(revoker);
+    Ok(())
 }
 
 /// Puts the player on the window's media element, which is what makes it controllable.
@@ -156,6 +179,16 @@ fn attach(player: &MediaPlayer) {
         && let Ok(host) = element.cast::<crate::xaml::IMediaPlayerElement>()
     {
         let _ = host.SetMediaPlayer(player);
+    }
+}
+
+/// The element lets go of the player, which has to happen before the player is closed.
+fn detach() {
+    let Some(root) = WINDOW_ROOT.with_borrow(Clone::clone) else { return };
+    if let Ok(element) = crate::ui::named::<crate::xaml::MediaPlayerElement>(&root, "Sound")
+        && let Ok(host) = element.cast::<crate::xaml::IMediaPlayerElement>()
+    {
+        let _ = host.SetMediaPlayer(None);
     }
 }
 
@@ -176,11 +209,10 @@ fn advance() {
         let quality = core.services.preferences.settings().playback.preferred_quality;
         let found = core.services.videos.playback(&next.bvid, quality).await;
         if let Ok(playback) = found
-            && let Some(stream) = playback.url.audio.first()
+            && let Ok(source) = audio_source(&playback)
         {
-            let (url, headers, title, id) =
-                (stream.url.clone(), playback.headers.clone(), next.title.clone(), next.bvid.clone());
-            post(&dispatcher, move || play(&id, &title, &url, &headers));
+            let (title, id) = (next.title.clone(), next.bvid.clone());
+            post(&dispatcher, move || play(&id, &title, source));
         }
     });
 }
@@ -190,9 +222,13 @@ pub fn playing() -> bool {
     SOUND.with_borrow(|slot| slot.is_some())
 }
 
+/// Whether `bvid` is the one being heard: coming back to its page must not restart the queue.
+pub fn hearing(bvid: &str) -> bool {
+    NOW.with_borrow(|slot| slot.as_deref() == Some(bvid))
+}
+
 #[allow(dead_code)]
 fn quiet(_: Result<()>) {}
-
 
 const PANEL: &str = r##"<Grid xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
       xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml" Background="#99000000">
@@ -255,9 +291,10 @@ pub fn open_panel() {
     crate::ui::on_click(&root, "Prev", || step(false)).ok();
     crate::ui::on_click(&root, "Mode", cycle_mode).ok();
     if let Ok(bar) = crate::ui::named::<crate::xaml::IRangeBase>(&root, "Bar")
-        && let Ok(revoker) = bar.ValueChanged(move |_: Ref<IInspectable>, _: Ref<crate::xaml::RangeBaseValueChangedEventArgs>| {
-            drag_to();
-        })
+        && let Ok(revoker) =
+            bar.ValueChanged(move |_: Ref<IInspectable>, _: Ref<crate::xaml::RangeBaseValueChangedEventArgs>| {
+                drag_to();
+            })
     {
         keep(revoker);
     }
@@ -316,18 +353,16 @@ fn step(forward: bool) {
         };
         let quality = core.services.preferences.settings().playback.preferred_quality;
         if let Ok(playback) = core.services.videos.playback(&card.bvid, quality).await
-            && let Some(stream) = playback.url.audio.first()
+            && let Ok(source) = audio_source(&playback)
         {
-            let (url, headers, title, id) =
-                (stream.url.clone(), playback.headers.clone(), card.title.clone(), card.bvid.clone());
+            let (title, id) = (card.title.clone(), card.bvid.clone());
             crate::ui::post(&dispatcher, move || {
-                play(&id, &title, &url, &headers);
+                play(&id, &title, source);
                 fill_window();
             });
         }
     });
 }
-
 
 // ---------------------------------------------------------------------------------------------
 // The listening window: the whole window becomes a player, with no navigation.
@@ -408,9 +443,6 @@ thread_local! {
     static SYNCING: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
     /// The video the window was opened on; a track change makes 看视频 go elsewhere.
     static STARTED: RefCell<Option<String>> = const { RefCell::new(None) };
-    /// Whether the sound was paused by hand: the session's own state says buffering as often
-    /// as it says playing, so pausing was guessed wrong and always resumed.
-    static PAUSED: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
     /// When the bar was last dragged: the clock leaves it alone for a while after, or it
     /// would pull the thumb back under the pointer.
     static DRAGGED: std::cell::Cell<u64> = const { std::cell::Cell::new(0) };
@@ -437,12 +469,21 @@ pub fn open_window() -> Result<()> {
     report(crate::ui::on_click(&root, "Mode", cycle_mode), "Mode");
     report(crate::ui::on_click(&root, "Fold", || fold(true)), "Fold");
     report(crate::ui::on_click(&root, "Unfold", || fold(false)), "Unfold");
+    if let Ok(bar) = crate::ui::named::<crate::xaml::IRangeBase>(&root, "Bar")
+        && let Ok(revoker) =
+            bar.ValueChanged(move |_: Ref<IInspectable>, _: Ref<crate::xaml::RangeBaseValueChangedEventArgs>| {
+                drag_to();
+            })
+    {
+        keep(revoker);
+    }
     fill_window();
     tick();
     Ok(())
 }
 
-/// Keeps the clock up to date while the window is on show.
+/// Keeps the clock up to date while the window is on show. The liveness check runs on the UI
+/// thread: thread-locals read from a tokio worker are always empty.
 fn tick() {
     let Some(shell) = shell() else { return };
     let Some(backend) = shell.backend.get().cloned() else { return };
@@ -450,11 +491,14 @@ fn tick() {
     backend.spawn(async move {
         loop {
             tokio::time::sleep(std::time::Duration::from_millis(500)).await;
-            let alive = WINDOW_ROOT.with_borrow(|slot| slot.is_some());
-            if !alive {
+            let (done, wait) = tokio::sync::oneshot::channel();
+            crate::ui::post(&dispatcher, move || {
+                paint();
+                let _ = done.send(WINDOW_ROOT.with_borrow(|slot| slot.is_none()));
+            });
+            if wait.await.unwrap_or(true) {
                 return;
             }
-            let _ = crate::ui::post(&dispatcher, paint);
         }
     });
 }
@@ -462,24 +506,31 @@ fn tick() {
 /// Gives the window back.
 pub fn close_window() {
     let Some(shell) = shell() else { return };
+    // The element lets go of the player while the window is still there: taken away holding a
+    // closed player it freezes the app. This has to come before WINDOW_ROOT is cleared, or the
+    // detach inside `stop` finds no window and does nothing.
+    detach();
     WINDOW_ROOT.with_borrow_mut(|slot| *slot = None);
     let _ = shell.immersive(false);
     let heard = NOW.with_borrow(Clone::clone);
     let started = STARTED.with_borrow_mut(|slot| slot.take());
-    // The video being heard wins: after a track change the page that was there is a different
-    // video, and going back to it would play the wrong one.
-    if heard.is_some() && heard != started {
-        stop();
+    // Leaving ends listening: the sound, the queue and where it got to all go.
+    stop();
+    // A track change makes 看视频 go to what was heard instead: the page that was there plays a
+    // different video. `started` is empty when the window opened before the first track loaded,
+    // which is not a track change.
+    if started.is_some() && heard.is_some() && heard != started {
         if let Some(bvid) = heard {
             crate::ui::player::show(&bvid, "", "");
         }
         return;
     }
+    // Otherwise the page that was there goes back as it was: its video paused where listening
+    // found it, its progress untouched.
     if let Some(previous) = BEFORE.with_borrow_mut(|slot| slot.take()) {
         let _ = shell.set_page(&previous);
         return;
     }
-    stop();
     if let Some(bvid) = heard {
         crate::ui::player::show(&bvid, "", "");
     }
@@ -490,24 +541,14 @@ fn toggle() {
         say("播放器没就绪");
         return;
     };
-    let was_paused = PAUSED.get();
-    let outcome = if was_paused { player.Play() } else { player.Pause() };
+    let playing =
+        media::session_of(&player).and_then(|s| s.PlaybackState()).is_ok_and(|s| s == MediaPlaybackState::Playing);
+    let outcome = if playing { player.Pause() } else { player.Play() };
     if let Err(problem) = outcome {
         say(&format!("按不动：{problem}"));
         return;
     }
-    PAUSED.set(!was_paused);
-    // The track keeps playing through Pause on this pipeline, and its position stays at zero:
-    // the audio alone cannot be driven from here, so the window says so rather than pretend.
-    let moving = media::session_of(&player)
-        .and_then(|s| s.Position())
-        .map(|p| p.duration > 0)
-        .unwrap_or(false);
-    say(if moving {
-        if was_paused { "继续播放" } else { "已暂停" }
-    } else {
-        "这条音轨无法暂停或跳转，只能切歌"
-    });
+    say(if playing { "已暂停" } else { "继续播放" });
     paint();
 }
 
@@ -538,7 +579,8 @@ fn fill_window() {
 /// Lists the videos after the one playing.
 fn paint_queue(root: &crate::xaml::IFrameworkElement, items: &[rubi_model::VideoCard], on: Option<String>) {
     let Ok(panel) = crate::ui::named::<crate::xaml::IPanel>(root, "Queue") else { return };
-    let Ok(children) = panel.Children().and_then(|c| c.cast::<windows_collections::IVector<crate::xaml::UIElement>>()) else {
+    let Ok(children) = panel.Children().and_then(|c| c.cast::<windows_collections::IVector<crate::xaml::UIElement>>())
+    else {
         return;
     };
     let _ = children.Clear();
@@ -557,9 +599,11 @@ fn paint_queue(root: &crate::xaml::IFrameworkElement, items: &[rubi_model::Video
         {
             // A tap plays that video.
             let aimed = item.bvid.clone();
-            if let Ok(revoker) = element.Tapped(move |_: Ref<IInspectable>, _: Ref<crate::xaml::TappedRoutedEventArgs>| {
-                jump_to(&aimed);
-            }) {
+            if let Ok(revoker) =
+                element.Tapped(move |_: Ref<IInspectable>, _: Ref<crate::xaml::TappedRoutedEventArgs>| {
+                    jump_to(&aimed);
+                })
+            {
                 keep(revoker);
             }
             let _ = children.Append(&element);
@@ -576,31 +620,24 @@ fn jump_to(bvid: &str) {
         let Ok(card) = core.services.listening.jump(&bvid).await else { return };
         let quality = core.services.preferences.settings().playback.preferred_quality;
         if let Ok(playback) = core.services.videos.playback(&card.bvid, quality).await
-            && let Some(stream) = playback.url.audio.first()
+            && let Ok(source) = audio_source(&playback)
         {
-            let (url, headers, title, id) =
-                (stream.url.clone(), playback.headers.clone(), card.title.clone(), card.bvid.clone());
+            let (title, id) = (card.title.clone(), card.bvid.clone());
             crate::ui::post(&dispatcher, move || {
-                play(&id, &title, &url, &headers);
+                play(&id, &title, source);
                 fill_window();
             });
         }
     });
 }
 
-
-
 /// Where the slider was dragged to.
 fn drag_to() {
     if SYNCING.get() {
         return;
     }
-    say("这条音轨无法跳转，只能切歌");
     DRAGGED.set(
-        std::time::SystemTime::now()
-            .duration_since(std::time::UNIX_EPOCH)
-            .map(|d| d.as_millis() as u64)
-            .unwrap_or(0),
+        std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map(|d| d.as_millis() as u64).unwrap_or(0),
     );
     let Some(root) = WINDOW_ROOT.with_borrow(Clone::clone) else { return };
     let Ok(bar) = crate::ui::named::<crate::xaml::IRangeBase>(&root, "Bar") else { return };
@@ -655,8 +692,7 @@ fn mode_label(mode: PlaylistMode) -> &'static str {
 /// Keeps the clock and the progress bar up to date.
 fn paint() {
     let Some(root) = WINDOW_ROOT.with_borrow(Clone::clone) else { return };
-    let _ = root;
-    show_mode(&root);
+    show_mode();
     let Some(player) = sound() else { return };
     let Ok(session) = media::session_of(&player) else { return };
     let at = session.Position().map(|p| p.duration as f64 / 10_000_000.0).unwrap_or(0.0);
@@ -678,7 +714,7 @@ fn paint() {
     }
     let clock = format!("{} / {}", mmss(at), mmss(end));
     let _ = crate::ui::set_text(&root, "Clock", &clock);
-    let playing = !PAUSED.get();
+    let playing = session.PlaybackState().is_ok_and(|s| s == MediaPlaybackState::Playing);
     let label = if playing { "❚❚" } else { "▶" };
     if let Ok(value) = crate::xaml::PropertyValue::CreateString(label) {
         if let Ok(button) = crate::ui::named::<crate::xaml::IContentControl>(&root, "PlayPause") {
@@ -688,7 +724,7 @@ fn paint() {
 }
 
 /// Says which mode the queue is in.
-fn show_mode(root: &crate::xaml::IFrameworkElement) {
+fn show_mode() {
     let Some(shell) = shell() else { return };
     let Some(backend) = shell.backend.get().cloned() else { return };
     let (dispatcher, core) = (shell.dispatcher.clone(), backend.clone());

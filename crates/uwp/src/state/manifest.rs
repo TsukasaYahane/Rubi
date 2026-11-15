@@ -6,11 +6,18 @@ use std::fmt::Write;
 use rubi_core::Stream;
 
 /// The manifest for `video` and `audio`; `None` when a stream lacks its segment ranges, which
-/// the system player cannot do without.
-pub fn dash_manifest(duration_ms: u64, video: &Stream, audio: Option<&Stream>) -> Option<String> {
-    let mut sets = adaptation_set("video/mp4", video)?;
+/// the system player cannot do without. Either may stand alone: an audio-only track is still
+/// a valid DASH presentation.
+pub fn dash_manifest(duration_ms: u64, video: Option<&Stream>, audio: Option<&Stream>) -> Option<String> {
+    let mut sets = String::new();
+    if let Some(video) = video {
+        sets.push_str(&adaptation_set("video/mp4", video)?);
+    }
     if let Some(audio) = audio {
         sets.push_str(&adaptation_set("audio/mp4", audio)?);
+    }
+    if sets.is_empty() {
+        return None;
     }
     let seconds = duration_ms as f64 / 1000.0;
     Some(format!(
@@ -67,7 +74,7 @@ mod tests {
 
     #[test]
     fn writes_both_streams_with_their_ranges() {
-        let mpd = dash_manifest(12_500, &stream(80, true), Some(&stream(30280, true))).unwrap();
+        let mpd = dash_manifest(12_500, Some(&stream(80, true)), Some(&stream(30280, true))).unwrap();
         assert!(mpd.contains("mediaPresentationDuration=\"PT12.500S\""));
         assert!(mpd.contains("mimeType=\"video/mp4\"") && mpd.contains("mimeType=\"audio/mp4\""));
         assert!(mpd.contains("indexRange=\"1000-2000\"") && mpd.contains("range=\"0-999\""));
@@ -75,9 +82,17 @@ mod tests {
     }
 
     #[test]
+    fn writes_audio_alone() {
+        let mpd = dash_manifest(3_000, None, Some(&stream(30280, true))).unwrap();
+        assert!(mpd.contains("mimeType=\"audio/mp4\""));
+        assert!(!mpd.contains("video/mp4"), "no video set when only audio plays");
+    }
+
+    #[test]
     fn needs_the_segment_ranges() {
-        assert!(dash_manifest(1, &stream(80, false), None).is_none());
-        assert!(dash_manifest(1, &stream(80, true), Some(&stream(1, false))).is_none());
-        assert!(dash_manifest(1, &stream(80, true), None).is_some());
+        assert!(dash_manifest(1, Some(&stream(80, false)), None).is_none());
+        assert!(dash_manifest(1, Some(&stream(80, true)), Some(&stream(1, false))).is_none());
+        assert!(dash_manifest(1, Some(&stream(80, true)), None).is_some());
+        assert!(dash_manifest(1, None, None).is_none());
     }
 }

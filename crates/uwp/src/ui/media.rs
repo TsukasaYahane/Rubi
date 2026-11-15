@@ -3,9 +3,9 @@
 use windows_core::{Error, HRESULT, Interface, Result};
 
 use crate::xaml::{
-    AdaptiveMediaSource, AdaptiveMediaSourceCreationResult, AdaptiveMediaSourceCreationStatus, HttpClient, IClosable,
-    IMediaPlaybackSession, IMediaPlaybackSource, IMediaPlayer, IMediaPlayer3, IMediaPlayerSource2, MediaPlayer,
-    MediaSource, Uri,
+    AdaptiveMediaSource, AdaptiveMediaSourceCreationResult, AdaptiveMediaSourceCreationStatus, DataWriter, HttpClient,
+    IClosable, IDataWriter, IInputStream, IMediaPlaybackSession, IMediaPlaybackSource, IMediaPlayer, IMediaPlayer3,
+    IMediaPlayerSource2, IOutputStream, IRandomAccessStream, InMemoryRandomAccessStream, MediaPlayer, MediaSource, Uri,
 };
 
 /// An HTTP client sending `headers` with each request.
@@ -34,10 +34,28 @@ pub fn stream_source(url: &str, headers: &[(String, String)]) -> Result<MediaSou
     source_of(&created)
 }
 
+/// The content type the system player expects for a DASH manifest.
+const DASH_TYPE: &str = "application/dash+xml";
 
-/// A source straight from one file, for what is not a manifest: an audio track alone.
-pub fn file_source(url: &str) -> Result<MediaSource> {
-    MediaSource::CreateFromUri(&Uri::CreateUri(url)?)
+/// The source of a manifest handed in as a string, with `headers` on the requests it leads to.
+/// Blocks on WinRT calls: never on the UI thread.
+pub fn manifest_source(manifest: &str, headers: &[(String, String)]) -> Result<MediaSource> {
+    let stream = InMemoryRandomAccessStream::new()?;
+    let writer = DataWriter::CreateDataWriter(&stream.cast::<IOutputStream>()?)?.cast::<IDataWriter>()?;
+    writer.WriteBytes(manifest.as_bytes())?;
+    writer.StoreAsync()?.join()?;
+    writer.DetachStream()?;
+    stream.cast::<IRandomAccessStream>()?.Seek(0)?;
+
+    let base = Uri::CreateUri("https://www.bilibili.com/")?;
+    let created = AdaptiveMediaSource::CreateFromStreamWithDownloaderAsync(
+        &stream.cast::<IInputStream>()?,
+        &base,
+        DASH_TYPE,
+        &client(headers)?,
+    )?
+    .join()?;
+    source_of(&created)
 }
 
 /// A player on `source`, for a picture to show.
