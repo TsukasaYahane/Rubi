@@ -150,6 +150,7 @@ fn play(bvid: &str, title: &str, url: &str, headers: &[(String, String)]) {
     }
 
     HEARD.with_borrow_mut(|slot| *slot = Some((player, bvid.to_owned())));
+    PAUSED.set(false);
     let _ = title;
     fill_window();
 }
@@ -390,6 +391,9 @@ thread_local! {
     static BEFORE: RefCell<Option<crate::xaml::IFrameworkElement>> = const { RefCell::new(None) };
     /// Set while the clock writes the slider's value, so that is not read as a drag.
     static SYNCING: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
+    /// Whether the sound was paused by hand: the session's own state says buffering as often
+    /// as it says playing, so pausing was guessed wrong and always resumed.
+    static PAUSED: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
     /// When the bar was last dragged: the clock leaves it alone for a while after, or it
     /// would pull the thumb back under the pointer.
     static DRAGGED: std::cell::Cell<u64> = const { std::cell::Cell::new(0) };
@@ -467,10 +471,11 @@ fn toggle() {
         say(&format!("播放器没就绪 · 当前「{current}」· 队列 {queued} 首"));
         return;
     };
-    let playing = media::session_of(&player)
-        .and_then(|s| s.PlaybackState())
-        .is_ok_and(|state| state == MediaPlaybackState::Playing);
-    let outcome = if playing { player.Pause() } else { player.Play() };
+    let was_paused = PAUSED.get();
+    let outcome = if was_paused { player.Play() } else { player.Pause() };
+    if outcome.is_ok() {
+        PAUSED.set(!was_paused);
+    }
     if let Err(problem) = outcome {
         toast(&format!("暂停/播放失败：{problem}"));
     }
@@ -645,9 +650,7 @@ fn paint() {
     }
     let clock = format!("{} / {}", mmss(at), mmss(end));
     let _ = crate::ui::set_text(&root, "Clock", &clock);
-    let playing = session
-        .PlaybackState()
-        .is_ok_and(|state| state == MediaPlaybackState::Playing);
+    let playing = !PAUSED.get();
     let label = if playing { "❚❚" } else { "▶" };
     if let Ok(value) = crate::xaml::PropertyValue::CreateString(label) {
         if let Ok(button) = crate::ui::named::<crate::xaml::IContentControl>(&root, "PlayPause") {
