@@ -9,6 +9,7 @@ pub mod comment_list;
 pub mod contacts;
 pub mod control_bar;
 pub mod danmaku;
+pub mod downloads;
 pub mod emote_text;
 pub mod feed;
 pub mod filling;

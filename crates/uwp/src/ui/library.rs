@@ -326,6 +326,7 @@ fn list_page(
 pub fn page(shelf: Shelf, fresh: bool, class: WindowClass) -> Result<IFrameworkElement> {
     match shelf {
         Shelf::Playlists => crate::ui::playlists::build(),
+        Shelf::Downloads => crate::ui::downloads::build(),
         Shelf::History => list_page(&HISTORY, shelf, Source::History, fresh, class),
         Shelf::Later => list_page(&LATER, shelf, Source::Later, fresh, class),
         Shelf::Favorites => {
