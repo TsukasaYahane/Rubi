@@ -29,12 +29,17 @@ pub fn start(bvid: &str) {
         let card = match begun {
             Ok(card) => card,
             Err(problem) => {
-                post(&dispatcher, move || toast(&format!("取视频失败：{problem}")));
+                let said = format!("取视频失败：{problem}");
+                post(&dispatcher, move || {
+                    say(&said);
+                    toast(&said);
+                });
                 return;
             }
         };
         let quality = core.services.preferences.settings().playback.preferred_quality;
         let found = core.services.videos.playback(&card.bvid, quality).await;
+        say("正在取音轨…");
         let said = match found {
             Ok(playback) => match playback.url.audio.first() {
                 Some(stream) => {
@@ -46,7 +51,10 @@ pub fn start(bvid: &str) {
                 }
                 None => "这个视频没有音轨".to_owned(),
             },
-            Err(problem) => format!("取音轨失败：{problem}"),
+            Err(problem) => {
+                say(&format!("取音轨失败：{problem}"));
+                format!("取音轨失败：{problem}")
+            }
         };
         post(&dispatcher, move || toast(&said));
     });
@@ -61,11 +69,18 @@ pub fn stop() {
     });
 }
 
+/// Says what is going on in the window itself: a toast would be under the page it opened.
+fn say(text: &str) {
+    let Some(root) = WINDOW_ROOT.with_borrow(Clone::clone) else { return };
+    let _ = crate::ui::set_text(&root, "Who", text);
+}
+
 fn play(bvid: &str, title: &str, url: &str, headers: &[(String, String)]) {
     stop();
     let source = match media::stream_source(url, headers) {
         Ok(source) => source,
         Err(problem) => {
+            say(&format!("打不开音轨：{problem}"));
             toast(&format!("打不开音轨：{problem}"));
             return;
         }
@@ -73,11 +88,13 @@ fn play(bvid: &str, title: &str, url: &str, headers: &[(String, String)]) {
     let player = match media::player(&source) {
         Ok(player) => player,
         Err(problem) => {
+            say(&format!("打不开播放器：{problem}"));
             toast(&format!("打不开播放器：{problem}"));
             return;
         }
     };
     if let Err(problem) = player.Play() {
+        say(&format!("放不出来：{problem}"));
         toast(&format!("放不出来：{problem}"));
         return;
     }
