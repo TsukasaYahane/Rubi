@@ -487,37 +487,27 @@ pub fn close_window() {
 
 fn toggle() {
     let Some(player) = sound() else {
-        let (current, queued) = shell()
-            .and_then(|s| s.backend.get().cloned())
-            .map(|core| {
-                let current = core.services.listening.current().map(|c| c.title).unwrap_or_default();
-                let queued = core.services.listening.items().map(|i| i.len()).unwrap_or(0);
-                (current, queued)
-            })
-            .unwrap_or_default();
-        say(&format!("播放器没就绪 · 当前「{current}」· 队列 {queued} 首"));
+        say("播放器没就绪");
         return;
     };
     let was_paused = PAUSED.get();
     let outcome = if was_paused { player.Play() } else { player.Pause() };
-    if outcome.is_ok() {
-        PAUSED.set(!was_paused);
-    }
-    let state = media::session_of(&player)
-        .and_then(|s| s.PlaybackState())
-        .map(|s| format!("{s:?}"))
-        .unwrap_or_else(|e| format!("读不到：{e}"));
-    let position = media::session_of(&player)
-        .and_then(|s| s.Position())
-        .map(|p| p.duration / 10_000_000)
-        .unwrap_or_default();
-    say(&format!(
-        "按了{} · 状态 {state} · 第 {position} 秒",
-        if was_paused { "播放" } else { "暂停" }
-    ));
     if let Err(problem) = outcome {
-        toast(&format!("暂停/播放失败：{problem}"));
+        say(&format!("按不动：{problem}"));
+        return;
     }
+    PAUSED.set(!was_paused);
+    // The track keeps playing through Pause on this pipeline, and its position stays at zero:
+    // the audio alone cannot be driven from here, so the window says so rather than pretend.
+    let moving = media::session_of(&player)
+        .and_then(|s| s.Position())
+        .map(|p| p.duration > 0)
+        .unwrap_or(false);
+    say(if moving {
+        if was_paused { "继续播放" } else { "已暂停" }
+    } else {
+        "这条音轨无法暂停或跳转，只能切歌"
+    });
     paint();
 }
 
@@ -605,6 +595,7 @@ fn drag_to() {
     if SYNCING.get() {
         return;
     }
+    say("这条音轨无法跳转，只能切歌");
     DRAGGED.set(
         std::time::SystemTime::now()
             .duration_since(std::time::UNIX_EPOCH)
