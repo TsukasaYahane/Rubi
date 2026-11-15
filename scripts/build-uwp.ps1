@@ -93,7 +93,9 @@ if ($Register) {
     if ($existing -and $existing.InstallLocation -and
         ($existing.InstallLocation.TrimEnd('\') -ne $layout.TrimEnd('\'))) {
         Copy-Item (Join-Path $layout '*') $existing.InstallLocation -Recurse -Force
-        $registered = $existing
+        # The manifest may hold something new, such as a capability: only a registration reads it.
+        Add-AppxPackage -Register (Join-Path $existing.InstallLocation 'AppxManifest.xml')
+        $registered = Get-AppxPackage -Name 'Rubi' | Select-Object -First 1
     } else {
         Add-AppxPackage -Register (Join-Path $layout 'AppxManifest.xml')
         $registered = Get-AppxPackage -Name 'Rubi'

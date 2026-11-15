@@ -49,7 +49,7 @@ pub use app::Services;
 pub use comments::{Comments, CommentsPage, ThreadView};
 pub use danmaku::{DanmakuSession, Danmakus};
 pub use discover::Discover;
-pub use downloads::{Downloads, LocalCopy, pick_streams};
+pub use downloads::{Downloads, ExportFormat, LocalCopy, pick_streams};
 pub use emotes::Emotes;
 pub use error::{CoreError, Result};
 pub use esports::Esports;

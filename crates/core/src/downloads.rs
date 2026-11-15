@@ -19,6 +19,28 @@ use crate::ports::VideoStreams;
 const VIDEO_FILE: &str = "video.m4s";
 const AUDIO_FILE: &str = "audio.m4s";
 
+/// What a finished copy is also written out as, outside Rubi.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum ExportFormat {
+    /// Kept inside Rubi: the copy already is what 离线缓存 plays.
+    #[default]
+    Rubi,
+    /// Picture and sound as one MP4.
+    Mp4,
+    /// The sound alone, as M4A.
+    Audio,
+}
+
+impl ExportFormat {
+    pub fn label(self) -> &'static str {
+        match self {
+            Self::Rubi => "仅 Rubi",
+            Self::Mp4 => "MP4 视频",
+            Self::Audio => "音频 M4A",
+        }
+    }
+}
+
 /// Where a finished download's streams are.
 #[derive(Debug, Clone)]
 pub struct LocalCopy {
@@ -60,6 +82,16 @@ struct Inner {
 
 fn lock<T>(m: &Mutex<T>) -> std::sync::MutexGuard<'_, T> {
     m.lock().unwrap_or_else(|e| e.into_inner())
+}
+
+/// A title as a file name: what Windows refuses becomes underscores, and a long one is cut
+/// short, so the write cannot fail on a character the title happened to hold.
+fn file_stem(title: &str) -> String {
+    let refused = r#"\/:*?"<>|"#;
+    let cleaned: String =
+        title.chars().map(|c| if refused.contains(c) || c.is_control() { '_' } else { c }).collect();
+    let name: String = cleaned.trim().trim_matches('.').chars().take(80).collect();
+    if name.is_empty() { "rubi".to_owned() } else { name }
 }
 
 impl Downloads {
@@ -149,8 +181,17 @@ impl Downloads {
     /// Stops a running download and waits for it to let go of its files; what is on disk
     /// stays for resuming.
     pub async fn pause(&self, bvid: &str) -> Result<()> {
+        // The bytes written so far go into the record before the task lets go of them, or the
+        // bar would fall back to wherever the last run ended.
+        let written = lock(&self.inner.live).get(bvid).copied();
         self.stop_task(bvid).await;
-        self.inner.set_state(bvid, DownloadState::Paused)
+        self.inner.store.update_download(bvid, &mut |d| {
+            d.state = DownloadState::Paused;
+            if let Some(written) = written {
+                d.done_bytes = written;
+            }
+        })?;
+        Ok(())
     }
 
     /// Stops it, waits for it to stop writing, and deletes its files and record.
@@ -177,6 +218,48 @@ impl Downloads {
         Ok(video.exists().then(|| LocalCopy { video, audio: audio.exists().then_some(audio) }))
     }
 
+    /// Writes a finished copy out into `dir` as `format`, and says what it wrote. The streams
+    /// move as they are: nothing is decoded or re-encoded here.
+    pub async fn export(&self, bvid: &str, dir: &Path, format: ExportFormat) -> Result<Vec<PathBuf>> {
+        if format == ExportFormat::Rubi {
+            return Ok(Vec::new());
+        }
+        let Some(copy) = self.local(bvid)? else {
+            return Err(CoreError::Invalid("这一条还没有缓存好".into()));
+        };
+        let Some(record) = self.inner.store.download(bvid)? else {
+            return Err(CoreError::Invalid("下载记录已删除".into()));
+        };
+        let stem = file_stem(&record.card.title);
+        tokio::fs::create_dir_all(dir).await?;
+        let audio = copy.audio.clone();
+        let written = match format {
+            ExportFormat::Rubi => Vec::new(),
+            ExportFormat::Audio => {
+                let Some(from) = audio.as_deref() else {
+                    return Err(CoreError::Invalid("这一条没有音轨".into()));
+                };
+                let to = dir.join(format!("{stem}.m4a"));
+                tokio::fs::copy(from, &to).await?;
+                vec![to]
+            }
+            ExportFormat::Mp4 => {
+                // The streams are joined in one MP4 once the remux lands; until then each goes
+                // out on its own, named for what it holds.
+                let to = dir.join(format!("{stem}.mp4"));
+                tokio::fs::copy(&copy.video, &to).await?;
+                let mut written = vec![to];
+                if let Some(from) = audio {
+                    let sound = dir.join(format!("{stem}.m4a"));
+                    tokio::fs::copy(from, &sound).await?;
+                    written.push(sound);
+                }
+                written
+            }
+        };
+        Ok(written)
+    }
+
     async fn stop_task(&self, bvid: &str) {
         let task = lock(&self.inner.tasks).remove(bvid);
         if let Some(handle) = task.and_then(|t| t.handle) {
@@ -189,8 +272,7 @@ impl Downloads {
 }
 
 impl Inner {
-    fn folder(&self, bvid: &str) -> PathBuf {
-        // BV ids are letters and digits only; anything else is refused before it reaches a path.
+    fn folder(&self, bvid: &str) -> PathBuf {        // BV ids are letters and digits only; anything else is refused before it reaches a path.
         self.dir.join(bvid.chars().filter(char::is_ascii_alphanumeric).collect::<String>())
     }
 
@@ -377,6 +459,13 @@ mod tests {
         }
     }
 
+    #[test]
+    fn titles_become_file_names() {
+        assert_eq!(file_stem(r#"a/b:c*d?e"f<g>h|i"#), "a_b_c_d_e_f_g_h_i");
+        assert_eq!(file_stem("  ..  "), "rubi");
+        assert_eq!(file_stem(&"长".repeat(120)).chars().count(), 80);
+    }
+
     #[tokio::test(flavor = "multi_thread")]
     async fn starts_once_finishes_and_removes() {
         let dir = std::env::temp_dir().join(format!("rubi-dl-test-{}", std::process::id()));
@@ -393,6 +482,12 @@ mod tests {
         }
         let copy = d.local("BV1").unwrap().expect("finished");
         assert_eq!(std::fs::read(&copy.video).unwrap(), b"abcdef", "written once, not twice");
+        // Out it goes, as it is: no re-encoding, so the bytes are the ones on disk.
+        let out = dir.join("out");
+        let written = d.export("BV1", &out, ExportFormat::Mp4).await.unwrap();
+        assert_eq!(written.len(), 1, "the fake has no sound track to carry over");
+        assert_eq!(std::fs::read(&written[0]).unwrap(), b"abcdef");
+        assert!(written[0].to_string_lossy().ends_with(".mp4"));
         d.remove("BV1").await.unwrap();
         assert!(!copy.video.exists());
         assert!(d.list().unwrap().is_empty());

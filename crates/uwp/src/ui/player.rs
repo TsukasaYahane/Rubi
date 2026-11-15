@@ -172,6 +172,8 @@ const LAYOUT: &str = r##"
           <FontIcon Glyph="&#xE72D;" FontSize="20" /><TextBlock Text="分享" FontSize="12" Margin="0,3,0,0" HorizontalAlignment="Center" /></StackPanel></Button>
         <Button x:Name="ActLater"><StackPanel>
           <FontIcon Glyph="&#xE823;" FontSize="20" /><TextBlock x:Name="LaterText" Text="稍后" FontSize="12" Margin="0,3,0,0" HorizontalAlignment="Center" /></StackPanel></Button>
+        <Button x:Name="ActCache"><StackPanel>
+          <FontIcon Glyph="&#xE896;" FontSize="20" /><TextBlock Text="缓存" FontSize="12" Margin="0,3,0,0" HorizontalAlignment="Center" /></StackPanel></Button>
         <Button x:Name="ActListen"><StackPanel><FontIcon x:Name="ListenIcon" Glyph="&#xE8D6;" FontSize="20" /><TextBlock Text="听" FontSize="12" Margin="0,3,0,0" HorizontalAlignment="Center" /></StackPanel></Button>
       <Button x:Name="ActDanmaku"><StackPanel>
           <FontIcon Glyph="&#xE8BD;" FontSize="20" /><TextBlock x:Name="DanmakuText" Text="弹幕 开" FontSize="12" Margin="0,3,0,0" HorizontalAlignment="Center" /></StackPanel></Button>
@@ -1270,6 +1272,13 @@ pub fn open(feed: bool, bvid: &str, title: &str, uploader: &str) -> Result<()> {
                 crate::ui::listening::start(&bvid);
             }
             let _ = crate::ui::listening::open_window();
+        }
+    })?;
+    on_click(&root, "ActCache", || {
+        if let Some(page) = page()
+            && let Err(problem) = crate::ui::download_sheet::open(&page.bvid)
+        {
+            crate::ui::shell::toast(&format!("打不开：{problem}"));
         }
     })?;
     on_click(&root, "ActDanmaku", toggle_danmaku)?;

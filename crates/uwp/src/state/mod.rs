@@ -3,6 +3,7 @@
 pub mod comments;
 pub mod danmaku;
 pub mod emotes;
+pub mod exports;
 pub mod feed;
 pub mod follow;
 pub mod handover;
