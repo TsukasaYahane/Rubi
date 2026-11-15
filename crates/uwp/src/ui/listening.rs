@@ -200,6 +200,13 @@ pub fn open_panel() {
     crate::ui::on_click(&root, "NextSong", || step(true)).ok();
     crate::ui::on_click(&root, "Prev", || step(false)).ok();
     crate::ui::on_click(&root, "Mode", cycle_mode).ok();
+    if let Ok(bar) = crate::ui::named::<crate::xaml::IRangeBase>(&root, "Bar")
+        && let Ok(revoker) = bar.ValueChanged(move |_: Ref<IInspectable>, _: Ref<crate::xaml::RangeBaseValueChangedEventArgs>| {
+            drag_to();
+        })
+    {
+        keep(revoker);
+    }
     if let Err(problem) = crate::ui::popup::show(&root) {
         toast(&format!("打不开：{problem}"));
         return;
@@ -290,26 +297,23 @@ const WINDOW: &str = r##"<Grid xmlns="http://schemas.microsoft.com/winfx/2006/xa
                  Foreground="#A6A6A6" />
       <Grid Margin="0,20,0,0">
         <Grid.ColumnDefinitions><ColumnDefinition Width="*" /><ColumnDefinition Width="Auto" /></Grid.ColumnDefinitions>
-        <Border Height="4" Background="#262626" VerticalAlignment="Center">
-          <Border x:Name="Fill" HorizontalAlignment="Left" Width="0" Background="#0050EF" />
-        </Border>
+        <Slider x:Name="Bar" Minimum="0" Maximum="1" StepFrequency="0.001" Margin="0,0,0,0"
+                VerticalAlignment="Center" Foreground="#0050EF" Background="#262626" />
         <TextBlock x:Name="Clock" Grid.Column="1" Margin="12,0,0,0" FontSize="11" Foreground="#A6A6A6"
                    FontFamily="Consolas" VerticalAlignment="Center" />
       </Grid>
-      <Grid Margin="0,22,0,0">
-        <Grid.ColumnDefinitions><ColumnDefinition Width="*" /><ColumnDefinition Width="Auto" />
-          <ColumnDefinition Width="Auto" /><ColumnDefinition Width="Auto" /><ColumnDefinition Width="*" /></Grid.ColumnDefinitions>
-        <Button x:Name="Mode" Grid.Column="1" Background="Transparent" BorderThickness="0"
-                Foreground="#A6A6A6" FontSize="13" Margin="0,0,20,0" VerticalAlignment="Center" />
-        <Button x:Name="Prev" Content="上一首" Grid.Column="1" Background="Transparent" BorderThickness="0"
-                Foreground="#A6A6A6" FontSize="14" Margin="0,0,110,0" />
-        <Button x:Name="PlayPause" Grid.Column="2" Width="72" Height="72" Background="#0050EF" BorderThickness="0"
+      <StackPanel Orientation="Horizontal" HorizontalAlignment="Center" Margin="0,22,0,0">
+        <Button x:Name="Mode" Width="96" Background="Transparent" BorderThickness="0" Foreground="#A6A6A6"
+                FontSize="13" VerticalAlignment="Center" />
+        <Button x:Name="Prev" Content="上一首" Width="72" Background="Transparent" BorderThickness="0"
+                Foreground="#A6A6A6" FontSize="14" Margin="8,0,16,0" />
+        <Button x:Name="PlayPause" Width="72" Height="72" Background="#0050EF" BorderThickness="0"
                 Foreground="#FFFFFF" FontSize="22" />
-        <Button x:Name="NextSong" Content="下一首" Grid.Column="3" Background="Transparent" BorderThickness="0"
-                Foreground="#A6A6A6" FontSize="14" Margin="20,0,0,0" />
-      </Grid>
-      <Button x:Name="Watch" Content="看视频" HorizontalAlignment="Center" Margin="0,18,0,0"
-              Background="Transparent" BorderThickness="0" Foreground="#0050EF" FontSize="14" />
+        <Button x:Name="NextSong" Content="下一首" Width="72" Background="Transparent" BorderThickness="0"
+                Foreground="#A6A6A6" FontSize="14" Margin="16,0,8,0" />
+        <Button x:Name="Watch" Content="看视频" Width="96" Background="Transparent" BorderThickness="0"
+                Foreground="#0050EF" FontSize="14" VerticalAlignment="Center" />
+      </StackPanel>
     </StackPanel>
     <Grid Grid.Column="1" Margin="24,0,0,0">
       <Grid.RowDefinitions><RowDefinition Height="Auto" /><RowDefinition Height="*" /></Grid.RowDefinitions>
@@ -324,6 +328,8 @@ thread_local! {
     /// The window on show, while it is, and the page it took the place of.
     static WINDOW_ROOT: RefCell<Option<crate::xaml::IFrameworkElement>> = const { RefCell::new(None) };
     static BEFORE: RefCell<Option<crate::xaml::IFrameworkElement>> = const { RefCell::new(None) };
+    /// Set while the clock writes the slider's value, so that is not read as a drag.
+    static SYNCING: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
 }
 
 /// Turns the window into the player.
@@ -468,6 +474,23 @@ fn jump_to(bvid: &str) {
 }
 
 
+
+/// Where the slider was dragged to.
+fn drag_to() {
+    if SYNCING.get() {
+        return;
+    }
+    let Some(root) = WINDOW_ROOT.with_borrow(Clone::clone) else { return };
+    let Ok(bar) = crate::ui::named::<crate::xaml::IRangeBase>(&root, "Bar") else { return };
+    let Ok(ratio) = bar.Value() else { return };
+    let heard = HEARD.with_borrow(Clone::clone);
+    let Some((player, _)) = heard else { return };
+    let Ok(session) = media::session_of(&player) else { return };
+    let Ok(total) = session.NaturalDuration() else { return };
+    let at = windows_time::TimeSpan { duration: (total.duration as f64 * ratio.clamp(0.0, 1.0)) as i64 };
+    let _ = session.SetPosition(at);
+}
+
 /// Steps the mode on: in order, around, one again, at random.
 fn cycle_mode() {
     let Some(shell) = shell() else { return };
@@ -504,21 +527,22 @@ fn mode_label(mode: PlaylistMode) -> &'static str {
 /// Keeps the clock and the progress bar up to date.
 fn paint() {
     let Some(root) = WINDOW_ROOT.with_borrow(Clone::clone) else { return };
+    let _ = root;
     show_mode(&root);
     let heard = HEARD.with_borrow(Clone::clone);
     let Some((player, _)) = heard else { return };
     let Ok(session) = media::session_of(&player) else { return };
     let at = session.Position().map(|p| p.duration as f64 / 10_000_000.0).unwrap_or(0.0);
     let end = session.NaturalDuration().map(|p| p.duration as f64 / 10_000_000.0).unwrap_or(0.0);
+    if end > 0.0
+        && let Ok(bar) = crate::ui::named::<crate::xaml::IRangeBase>(&root, "Bar")
+    {
+        SYNCING.set(true);
+        let _ = bar.SetValue(at / end);
+        SYNCING.set(false);
+    }
     let clock = format!("{} / {}", mmss(at), mmss(end));
     let _ = crate::ui::set_text(&root, "Clock", &clock);
-    if end > 0.0
-        && let Ok(fill) = crate::ui::named::<crate::xaml::IFrameworkElement>(&root, "Fill")
-        && let Ok(track) = crate::ui::named::<crate::xaml::IFrameworkElement>(&root, "Clock")
-    {
-        let _ = fill.SetWidth((at / end * 260.0).max(0.0)).map_err(|_| ()).ok();
-        let _ = track;
-    }
     let playing = session
         .PlaybackState()
         .is_ok_and(|state| state == MediaPlaybackState::Playing);
