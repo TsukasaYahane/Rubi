@@ -70,6 +70,29 @@ pub fn stop() {
     });
 }
 
+/// Folds the queue away to the left, or brings it back.
+fn fold(away: bool) {
+    let Some(root) = WINDOW_ROOT.with_borrow(Clone::clone) else { return };
+    let width = crate::xaml::GridLength {
+        value: if away { 0.0 } else { 340.0 },
+        grid_unit_type: crate::xaml::GridUnitType::Pixel,
+    };
+    if let Ok(column) = crate::ui::named::<crate::xaml::IColumnDefinition>(&root, "QueueColumn") {
+        let _ = column.SetWidth(width);
+    }
+    let show = |name: &str, on: bool| {
+        if let Ok(element) = crate::ui::named::<crate::xaml::IUIElement>(&root, name) {
+            let _ = element.SetVisibility(if on {
+                crate::xaml::Visibility::Visible
+            } else {
+                crate::xaml::Visibility::Collapsed
+            });
+        }
+    };
+    show("QueuePane", !away);
+    show("Unfold", away);
+}
+
 /// Says when a button could not be wired at all.
 fn report(outcome: windows_core::Result<()>, name: &str) {
     if let Err(problem) = outcome {
@@ -270,7 +293,6 @@ fn show_current() {
 
 /// Moves to the next (or previous) video of the listening queue.
 fn step(forward: bool) {
-    say(if forward { "下一首被点到" } else { "上一首被点到" });
     let Some(shell) = shell() else { return };
     let Some(backend) = shell.backend.get().cloned() else { return };
     let (dispatcher, core) = (shell.dispatcher.clone(), backend.clone());
@@ -316,7 +338,7 @@ const WINDOW: &str = r##"<Grid xmlns="http://schemas.microsoft.com/winfx/2006/xa
                Foreground="#A6A6A6" />
   </Grid>
   <Grid Grid.Row="1" Margin="24,0,24,24">
-    <Grid.ColumnDefinitions><ColumnDefinition Width="*" /><ColumnDefinition Width="340" /></Grid.ColumnDefinitions>
+    <Grid.ColumnDefinitions><ColumnDefinition Width="*" /><ColumnDefinition x:Name="QueueColumn" Width="340" /></Grid.ColumnDefinitions>
     <StackPanel VerticalAlignment="Center" HorizontalAlignment="Center" MaxWidth="560">
       <Border Width="300" Height="300" HorizontalAlignment="Center" Background="#1c1c1c">
         <Image x:Name="Cover" Stretch="UniformToFill" />
@@ -345,10 +367,18 @@ const WINDOW: &str = r##"<Grid xmlns="http://schemas.microsoft.com/winfx/2006/xa
                 Foreground="#0050EF" FontSize="14" VerticalAlignment="Center" />
       </StackPanel>
     </StackPanel>
-    <Grid Grid.Column="1" Margin="24,0,0,0">
+    <Button x:Name="Unfold" Content="‹" HorizontalAlignment="Right" VerticalAlignment="Top"
+            Background="Transparent" BorderThickness="0" Foreground="#A6A6A6" FontSize="16" Padding="8,0"
+            Visibility="Collapsed" Grid.Column="1" />
+    <Grid x:Name="QueuePane" Grid.Column="1" Margin="24,0,0,0">
       <Grid.RowDefinitions><RowDefinition Height="Auto" /><RowDefinition Height="*" /></Grid.RowDefinitions>
-      <TextBlock x:Name="QueueHead" Text="接下来" FontSize="16" FontWeight="Light" Foreground="#FFFFFF"
-                 Margin="0,0,0,10" />
+      <Grid>
+        <Grid.ColumnDefinitions><ColumnDefinition Width="*" /><ColumnDefinition Width="Auto" /></Grid.ColumnDefinitions>
+        <TextBlock x:Name="QueueHead" Text="接下来" FontSize="16" FontWeight="Light" Foreground="#FFFFFF"
+                   Margin="0,0,0,10" />
+        <Button x:Name="Fold" Grid.Column="1" Content="›" Background="Transparent" BorderThickness="0"
+                Foreground="#A6A6A6" FontSize="16" Padding="8,0" VerticalAlignment="Top" />
+      </Grid>
       <ScrollViewer Grid.Row="1"><StackPanel x:Name="Queue" /></ScrollViewer>
     </Grid>
   </Grid>
@@ -383,6 +413,8 @@ pub fn open_window() -> Result<()> {
     report(crate::ui::on_click(&root, "NextSong", || step(true)), "NextSong");
     report(crate::ui::on_click(&root, "Prev", || step(false)), "Prev");
     report(crate::ui::on_click(&root, "Mode", cycle_mode), "Mode");
+    report(crate::ui::on_click(&root, "Fold", || fold(true)), "Fold");
+    report(crate::ui::on_click(&root, "Unfold", || fold(false)), "Unfold");
     fill_window();
     tick();
     Ok(())
@@ -422,7 +454,6 @@ pub fn close_window() {
 }
 
 fn toggle() {
-    say("暂停键被点到");
     let heard = HEARD.with_borrow(Clone::clone);
     let Some((player, _)) = heard else {
         let (current, queued) = shell()
