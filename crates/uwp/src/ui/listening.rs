@@ -21,6 +21,7 @@ thread_local! {
 
 /// Plays `bvid`'s audio, then whatever the listening queue holds next.
 pub fn start(bvid: &str) {
+    crate::ui::player::stop_video();
     let Some(shell) = shell() else { return };
     let Some(backend) = shell.backend.get().cloned() else { return };
     let (bvid, dispatcher, core) = (bvid.to_owned(), shell.dispatcher.clone(), backend.clone());
@@ -77,7 +78,8 @@ fn say(text: &str) {
 
 fn play(bvid: &str, title: &str, url: &str, headers: &[(String, String)]) {
     stop();
-    let source = match media::stream_source(url, headers) {
+    let _ = headers;
+    let source = match media::file_source(url) {
         Ok(source) => source,
         Err(problem) => {
             say(&format!("打不开音轨：{problem}"));

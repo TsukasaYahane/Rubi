@@ -510,6 +510,11 @@ fn is_playing() -> bool {
     playing_session().and_then(|s| s.PlaybackState().ok()) == Some(MediaPlaybackState::Playing)
 }
 
+/// Stops the picture and its sound: listening plays the same video's audio alone.
+pub fn stop_video() {
+    pause(false);
+}
+
 fn pause(on: bool) {
     PLAYING.with(|p| {
         if let Some(player) = p.borrow().as_ref().and_then(|m| m.cast::<IMediaPlayer>().ok()) {

@@ -34,6 +34,12 @@ pub fn stream_source(url: &str, headers: &[(String, String)]) -> Result<MediaSou
     source_of(&created)
 }
 
+
+/// A source straight from one file, for what is not a manifest: an audio track alone.
+pub fn file_source(url: &str) -> Result<MediaSource> {
+    MediaSource::CreateFromUri(&Uri::CreateUri(url)?)
+}
+
 /// A player on `source`, for a picture to show.
 pub fn player(source: &MediaSource) -> Result<MediaPlayer> {
     let player = MediaPlayer::new()?;
