@@ -270,6 +270,7 @@ fn show_current() {
 
 /// Moves to the next (or previous) video of the listening queue.
 fn step(forward: bool) {
+    say(if forward { "下一首被点到" } else { "上一首被点到" });
     let Some(shell) = shell() else { return };
     let Some(backend) = shell.backend.get().cloned() else { return };
     let (dispatcher, core) = (shell.dispatcher.clone(), backend.clone());
@@ -421,6 +422,7 @@ pub fn close_window() {
 }
 
 fn toggle() {
+    say("暂停键被点到");
     let heard = HEARD.with_borrow(Clone::clone);
     let Some((player, _)) = heard else {
         let (current, queued) = shell()
