@@ -476,6 +476,12 @@ fn toggle() {
     if outcome.is_ok() {
         PAUSED.set(!was_paused);
     }
+    // What the player says it is doing, right after being asked.
+    let state = media::session_of(&player)
+        .and_then(|s| s.PlaybackState())
+        .map(|s| format!("{s:?}"))
+        .unwrap_or_else(|e| format!("读不到：{e}"));
+    say(&format!("按了{} · 状态 {state}", if was_paused { "播放" } else { "暂停" }));
     if let Err(problem) = outcome {
         toast(&format!("暂停/播放失败：{problem}"));
     }
