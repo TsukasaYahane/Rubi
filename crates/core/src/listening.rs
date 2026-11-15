@@ -25,9 +25,9 @@ impl<S: PlaylistRepo + KvRepo + Send + Sync> Listening<S> {
         Self { lineup, queue: Mutex::default(), related: related.unwrap_or_else(|| Arc::new(NoRelated)) }
     }
 
-    /// The mode the queue is played in; 相关推荐 is always in order.
+    /// The mode the queue is played in.
     pub fn mode(&self) -> Result<PlaylistMode> {
-        self.lineup.mode_of(self.lineup.active())
+        self.lineup.mode()
     }
 
     /// Sets how the queue is played from here on.
@@ -123,17 +123,13 @@ impl<S: PlaylistRepo + KvRepo + Send + Sync> Listening<S> {
 
     /// 下一首 (`by_user`) or the item having ended; `None` means listening stopped.
     pub fn next(&self, by_user: bool) -> Result<Option<VideoCard>> {
-        let list = self.lineup.active();
-        let (items, mode) = (self.lineup.items(list)?, self.lineup.mode_of(list)?);
-        // Following 相关推荐 never wraps back to the first.
-        let by_user = by_user && list != RELATED_PLAYLIST;
+        let (items, mode) = (self.lineup.items(self.lineup.active())?, self.lineup.mode()?);
         Ok(self.queue().next(&items, mode, by_user, random_below))
     }
 
     /// 上一首.
     pub fn previous(&self) -> Result<Option<VideoCard>> {
-        let list = self.lineup.active();
-        let (items, mode) = (self.lineup.items(list)?, self.lineup.mode_of(list)?);
+        let (items, mode) = (self.lineup.items(self.lineup.active())?, self.lineup.mode()?);
         Ok(self.queue().previous(&items, mode))
     }
 
@@ -221,5 +217,18 @@ mod tests {
         assert_eq!(heard.current().unwrap().bvid, "b");
         assert_eq!(heard.items().unwrap().len(), 3);
         assert_eq!(heard.next(true).unwrap().unwrap().bvid, "c", "it follows the list, not 相关推荐");
+    }
+
+    #[tokio::test]
+    async fn related_plays_in_the_mode_that_was_chosen() {
+        let shared = lineup();
+        let heard = Listening::new(shared.clone(), None);
+        heard.start_related("a").await.unwrap();
+        heard.append(&["b".into(), "c".into()]).await;
+        heard.set_mode(PlaylistMode::LoopOne).unwrap();
+        assert_eq!(heard.mode().unwrap(), PlaylistMode::LoopOne, "相关推荐 takes the mode too");
+        assert_eq!(heard.next(false).unwrap().unwrap().bvid, "a", "单曲循环 keeps the one being heard");
+        heard.set_mode(PlaylistMode::Shuffle).unwrap();
+        assert_eq!(heard.mode().unwrap(), PlaylistMode::Shuffle);
     }
 }

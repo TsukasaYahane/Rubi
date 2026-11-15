@@ -10,7 +10,7 @@ use rubi_model::{VideoCard, now_secs};
 use rubi_store::{DEFAULT_PLAYLIST, KvRepo, PlaylistRepo};
 
 use crate::error::Result;
-use crate::playlist::{Playlist, PlaylistMode, RELATED_PLAYLIST};
+use crate::playlist::{Playlist, PlaylistMode};
 use crate::ports::VideoLookup;
 use crate::videos::CardCache;
 
@@ -52,14 +52,13 @@ impl<S: PlaylistRepo + KvRepo + Send + Sync> Lineup<S> {
         })
     }
 
-    /// 相关推荐 plays in order; the other lists in the chosen mode.
-    pub(crate) fn mode_of(&self, list: i64) -> Result<PlaylistMode> {
-        if list == RELATED_PLAYLIST { Ok(PlaylistMode::Sequential) } else { self.list.mode() }
+    /// The mode the lists play in. 相关推荐 plays in it too: 听视频 can change it as it goes.
+    pub(crate) fn mode(&self) -> Result<PlaylistMode> {
+        self.list.mode()
     }
 
-    /// Sets the mode for the lists played from here; 相关推荐 always goes in order.
+    /// Sets the mode for the lists played from here.
     pub(crate) fn set_mode(&self, mode: PlaylistMode) -> Result<()> {
-        if self.active() == RELATED_PLAYLIST { return Ok(()); }
         self.list.set_mode(mode)
     }
 

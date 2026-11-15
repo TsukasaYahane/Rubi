@@ -341,11 +341,7 @@ fn show_current() {
                 Some(card) => {
                     let _ = crate::ui::set_text(&root, "Song", &card.title);
                     let _ = crate::ui::set_text(&root, "Who", &format!("{} · 队列 {left} 首", card.owner.name));
-                    if let Ok(image) = crate::ui::named::<crate::xaml::IImage>(&root, "Cover") {
-                        COVERS.with(|covers| {
-                            let _ = covers.show(&image, &card.cover, 480);
-                        });
-                    }
+                    show_cover(&root, "Cover", &card.cover, 480);
                 }
                 None => {
                     let _ = crate::ui::set_text(&root, "Song", "还没有在听的视频");
@@ -391,15 +387,18 @@ fn step(forward: bool) {
 // The listening window: the whole window becomes a player, with no navigation.
 
 const WINDOW: &str = r##"<Grid xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
-      xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml" Background="#000000">
+      xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml" Background="#FFFFFF">
   <Grid.Resources>
-    <!-- The pointer only brightens the button: black words are what the default hover brush
-         put there, and pressing is the feedback. -->
-    <SolidColorBrush x:Key="ButtonForegroundPointerOver" Color="#FFFFFF" />
+    <!-- The pointer only fades a button: nothing is repainted under it, and pressing is the
+         feedback. -->
+    <SolidColorBrush x:Key="ButtonForegroundPointerOver" Color="#8A8A8A" />
     <SolidColorBrush x:Key="ButtonBackgroundPointerOver" Color="Transparent" />
     <SolidColorBrush x:Key="ButtonBorderBrushPointerOver" Color="Transparent" />
-    <SolidColorBrush x:Key="ButtonForegroundPressed" Color="#7EA6FF" />
+    <SolidColorBrush x:Key="ButtonForegroundPressed" Color="#0050EF" />
     <SolidColorBrush x:Key="ButtonBackgroundPressed" Color="Transparent" />
+    <!-- The centre is the cover, frosted: acrylic takes what it is laid over. -->
+    <AcrylicBrush x:Key="Frost" BackgroundSource="Backdrop" TintColor="#FFFFFF" TintOpacity="0.62"
+                  FallbackColor="#D9FFFFFF" />
   </Grid.Resources>
   <Grid.RowDefinitions><RowDefinition Height="Auto" /><RowDefinition Height="*" /></Grid.RowDefinitions>
   <MediaPlayerElement x:Name="Sound" Width="1" Height="1" Opacity="0" IsHitTestVisible="False"
@@ -407,53 +406,65 @@ const WINDOW: &str = r##"<Grid xmlns="http://schemas.microsoft.com/winfx/2006/xa
   <Grid Margin="24,16,24,8">
     <Grid.ColumnDefinitions><ColumnDefinition Width="Auto" /><ColumnDefinition Width="*" /></Grid.ColumnDefinitions>
     <Button x:Name="Close" Content="‹ 退出" Background="Transparent" BorderThickness="0"
-            Foreground="#FFFFFF" FontSize="15" Padding="0" />
+            Foreground="#141414" FontSize="15" Padding="0" />
     <TextBlock Grid.Column="1" Text="听视频" FontSize="15" Margin="16,0,0,0" VerticalAlignment="Center"
-               Foreground="#A6A6A6" />
+               Foreground="#8A8A8A" />
   </Grid>
   <Grid Grid.Row="1" Margin="24,0,24,24">
     <Grid.ColumnDefinitions><ColumnDefinition Width="*" /><ColumnDefinition x:Name="QueueColumn" Width="340" /></Grid.ColumnDefinitions>
-    <StackPanel VerticalAlignment="Center" HorizontalAlignment="Center" MaxWidth="560">
-      <Border Width="340" Height="191" HorizontalAlignment="Center" Background="#1c1c1c">
-        <Image x:Name="Cover" Stretch="UniformToFill" />
-      </Border>
-      <TextBlock x:Name="Song" Margin="0,22,0,0" FontSize="20" FontWeight="SemiBold" TextAlignment="Center"
-                 TextWrapping="Wrap" MaxLines="2" TextTrimming="CharacterEllipsis" Foreground="#FFFFFF" />
-      <TextBlock x:Name="Who" Margin="0,8,0,0" FontSize="13" TextAlignment="Center" TextTrimming="CharacterEllipsis"
-                 Foreground="#A6A6A6" />
-      <Grid Margin="0,20,0,0">
-        <Grid.ColumnDefinitions><ColumnDefinition Width="*" /><ColumnDefinition Width="Auto" /></Grid.ColumnDefinitions>
-        <Slider x:Name="Bar" Minimum="0" Maximum="1" StepFrequency="1" Margin="0,0,0,0"
-                VerticalAlignment="Center" Foreground="#0050EF" Background="#262626" />
-        <TextBlock x:Name="Clock" Grid.Column="1" Margin="12,0,0,0" FontSize="11" Foreground="#A6A6A6"
-                   FontFamily="Consolas" VerticalAlignment="Center" />
-      </Grid>
-      <StackPanel Orientation="Horizontal" HorizontalAlignment="Center" Margin="0,22,0,0">
-        <Button x:Name="Mode" Width="96" Background="Transparent" BorderThickness="0" Foreground="#A6A6A6"
-                FontSize="13" VerticalAlignment="Center" />
-        <Button x:Name="Prev" Content="上一首" Width="72" Background="Transparent" BorderThickness="0"
-                Foreground="#A6A6A6" FontSize="14" Margin="8,0,16,0" />
-        <Button x:Name="PlayPause" Width="72" Height="72" Background="#0050EF" BorderThickness="0"
-                Foreground="#FFFFFF" FontSize="22" />
-        <Button x:Name="NextSong" Content="下一首" Width="72" Background="Transparent" BorderThickness="0"
-                Foreground="#A6A6A6" FontSize="14" Margin="16,0,8,0" />
-        <Button x:Name="Watch" Content="看视频" Width="96" Background="Transparent" BorderThickness="0"
-                Foreground="#0050EF" FontSize="14" VerticalAlignment="Center" />
+    <Grid>
+      <Image x:Name="StageCover" Stretch="UniformToFill" Opacity="0.9" />
+      <Border Background="{StaticResource Frost}" />
+      <StackPanel VerticalAlignment="Center" HorizontalAlignment="Center" MaxWidth="560">
+        <Border Width="340" Height="191" HorizontalAlignment="Center" Background="#E8E8E8"
+                BorderBrush="#FFFFFF" BorderThickness="2">
+          <Image x:Name="Cover" Stretch="UniformToFill" />
+        </Border>
+        <TextBlock x:Name="Song" Margin="0,22,0,0" FontSize="20" FontWeight="SemiBold" TextAlignment="Center"
+                   TextWrapping="Wrap" MaxLines="2" TextTrimming="CharacterEllipsis" Foreground="#141414" />
+        <TextBlock x:Name="Who" Margin="0,8,0,0" FontSize="13" TextAlignment="Center" TextTrimming="CharacterEllipsis"
+                   Foreground="#5A5A5A" />
+        <Grid Margin="0,20,0,0">
+          <Grid.ColumnDefinitions><ColumnDefinition Width="*" /><ColumnDefinition Width="Auto" /></Grid.ColumnDefinitions>
+          <Slider x:Name="Bar" Minimum="0" Maximum="1" StepFrequency="1" Margin="0,0,0,0"
+                  VerticalAlignment="Center" Foreground="#0050EF" Background="#DFE3EA" />
+          <TextBlock x:Name="Clock" Grid.Column="1" Margin="12,0,0,0" FontSize="11" Foreground="#8A8A8A"
+                     FontFamily="Consolas" VerticalAlignment="Center" />
+        </Grid>
+        <StackPanel Orientation="Horizontal" HorizontalAlignment="Center" Margin="0,22,0,0">
+          <Button x:Name="Mode" Width="96" Background="Transparent" BorderThickness="0" Foreground="#5A5A5A"
+                  FontSize="13" VerticalAlignment="Center" />
+          <Button x:Name="Prev" Content="上一首" Width="72" Background="Transparent" BorderThickness="0"
+                  Foreground="#5A5A5A" FontSize="14" Margin="8,0,16,0" />
+          <Button x:Name="PlayPause" Width="64" Height="64" Background="#0050EF" BorderThickness="0"
+                  Foreground="#FFFFFF" FontSize="20">
+            <Button.Resources>
+              <SolidColorBrush x:Key="ButtonBackgroundPointerOver" Color="#D90050EF" />
+              <SolidColorBrush x:Key="ButtonBackgroundPressed" Color="#B30050EF" />
+              <SolidColorBrush x:Key="ButtonForegroundPointerOver" Color="#FFFFFF" />
+              <SolidColorBrush x:Key="ButtonForegroundPressed" Color="#FFFFFF" />
+            </Button.Resources>
+          </Button>
+          <Button x:Name="NextSong" Content="下一首" Width="72" Background="Transparent" BorderThickness="0"
+                  Foreground="#5A5A5A" FontSize="14" Margin="16,0,8,0" />
+          <Button x:Name="Watch" Content="看视频" Width="96" Background="Transparent" BorderThickness="0"
+                  Foreground="#0050EF" FontSize="14" VerticalAlignment="Center" />
+        </StackPanel>
       </StackPanel>
-    </StackPanel>
+    </Grid>
     <!-- The way back sits in the main column: the queue column is what folds to nothing, and a
          button in it would fold with it and never be hit again. -->
     <Button x:Name="Unfold" Content="‹" HorizontalAlignment="Right" VerticalAlignment="Top"
-            Background="Transparent" BorderThickness="0" Foreground="#A6A6A6" FontSize="16" Padding="8,0"
+            Background="Transparent" BorderThickness="0" Foreground="#8A8A8A" FontSize="16" Padding="8,0"
             Visibility="Collapsed" />
     <Grid x:Name="QueuePane" Grid.Column="1" Margin="24,0,0,0">
       <Grid.RowDefinitions><RowDefinition Height="Auto" /><RowDefinition Height="*" /></Grid.RowDefinitions>
       <Grid>
         <Grid.ColumnDefinitions><ColumnDefinition Width="*" /><ColumnDefinition Width="Auto" /></Grid.ColumnDefinitions>
-        <TextBlock x:Name="QueueHead" Text="接下来" FontSize="16" FontWeight="Light" Foreground="#FFFFFF"
+        <TextBlock x:Name="QueueHead" Text="接下来" FontSize="16" FontWeight="Light" Foreground="#141414"
                    Margin="0,0,0,10" />
         <Button x:Name="Fold" Grid.Column="1" Content="›" Background="Transparent" BorderThickness="0"
-                Foreground="#A6A6A6" FontSize="16" Padding="8,0" VerticalAlignment="Top" />
+                Foreground="#8A8A8A" FontSize="16" Padding="8,0" VerticalAlignment="Top" />
       </Grid>
       <ScrollViewer Grid.Row="1"><StackPanel x:Name="Queue" /></ScrollViewer>
     </Grid>
@@ -598,15 +609,21 @@ fn fill_window() {
             if let Some(card) = &now {
                 let _ = crate::ui::set_text(&root, "Song", &card.title);
                 let _ = crate::ui::set_text(&root, "Who", &card.owner.name);
-                if let Ok(image) = crate::ui::named::<crate::xaml::IImage>(&root, "Cover") {
-                    COVERS.with(|covers| {
-                        let _ = covers.show(&image, &card.cover, 680);
-                    });
-                }
+                // The same picture twice: the small one, and the one the frost is laid over.
+                show_cover(&root, "Cover", &card.cover, 340);
+                show_cover(&root, "StageCover", &card.cover, 680);
             }
             paint_queue(&root, &queued, now.as_ref().map(|card| card.bvid.clone()));
             paint();
         });
+    });
+}
+
+/// Shows `cover` in the picture called `name`, decoded `width` px wide.
+fn show_cover(root: &crate::xaml::IFrameworkElement, name: &str, cover: &str, width: i32) {
+    let Ok(image) = crate::ui::named::<crate::xaml::IImage>(root, name) else { return };
+    COVERS.with(|covers| {
+        let _ = covers.show(&image, cover, width);
     });
 }
 
@@ -626,7 +643,7 @@ fn paint_queue(root: &crate::xaml::IFrameworkElement, items: &[rubi_model::Video
                   xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml" Text="{}" FontSize="13" Margin="0,0,0,8"
                   TextTrimming="CharacterEllipsis" Foreground="{}" />"##,
             crate::state::settings::escape(&item.title),
-            if bright { "#7EA6FF" } else { "#A6A6A6" }
+            if bright { "#0050EF" } else { "#5A5A5A" }
         );
         if let Ok(line) = crate::ui::load(&xaml)
             && let Ok(element) = line.cast::<crate::xaml::UIElement>()
@@ -690,27 +707,24 @@ fn drag_to() {
     }
 }
 
-/// Steps the mode on: in order, around, one again, at random.
+/// Steps the mode on: 顺序, 单曲循环, 随机, and round again.
 fn cycle_mode() {
     let Some(shell) = shell() else { return };
     let Some(backend) = shell.backend.get().cloned() else { return };
     let (dispatcher, core) = (shell.dispatcher.clone(), backend.clone());
     backend.spawn(async move {
         let now = core.services.listening.mode().unwrap_or_default();
+        // 列表循环 is not one of them: listening is a list that goes on, and the three cover it.
         let next = match now {
-            PlaylistMode::Sequential => PlaylistMode::LoopAll,
-            PlaylistMode::LoopAll => PlaylistMode::LoopOne,
+            PlaylistMode::Sequential | PlaylistMode::LoopAll => PlaylistMode::LoopOne,
             PlaylistMode::LoopOne => PlaylistMode::Shuffle,
             PlaylistMode::Shuffle => PlaylistMode::Sequential,
         };
         let done = core.services.listening.set_mode(next);
-        // 相关推荐 is always in order: asking for another mode there leaves it as it was.
         let after = core.services.listening.mode().unwrap_or(now);
         crate::ui::post(&dispatcher, move || {
             if done.is_err() {
                 toast("模式没能改");
-            } else if after == now {
-                toast("相关推荐按顺序播放");
             }
             MODE.set(Some(after));
             paint();

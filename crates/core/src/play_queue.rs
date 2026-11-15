@@ -28,7 +28,7 @@ impl<S: PlaylistRepo + KvRepo + Send + Sync> PlayQueue<S> {
     pub fn first(&self, list: i64) -> Result<Option<VideoCard>> {
         self.play(list);
         let items = self.lineup.items(list)?;
-        Ok(match self.lineup.mode_of(list)? {
+        Ok(match self.lineup.mode()? {
             PlaylistMode::Shuffle if !items.is_empty() => Some(items[random_below(items.len())].clone()),
             _ => items.into_iter().next(),
         })
@@ -38,7 +38,7 @@ impl<S: PlaylistRepo + KvRepo + Send + Sync> PlayQueue<S> {
     pub fn next_after(&self, current: &str) -> Result<Option<VideoCard>> {
         let list = self.lineup.active();
         let items = self.lineup.items(list)?;
-        Ok(next_in(&items, current, self.lineup.mode_of(list)?, random_below).cloned())
+        Ok(next_in(&items, current, self.lineup.mode()?, random_below).cloned())
     }
 
     /// The list being played: its id, name and videos.

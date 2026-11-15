@@ -78,6 +78,103 @@ impl windows_core::RuntimeName for AccessKeyInvokedEventArgs {
 unsafe impl Send for AccessKeyInvokedEventArgs {}
 unsafe impl Sync for AccessKeyInvokedEventArgs {}
 #[repr(transparent)]
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
+pub struct AcrylicBackgroundSource(pub i32);
+impl AcrylicBackgroundSource {
+    pub const HostBackdrop: Self = Self(0);
+    pub const Backdrop: Self = Self(1);
+}
+impl windows_core::imp::TypeKind for AcrylicBackgroundSource {
+    type TypeKind = windows_core::imp::CopyType;
+}
+impl windows_core::RuntimeType for AcrylicBackgroundSource {
+    const SIGNATURE: windows_core::imp::ConstBuffer =
+        windows_core::imp::ConstBuffer::from_slice(b"enum(Windows.UI.Xaml.Media.AcrylicBackgroundSource;i4)");
+}
+#[repr(transparent)]
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct AcrylicBrush(windows_core::IUnknown);
+windows_core::imp::interface_hierarchy!(AcrylicBrush, windows_core::IUnknown, windows_core::IInspectable);
+windows_core::imp::required_hierarchy!(AcrylicBrush, XamlCompositionBrushBase, Brush, DependencyObject);
+impl AcrylicBrush {
+    pub fn BackgroundSourceProperty() -> windows_core::Result<DependencyProperty> {
+        Self::IAcrylicBrushStatics(|this| unsafe {
+            let mut result__ = core::mem::zeroed();
+            (windows_core::Interface::vtable(this).BackgroundSourceProperty)(
+                windows_core::Interface::as_raw(this),
+                &mut result__,
+            )
+            .and_then(|| windows_core::imp::Type::from_abi(result__))
+        })
+    }
+    pub fn TintColorProperty() -> windows_core::Result<DependencyProperty> {
+        Self::IAcrylicBrushStatics(|this| unsafe {
+            let mut result__ = core::mem::zeroed();
+            (windows_core::Interface::vtable(this).TintColorProperty)(
+                windows_core::Interface::as_raw(this),
+                &mut result__,
+            )
+            .and_then(|| windows_core::imp::Type::from_abi(result__))
+        })
+    }
+    pub fn TintOpacityProperty() -> windows_core::Result<DependencyProperty> {
+        Self::IAcrylicBrushStatics(|this| unsafe {
+            let mut result__ = core::mem::zeroed();
+            (windows_core::Interface::vtable(this).TintOpacityProperty)(
+                windows_core::Interface::as_raw(this),
+                &mut result__,
+            )
+            .and_then(|| windows_core::imp::Type::from_abi(result__))
+        })
+    }
+    pub fn TintTransitionDurationProperty() -> windows_core::Result<DependencyProperty> {
+        Self::IAcrylicBrushStatics(|this| unsafe {
+            let mut result__ = core::mem::zeroed();
+            (windows_core::Interface::vtable(this).TintTransitionDurationProperty)(
+                windows_core::Interface::as_raw(this),
+                &mut result__,
+            )
+            .and_then(|| windows_core::imp::Type::from_abi(result__))
+        })
+    }
+    pub fn AlwaysUseFallbackProperty() -> windows_core::Result<DependencyProperty> {
+        Self::IAcrylicBrushStatics(|this| unsafe {
+            let mut result__ = core::mem::zeroed();
+            (windows_core::Interface::vtable(this).AlwaysUseFallbackProperty)(
+                windows_core::Interface::as_raw(this),
+                &mut result__,
+            )
+            .and_then(|| windows_core::imp::Type::from_abi(result__))
+        })
+    }
+    fn IAcrylicBrushStatics<R, F: FnOnce(&IAcrylicBrushStatics) -> windows_core::Result<R>>(
+        callback: F,
+    ) -> windows_core::Result<R> {
+        static SHARED: windows_core::imp::FactoryCache<AcrylicBrush, IAcrylicBrushStatics> =
+            windows_core::imp::FactoryCache::new();
+        SHARED.call(callback)
+    }
+}
+impl windows_core::RuntimeType for AcrylicBrush {
+    const SIGNATURE: windows_core::imp::ConstBuffer =
+        windows_core::imp::ConstBuffer::for_class::<Self, IAcrylicBrush>();
+}
+unsafe impl windows_core::Interface for AcrylicBrush {
+    type Vtable = <IAcrylicBrush as windows_core::Interface>::Vtable;
+    const IID: windows_core::GUID = <IAcrylicBrush as windows_core::Interface>::IID;
+}
+impl core::ops::Deref for AcrylicBrush {
+    type Target = IAcrylicBrush;
+    fn deref(&self) -> &Self::Target {
+        unsafe { core::mem::transmute(self) }
+    }
+}
+impl windows_core::RuntimeName for AcrylicBrush {
+    const NAME: &'static str = "Windows.UI.Xaml.Media.AcrylicBrush";
+}
+unsafe impl Send for AcrylicBrush {}
+unsafe impl Sync for AcrylicBrush {}
+#[repr(transparent)]
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct AdaptiveMediaSource(windows_core::IUnknown);
 windows_core::imp::interface_hierarchy!(AdaptiveMediaSource, windows_core::IUnknown, windows_core::IInspectable);
@@ -7322,6 +7419,127 @@ impl windows_core::RuntimeType for IAccessKeyInvokedEventArgs {
 #[repr(C)]
 pub struct IAccessKeyInvokedEventArgs_Vtbl {
     pub base__: windows_core::IInspectable_Vtbl,
+}
+windows_core::imp::define_interface!(IAcrylicBrush, IAcrylicBrush_Vtbl, 0x79bbcf4e_cd66_4f1b_a8b6_cd6d2977c18d);
+impl windows_core::RuntimeType for IAcrylicBrush {
+    const SIGNATURE: windows_core::imp::ConstBuffer = windows_core::imp::ConstBuffer::for_interface::<Self>();
+}
+impl IAcrylicBrush {
+    pub fn BackgroundSource(&self) -> windows_core::Result<AcrylicBackgroundSource> {
+        unsafe {
+            let mut result__ = core::mem::zeroed();
+            (windows_core::Interface::vtable(self).BackgroundSource)(
+                windows_core::Interface::as_raw(self),
+                &mut result__,
+            )
+            .map(|| result__)
+        }
+    }
+    pub fn SetBackgroundSource(&self, value: AcrylicBackgroundSource) -> windows_core::Result<()> {
+        unsafe {
+            (windows_core::Interface::vtable(self).SetBackgroundSource)(windows_core::Interface::as_raw(self), value)
+                .ok()
+        }
+    }
+    pub fn TintColor(&self) -> windows_core::Result<Color> {
+        unsafe {
+            let mut result__ = core::mem::zeroed();
+            (windows_core::Interface::vtable(self).TintColor)(windows_core::Interface::as_raw(self), &mut result__)
+                .map(|| result__)
+        }
+    }
+    pub fn SetTintColor(&self, value: Color) -> windows_core::Result<()> {
+        unsafe {
+            (windows_core::Interface::vtable(self).SetTintColor)(windows_core::Interface::as_raw(self), value).ok()
+        }
+    }
+    pub fn TintOpacity(&self) -> windows_core::Result<f64> {
+        unsafe {
+            let mut result__ = core::mem::zeroed();
+            (windows_core::Interface::vtable(self).TintOpacity)(windows_core::Interface::as_raw(self), &mut result__)
+                .map(|| result__)
+        }
+    }
+    pub fn SetTintOpacity(&self, value: f64) -> windows_core::Result<()> {
+        unsafe {
+            (windows_core::Interface::vtable(self).SetTintOpacity)(windows_core::Interface::as_raw(self), value).ok()
+        }
+    }
+    pub fn TintTransitionDuration(&self) -> windows_core::Result<windows_time::TimeSpan> {
+        unsafe {
+            let mut result__ = core::mem::zeroed();
+            (windows_core::Interface::vtable(self).TintTransitionDuration)(
+                windows_core::Interface::as_raw(self),
+                &mut result__,
+            )
+            .map(|| result__)
+        }
+    }
+    pub fn SetTintTransitionDuration(&self, value: windows_time::TimeSpan) -> windows_core::Result<()> {
+        unsafe {
+            (windows_core::Interface::vtable(self).SetTintTransitionDuration)(
+                windows_core::Interface::as_raw(self),
+                value,
+            )
+            .ok()
+        }
+    }
+    pub fn AlwaysUseFallback(&self) -> windows_core::Result<bool> {
+        unsafe {
+            let mut result__ = core::mem::zeroed();
+            (windows_core::Interface::vtable(self).AlwaysUseFallback)(
+                windows_core::Interface::as_raw(self),
+                &mut result__,
+            )
+            .map(|| result__)
+        }
+    }
+    pub fn SetAlwaysUseFallback(&self, value: bool) -> windows_core::Result<()> {
+        unsafe {
+            (windows_core::Interface::vtable(self).SetAlwaysUseFallback)(windows_core::Interface::as_raw(self), value)
+                .ok()
+        }
+    }
+}
+#[repr(C)]
+pub struct IAcrylicBrush_Vtbl {
+    pub base__: windows_core::IInspectable_Vtbl,
+    pub BackgroundSource:
+        unsafe extern "system" fn(*mut core::ffi::c_void, *mut AcrylicBackgroundSource) -> windows_core::HRESULT,
+    pub SetBackgroundSource:
+        unsafe extern "system" fn(*mut core::ffi::c_void, AcrylicBackgroundSource) -> windows_core::HRESULT,
+    pub TintColor: unsafe extern "system" fn(*mut core::ffi::c_void, *mut Color) -> windows_core::HRESULT,
+    pub SetTintColor: unsafe extern "system" fn(*mut core::ffi::c_void, Color) -> windows_core::HRESULT,
+    pub TintOpacity: unsafe extern "system" fn(*mut core::ffi::c_void, *mut f64) -> windows_core::HRESULT,
+    pub SetTintOpacity: unsafe extern "system" fn(*mut core::ffi::c_void, f64) -> windows_core::HRESULT,
+    pub TintTransitionDuration:
+        unsafe extern "system" fn(*mut core::ffi::c_void, *mut windows_time::TimeSpan) -> windows_core::HRESULT,
+    pub SetTintTransitionDuration:
+        unsafe extern "system" fn(*mut core::ffi::c_void, windows_time::TimeSpan) -> windows_core::HRESULT,
+    pub AlwaysUseFallback: unsafe extern "system" fn(*mut core::ffi::c_void, *mut bool) -> windows_core::HRESULT,
+    pub SetAlwaysUseFallback: unsafe extern "system" fn(*mut core::ffi::c_void, bool) -> windows_core::HRESULT,
+}
+windows_core::imp::define_interface!(
+    IAcrylicBrushStatics,
+    IAcrylicBrushStatics_Vtbl,
+    0x2787fd79_a3da_423f_b81a_599147971523
+);
+impl windows_core::RuntimeType for IAcrylicBrushStatics {
+    const SIGNATURE: windows_core::imp::ConstBuffer = windows_core::imp::ConstBuffer::for_interface::<Self>();
+}
+#[repr(C)]
+pub struct IAcrylicBrushStatics_Vtbl {
+    pub base__: windows_core::IInspectable_Vtbl,
+    pub BackgroundSourceProperty:
+        unsafe extern "system" fn(*mut core::ffi::c_void, *mut *mut core::ffi::c_void) -> windows_core::HRESULT,
+    pub TintColorProperty:
+        unsafe extern "system" fn(*mut core::ffi::c_void, *mut *mut core::ffi::c_void) -> windows_core::HRESULT,
+    pub TintOpacityProperty:
+        unsafe extern "system" fn(*mut core::ffi::c_void, *mut *mut core::ffi::c_void) -> windows_core::HRESULT,
+    pub TintTransitionDurationProperty:
+        unsafe extern "system" fn(*mut core::ffi::c_void, *mut *mut core::ffi::c_void) -> windows_core::HRESULT,
+    pub AlwaysUseFallbackProperty:
+        unsafe extern "system" fn(*mut core::ffi::c_void, *mut *mut core::ffi::c_void) -> windows_core::HRESULT,
 }
 windows_core::imp::define_interface!(
     IActivatedEventArgs,
@@ -30504,6 +30722,18 @@ pub struct IWindowStatics_Vtbl {
     pub Current:
         unsafe extern "system" fn(*mut core::ffi::c_void, *mut *mut core::ffi::c_void) -> windows_core::HRESULT,
 }
+windows_core::imp::define_interface!(
+    IXamlCompositionBrushBase,
+    IXamlCompositionBrushBase_Vtbl,
+    0x03e432d9_b35c_4a79_811c_c5652004da0e
+);
+impl windows_core::RuntimeType for IXamlCompositionBrushBase {
+    const SIGNATURE: windows_core::imp::ConstBuffer = windows_core::imp::ConstBuffer::for_interface::<Self>();
+}
+#[repr(C)]
+pub struct IXamlCompositionBrushBase_Vtbl {
+    pub base__: windows_core::IInspectable_Vtbl,
+}
 windows_core::imp::define_interface!(IXamlReader, IXamlReader_Vtbl, 0x24374cf1_cceb_48bf_a514_41b0186f84c2);
 impl windows_core::RuntimeType for IXamlReader {
     const SIGNATURE: windows_core::imp::ConstBuffer = windows_core::imp::ConstBuffer::for_interface::<Self>();
@@ -36853,6 +37083,30 @@ impl<F: Fn(windows_core::Ref<windows_core::IInspectable>, windows_core::Ref<Visi
         }
     }
 }
+#[repr(transparent)]
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct XamlCompositionBrushBase(windows_core::IUnknown);
+windows_core::imp::interface_hierarchy!(XamlCompositionBrushBase, windows_core::IUnknown, windows_core::IInspectable);
+windows_core::imp::required_hierarchy!(XamlCompositionBrushBase, Brush, DependencyObject);
+impl windows_core::RuntimeType for XamlCompositionBrushBase {
+    const SIGNATURE: windows_core::imp::ConstBuffer =
+        windows_core::imp::ConstBuffer::for_class::<Self, IXamlCompositionBrushBase>();
+}
+unsafe impl windows_core::Interface for XamlCompositionBrushBase {
+    type Vtable = <IXamlCompositionBrushBase as windows_core::Interface>::Vtable;
+    const IID: windows_core::GUID = <IXamlCompositionBrushBase as windows_core::Interface>::IID;
+}
+impl core::ops::Deref for XamlCompositionBrushBase {
+    type Target = IXamlCompositionBrushBase;
+    fn deref(&self) -> &Self::Target {
+        unsafe { core::mem::transmute(self) }
+    }
+}
+impl windows_core::RuntimeName for XamlCompositionBrushBase {
+    const NAME: &'static str = "Windows.UI.Xaml.Media.XamlCompositionBrushBase";
+}
+unsafe impl Send for XamlCompositionBrushBase {}
+unsafe impl Sync for XamlCompositionBrushBase {}
 #[repr(transparent)]
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct XamlReader(windows_core::IUnknown);

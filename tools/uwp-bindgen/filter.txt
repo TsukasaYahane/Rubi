@@ -162,7 +162,11 @@ Windows.UI.Xaml.Input.DoubleTappedRoutedEventArgs
 Windows.UI.Xaml.Input.PointerRoutedEventArgs
 Windows.UI.Xaml.Markup.IXamlReaderStatics
 Windows.UI.Xaml.Markup.XamlReader
+Windows.UI.Xaml.Media.AcrylicBackgroundSource
+Windows.UI.Xaml.Media.AcrylicBrush
 Windows.UI.Xaml.Media.CompositionTarget
+Windows.UI.Xaml.Media.IAcrylicBrush
+Windows.UI.Xaml.Media.IAcrylicBrushStatics
 Windows.UI.Xaml.Media.ICompositionTargetStatics
 Windows.UI.Xaml.Media.IRectangleGeometry
 Windows.UI.Xaml.Media.ISolidColorBrushFactory
