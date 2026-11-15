@@ -8,7 +8,7 @@ use rubi_store::{KvRepo, PlaylistRepo, SqliteStore};
 
 use crate::error::Result;
 use crate::lineup::{Lineup, random_below};
-use crate::playlist::RELATED_PLAYLIST;
+use crate::playlist::{PlaylistMode, RELATED_PLAYLIST};
 use crate::queue::ListenQueue;
 
 pub struct Listening<S = SqliteStore> {
@@ -19,6 +19,16 @@ pub struct Listening<S = SqliteStore> {
 impl<S: PlaylistRepo + KvRepo + Send + Sync> Listening<S> {
     pub(crate) fn new(lineup: Arc<Lineup<S>>) -> Self {
         Self { lineup, queue: Mutex::default() }
+    }
+
+    /// The mode the queue is played in; 相关推荐 is always in order.
+    pub fn mode(&self) -> Result<PlaylistMode> {
+        self.lineup.mode_of(self.lineup.active())
+    }
+
+    /// Sets how the queue is played from here on.
+    pub fn set_mode(&self, mode: PlaylistMode) -> Result<()> {
+        self.lineup.set_mode(mode)
     }
 
     /// What is being heard; `None` when not listening.

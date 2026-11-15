@@ -57,6 +57,12 @@ impl<S: PlaylistRepo + KvRepo + Send + Sync> Lineup<S> {
         if list == RELATED_PLAYLIST { Ok(PlaylistMode::Sequential) } else { self.list.mode() }
     }
 
+    /// Sets the mode for the lists played from here; 相关推荐 always goes in order.
+    pub(crate) fn set_mode(&self, mode: PlaylistMode) -> Result<()> {
+        if self.active() == RELATED_PLAYLIST { return Ok(()); }
+        self.list.set_mode(mode)
+    }
+
     /// The list being played.
     pub(crate) fn active(&self) -> i64 {
         *self.active.lock().unwrap_or_else(|e| e.into_inner())
