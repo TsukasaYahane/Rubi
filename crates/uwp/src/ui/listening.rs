@@ -70,6 +70,13 @@ pub fn stop() {
     });
 }
 
+/// Says when a button could not be wired at all.
+fn report(outcome: windows_core::Result<()>, name: &str) {
+    if let Err(problem) = outcome {
+        say(&format!("{name} 绑不上：{problem}"));
+    }
+}
+
 /// Says what is going on in the window itself: a toast would be under the page it opened.
 fn say(text: &str) {
     let Some(root) = WINDOW_ROOT.with_borrow(Clone::clone) else { return };
@@ -284,7 +291,7 @@ fn step(forward: bool) {
                 (stream.url.clone(), playback.headers.clone(), card.title.clone(), card.bvid.clone());
             crate::ui::post(&dispatcher, move || {
                 play(&id, &title, &url, &headers);
-                show_current();
+                fill_window();
             });
         }
     });
@@ -365,11 +372,13 @@ pub fn open_window() -> Result<()> {
     shell.set_page(&root)?;
     shell.immersive(true)?;
     WINDOW_ROOT.with_borrow_mut(|slot| *slot = Some(root.clone()));
-    crate::ui::on_click(&root, "Close", close_window).ok();
-    crate::ui::on_click(&root, "Watch", close_window).ok();
-    crate::ui::on_click(&root, "PlayPause", toggle).ok();
-    crate::ui::on_click(&root, "NextSong", || step(true)).ok();
-    crate::ui::on_click(&root, "Prev", || step(false)).ok();
+    // Every button is wired, and one that cannot be says so instead of doing nothing.
+    report(crate::ui::on_click(&root, "Close", close_window), "Close");
+    report(crate::ui::on_click(&root, "Watch", close_window), "Watch");
+    report(crate::ui::on_click(&root, "PlayPause", toggle), "PlayPause");
+    report(crate::ui::on_click(&root, "NextSong", || step(true)), "NextSong");
+    report(crate::ui::on_click(&root, "Prev", || step(false)), "Prev");
+    report(crate::ui::on_click(&root, "Mode", cycle_mode), "Mode");
     fill_window();
     tick();
     Ok(())
