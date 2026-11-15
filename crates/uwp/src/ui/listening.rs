@@ -330,6 +330,9 @@ thread_local! {
     static BEFORE: RefCell<Option<crate::xaml::IFrameworkElement>> = const { RefCell::new(None) };
     /// Set while the clock writes the slider's value, so that is not read as a drag.
     static SYNCING: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
+    /// When the bar was last dragged: the clock leaves it alone for a while after, or it
+    /// would pull the thumb back under the pointer.
+    static DRAGGED: std::cell::Cell<u64> = const { std::cell::Cell::new(0) };
 }
 
 /// Turns the window into the player.
@@ -388,11 +391,17 @@ pub fn close_window() {
 
 fn toggle() {
     let heard = HEARD.with_borrow(Clone::clone);
-    let Some((player, _)) = heard else { return };
+    let Some((player, _)) = heard else {
+        toast("没有在播的声音");
+        return;
+    };
     let playing = media::session_of(&player)
         .and_then(|s| s.PlaybackState())
         .is_ok_and(|state| state == MediaPlaybackState::Playing);
-    let _ = if playing { player.Pause() } else { player.Play() };
+    let outcome = if playing { player.Pause() } else { player.Play() };
+    if let Err(problem) = outcome {
+        toast(&format!("暂停/播放失败：{problem}"));
+    }
     paint();
 }
 
@@ -480,6 +489,12 @@ fn drag_to() {
     if SYNCING.get() {
         return;
     }
+    DRAGGED.set(
+        std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map(|d| d.as_millis() as u64)
+            .unwrap_or(0),
+    );
     let Some(root) = WINDOW_ROOT.with_borrow(Clone::clone) else { return };
     let Ok(bar) = crate::ui::named::<crate::xaml::IRangeBase>(&root, "Bar") else { return };
     let Ok(ratio) = bar.Value() else { return };
@@ -488,7 +503,9 @@ fn drag_to() {
     let Ok(session) = media::session_of(&player) else { return };
     let Ok(total) = session.NaturalDuration() else { return };
     let at = windows_time::TimeSpan { duration: (total.duration as f64 * ratio.clamp(0.0, 1.0)) as i64 };
-    let _ = session.SetPosition(at);
+    if let Err(problem) = session.SetPosition(at) {
+        toast(&format!("跳转失败：{problem}"));
+    }
 }
 
 /// Steps the mode on: in order, around, one again, at random.
@@ -534,7 +551,14 @@ fn paint() {
     let Ok(session) = media::session_of(&player) else { return };
     let at = session.Position().map(|p| p.duration as f64 / 10_000_000.0).unwrap_or(0.0);
     let end = session.NaturalDuration().map(|p| p.duration as f64 / 10_000_000.0).unwrap_or(0.0);
+    let quiet = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_millis() as u64)
+        .unwrap_or(0)
+        .saturating_sub(DRAGGED.get())
+        > 1500;
     if end > 0.0
+        && quiet
         && let Ok(bar) = crate::ui::named::<crate::xaml::IRangeBase>(&root, "Bar")
     {
         SYNCING.set(true);
