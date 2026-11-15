@@ -393,6 +393,8 @@ thread_local! {
     static BEFORE: RefCell<Option<crate::xaml::IFrameworkElement>> = const { RefCell::new(None) };
     /// Set while the clock writes the slider's value, so that is not read as a drag.
     static SYNCING: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
+    /// The video the window was opened on; a track change makes 看视频 go elsewhere.
+    static STARTED: RefCell<Option<String>> = const { RefCell::new(None) };
     /// Whether the sound was paused by hand: the session's own state says buffering as often
     /// as it says playing, so pausing was guessed wrong and always resumed.
     static PAUSED: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
@@ -405,6 +407,7 @@ thread_local! {
 pub fn open_window() -> Result<()> {
     let Some(shell) = shell() else { return Ok(()) };
     // What was on show is put back when the window is given back.
+    STARTED.with_borrow_mut(|slot| *slot = NOW.with_borrow(Clone::clone));
     if let Ok(previous) = shell.current_page() {
         BEFORE.with_borrow_mut(|slot| *slot = Some(previous));
     }
@@ -448,13 +451,23 @@ pub fn close_window() {
     let Some(shell) = shell() else { return };
     WINDOW_ROOT.with_borrow_mut(|slot| *slot = None);
     let _ = shell.immersive(false);
-    // The page that was there before comes back: showing the player again would rebuild it, and
-    // the window content would keep the listening one.
+    let heard = NOW.with_borrow(Clone::clone);
+    let started = STARTED.with_borrow_mut(|slot| slot.take());
+    // The video being heard wins: after a track change the page that was there is a different
+    // video, and going back to it would play the wrong one.
+    if heard.is_some() && heard != started {
+        stop();
+        if let Some(bvid) = heard {
+            crate::ui::player::show(&bvid, "", "");
+        }
+        return;
+    }
     if let Some(previous) = BEFORE.with_borrow_mut(|slot| slot.take()) {
         let _ = shell.set_page(&previous);
         return;
     }
-    if let Some(bvid) = NOW.with_borrow(Clone::clone) {
+    stop();
+    if let Some(bvid) = heard {
         crate::ui::player::show(&bvid, "", "");
     }
 }
@@ -477,12 +490,18 @@ fn toggle() {
     if outcome.is_ok() {
         PAUSED.set(!was_paused);
     }
-    // What the player says it is doing, right after being asked.
     let state = media::session_of(&player)
         .and_then(|s| s.PlaybackState())
         .map(|s| format!("{s:?}"))
         .unwrap_or_else(|e| format!("读不到：{e}"));
-    say(&format!("按了{} · 状态 {state}", if was_paused { "播放" } else { "暂停" }));
+    let position = media::session_of(&player)
+        .and_then(|s| s.Position())
+        .map(|p| p.duration / 10_000_000)
+        .unwrap_or_default();
+    say(&format!(
+        "按了{} · 状态 {state} · 第 {position} 秒",
+        if was_paused { "播放" } else { "暂停" }
+    ));
     if let Err(problem) = outcome {
         toast(&format!("暂停/播放失败：{problem}"));
     }
