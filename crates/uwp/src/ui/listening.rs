@@ -429,9 +429,37 @@ fn paint_queue(root: &crate::xaml::IFrameworkElement, items: &[rubi_model::Video
         if let Ok(line) = crate::ui::load(&xaml)
             && let Ok(element) = line.cast::<crate::xaml::UIElement>()
         {
+            // A tap plays that video.
+            let aimed = item.bvid.clone();
+            if let Ok(revoker) = element.Tapped(move |_: Ref<IInspectable>, _: Ref<crate::xaml::TappedRoutedEventArgs>| {
+                jump_to(&aimed);
+            }) {
+                keep(revoker);
+            }
             let _ = children.Append(&element);
         }
     }
+}
+
+/// Plays vid now, and refills the window.
+fn jump_to(bvid: &str) {
+    let Some(shell) = shell() else { return };
+    let Some(backend) = shell.backend.get().cloned() else { return };
+    let (bvid, dispatcher, core) = (bvid.to_owned(), shell.dispatcher.clone(), backend.clone());
+    backend.spawn(async move {
+        let Ok(card) = core.services.listening.jump(&bvid).await else { return };
+        let quality = core.services.preferences.settings().playback.preferred_quality;
+        if let Ok(playback) = core.services.videos.playback(&card.bvid, quality).await
+            && let Some(stream) = playback.url.audio.first()
+        {
+            let (url, headers, title, id) =
+                (stream.url.clone(), playback.headers.clone(), card.title.clone(), card.bvid.clone());
+            crate::ui::post(&dispatcher, move || {
+                play(&id, &title, &url, &headers);
+                fill_window();
+            });
+        }
+    });
 }
 
 /// Keeps the clock and the progress bar up to date.
