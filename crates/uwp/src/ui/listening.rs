@@ -297,7 +297,7 @@ const WINDOW: &str = r##"<Grid xmlns="http://schemas.microsoft.com/winfx/2006/xa
                  Foreground="#A6A6A6" />
       <Grid Margin="0,20,0,0">
         <Grid.ColumnDefinitions><ColumnDefinition Width="*" /><ColumnDefinition Width="Auto" /></Grid.ColumnDefinitions>
-        <Slider x:Name="Bar" Minimum="0" Maximum="1" StepFrequency="0.001" Margin="0,0,0,0"
+        <Slider x:Name="Bar" Minimum="0" Maximum="1" StepFrequency="1" Margin="0,0,0,0"
                 VerticalAlignment="Center" Foreground="#0050EF" Background="#262626" />
         <TextBlock x:Name="Clock" Grid.Column="1" Margin="12,0,0,0" FontSize="11" Foreground="#A6A6A6"
                    FontFamily="Consolas" VerticalAlignment="Center" />
@@ -392,7 +392,11 @@ pub fn close_window() {
 fn toggle() {
     let heard = HEARD.with_borrow(Clone::clone);
     let Some((player, _)) = heard else {
-        toast("没有在播的声音");
+        let queued = shell()
+            .and_then(|s| s.backend.get().cloned())
+            .map(|core| core.services.listening.items().map(|i| i.len()).unwrap_or(0))
+            .unwrap_or(0);
+        toast(&format!("播放器还没准备好 · 队列 {queued} 首"));
         return;
     };
     let playing = media::session_of(&player)
@@ -497,12 +501,17 @@ fn drag_to() {
     );
     let Some(root) = WINDOW_ROOT.with_borrow(Clone::clone) else { return };
     let Ok(bar) = crate::ui::named::<crate::xaml::IRangeBase>(&root, "Bar") else { return };
-    let Ok(ratio) = bar.Value() else { return };
+    let Ok(position) = bar.Value() else { return };
     let heard = HEARD.with_borrow(Clone::clone);
     let Some((player, _)) = heard else { return };
     let Ok(session) = media::session_of(&player) else { return };
     let Ok(total) = session.NaturalDuration() else { return };
-    let at = windows_time::TimeSpan { duration: (total.duration as f64 * ratio.clamp(0.0, 1.0)) as i64 };
+    let whole = bar.Maximum().unwrap_or(0.0);
+    if whole <= 0.0 {
+        return;
+    }
+    let share = (position / whole).clamp(0.0, 1.0);
+    let at = windows_time::TimeSpan { duration: (total.duration as f64 * share) as i64 };
     if let Err(problem) = session.SetPosition(at) {
         toast(&format!("跳转失败：{problem}"));
     }
@@ -562,7 +571,8 @@ fn paint() {
         && let Ok(bar) = crate::ui::named::<crate::xaml::IRangeBase>(&root, "Bar")
     {
         SYNCING.set(true);
-        let _ = bar.SetValue(at / end);
+        let _ = bar.SetMaximum(end);
+        let _ = bar.SetValue(at);
         SYNCING.set(false);
     }
     let clock = format!("{} / {}", mmss(at), mmss(end));
