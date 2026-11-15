@@ -15,8 +15,15 @@ thread_local! {
     /// Set while the next video is being fetched, so one ending moves on once.
     static ADVANCING: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
 
-    /// The player making the sound, and the video it is playing.
-    static HEARD: RefCell<Option<(MediaPlayer, String)>> = const { RefCell::new(None) };
+    /// The one player the sound comes out of. Changing track changes its source rather than
+    /// building another, so what the buttons hold is always what is heard.
+    static SOUND: RefCell<Option<MediaPlayer>> = const { RefCell::new(None) };
+    /// The video it is playing.
+    static NOW: RefCell<Option<String>> = const { RefCell::new(None) };
+}
+
+fn sound() -> Option<MediaPlayer> {
+    SOUND.with_borrow(Clone::clone)
 }
 
 /// Plays `bvid`'s audio, then whatever the listening queue holds next.
@@ -63,11 +70,12 @@ pub fn start(bvid: &str) {
 
 /// Stops the sound, if any.
 pub fn stop() {
-    HEARD.with_borrow_mut(|slot| {
-        if let Some((player, _)) = slot.take() {
+    SOUND.with_borrow_mut(|slot| {
+        if let Some(player) = slot.take() {
             let _ = player.Pause();
         }
     });
+    NOW.with_borrow_mut(|slot| *slot = None);
 }
 
 /// Folds the queue away to the left, or brings it back.
@@ -107,49 +115,34 @@ fn say(text: &str) {
 }
 
 fn play(bvid: &str, title: &str, url: &str, headers: &[(String, String)]) {
-    stop();
     let _ = headers;
     let source = match media::file_source(url) {
         Ok(source) => source,
         Err(problem) => {
             say(&format!("打不开音轨：{problem}"));
-            toast(&format!("打不开音轨：{problem}"));
             return;
         }
     };
-    let player = match media::player(&source) {
-        Ok(player) => player,
-        Err(problem) => {
-            say(&format!("打不开播放器：{problem}"));
-            toast(&format!("打不开播放器：{problem}"));
-            return;
+    let outcome = SOUND.with_borrow_mut(|slot| {
+        if let Some(player) = slot.as_ref() {
+            let swap = player
+                .cast::<crate::xaml::IMediaPlayerSource2>()
+                .and_then(|p| p.SetSource(&source.cast::<crate::xaml::IMediaPlaybackSource>()?));
+            swap?;
+            player.Play()
+        } else {
+            let player = media::player(&source)?;
+            player.Play()?;
+            *slot = Some(player);
+            Ok(())
         }
-    };
-    if let Err(problem) = player.Play() {
+    });
+    if let Err(problem) = outcome {
         say(&format!("放不出来：{problem}"));
         toast(&format!("放不出来：{problem}"));
         return;
     }
-    // The next video starts when this one ends. MediaEnded is not raised for a single audio
-    // file played through an adaptive source, so the session's own state is watched instead.
-    if let Ok(session) = media::session_of(&player) {
-        let watched = session.clone();
-        if let Ok(revoker) = session.PlaybackStateChanged(
-            move |_: Ref<crate::xaml::MediaPlaybackSession>, _: Ref<IInspectable>| {
-                let finished = watched
-                    .cast::<crate::xaml::IMediaPlaybackSession>()
-                    .and_then(|s| s.PlaybackState())
-                    .is_ok_and(|state| state == crate::xaml::MediaPlaybackState::None);
-                if finished && !ADVANCING.replace(true) {
-                    advance();
-                }
-            },
-        ) {
-            keep(revoker);
-        }
-    }
-
-    HEARD.with_borrow_mut(|slot| *slot = Some((player, bvid.to_owned())));
+    NOW.with_borrow_mut(|slot| *slot = Some(bvid.to_owned()));
     PAUSED.set(false);
     let _ = title;
     fill_window();
@@ -183,7 +176,7 @@ fn advance() {
 
 /// Whether something is being listened to.
 pub fn playing() -> bool {
-    HEARD.with_borrow(|slot| slot.is_some())
+    SOUND.with_borrow(|slot| slot.is_some())
 }
 
 #[allow(dead_code)]
@@ -330,6 +323,15 @@ fn step(forward: bool) {
 
 const WINDOW: &str = r##"<Grid xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
       xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml" Background="#000000">
+  <Grid.Resources>
+    <!-- The pointer only brightens the button: black words are what the default hover brush
+         put there, and pressing is the feedback. -->
+    <SolidColorBrush x:Key="ButtonForegroundPointerOver" Color="#FFFFFF" />
+    <SolidColorBrush x:Key="ButtonBackgroundPointerOver" Color="Transparent" />
+    <SolidColorBrush x:Key="ButtonBorderBrushPointerOver" Color="Transparent" />
+    <SolidColorBrush x:Key="ButtonForegroundPressed" Color="#7EA6FF" />
+    <SolidColorBrush x:Key="ButtonBackgroundPressed" Color="Transparent" />
+  </Grid.Resources>
   <Grid.RowDefinitions><RowDefinition Height="Auto" /><RowDefinition Height="*" /></Grid.RowDefinitions>
   <Grid Margin="24,16,24,8">
     <Grid.ColumnDefinitions><ColumnDefinition Width="Auto" /><ColumnDefinition Width="*" /></Grid.ColumnDefinitions>
@@ -452,14 +454,13 @@ pub fn close_window() {
         let _ = shell.set_page(&previous);
         return;
     }
-    if let Some((_, bvid)) = HEARD.with_borrow(Clone::clone) {
+    if let Some(bvid) = NOW.with_borrow(Clone::clone) {
         crate::ui::player::show(&bvid, "", "");
     }
 }
 
 fn toggle() {
-    let heard = HEARD.with_borrow(Clone::clone);
-    let Some((player, _)) = heard else {
+    let Some(player) = sound() else {
         let (current, queued) = shell()
             .and_then(|s| s.backend.get().cloned())
             .map(|core| {
@@ -581,8 +582,7 @@ fn drag_to() {
     let Some(root) = WINDOW_ROOT.with_borrow(Clone::clone) else { return };
     let Ok(bar) = crate::ui::named::<crate::xaml::IRangeBase>(&root, "Bar") else { return };
     let Ok(position) = bar.Value() else { return };
-    let heard = HEARD.with_borrow(Clone::clone);
-    let Some((player, _)) = heard else { return };
+    let Some(player) = sound() else { return };
     let Ok(session) = media::session_of(&player) else { return };
     let Ok(total) = session.NaturalDuration() else { return };
     let whole = bar.Maximum().unwrap_or(0.0);
@@ -634,8 +634,7 @@ fn paint() {
     let Some(root) = WINDOW_ROOT.with_borrow(Clone::clone) else { return };
     let _ = root;
     show_mode(&root);
-    let heard = HEARD.with_borrow(Clone::clone);
-    let Some((player, _)) = heard else { return };
+    let Some(player) = sound() else { return };
     let Ok(session) = media::session_of(&player) else { return };
     let at = session.Position().map(|p| p.duration as f64 / 10_000_000.0).unwrap_or(0.0);
     let end = session.NaturalDuration().map(|p| p.duration as f64 / 10_000_000.0).unwrap_or(0.0);
