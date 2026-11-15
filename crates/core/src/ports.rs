@@ -134,3 +134,9 @@ impl rubi_filter::WatchedLookup for WatchedSet {
         self.0.contains(bvid)
     }
 }
+
+/// What plays after a video when nothing else says: the recommended videos, read by id.
+#[async_trait::async_trait]
+pub trait RelatedSource: Send + Sync {
+    async fn related(&self, bvid: &str) -> Vec<VideoCard>;
+}

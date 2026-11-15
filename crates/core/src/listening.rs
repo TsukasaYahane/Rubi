@@ -8,17 +8,25 @@ use rubi_store::{KvRepo, PlaylistRepo, SqliteStore};
 
 use crate::error::Result;
 use crate::lineup::{Lineup, random_below};
+use crate::ports::RelatedSource;
 use crate::playlist::{PlaylistMode, RELATED_PLAYLIST};
 use crate::queue::ListenQueue;
 
 pub struct Listening<S = SqliteStore> {
     lineup: Arc<Lineup<S>>,
     queue: Mutex<ListenQueue>,
+    /// What follows the video being heard; 相关推荐 is read from here when it starts, since
+    /// [Self::next] cannot reach the network.
+    related: Arc<dyn RelatedSource>,
 }
 
 impl<S: PlaylistRepo + KvRepo + Send + Sync> Listening<S> {
-    pub(crate) fn new(lineup: Arc<Lineup<S>>) -> Self {
-        Self { lineup, queue: Mutex::default() }
+    pub(crate) fn new(lineup: Arc<Lineup<S>>, related: Option<Arc<dyn RelatedSource>>) -> Self {
+        Self {
+            lineup,
+            queue: Mutex::default(),
+            related: related.unwrap_or_else(|| Arc::new(NoRelated)),
+        }
     }
 
     /// The mode the queue is played in; 相关推荐 is always in order.
@@ -52,9 +60,27 @@ impl<S: PlaylistRepo + KvRepo + Send + Sync> Listening<S> {
     /// Starts hearing one video, to be followed by its 相关推荐 ([Self::append]).
     pub async fn start_related(&self, bvid: &str) -> Result<VideoCard> {
         let card = self.lineup.card(bvid).await?;
-        self.lineup.put(RELATED_PLAYLIST, "相关推荐", vec![card.clone()]);
+        // The video itself comes first, then what follows it: they are read now, because the
+        // queue is walked without touching the network.
+        let mut list = vec![card.clone()];
+        list.extend(self.related.related(bvid).await);
+        self.lineup.put(RELATED_PLAYLIST, "相关推荐", list);
         self.lineup.set_active(RELATED_PLAYLIST);
         Ok(self.queue().start(card))
+    }
+
+    /// Reads more of 相关推荐 once the queue runs short while hearing them.
+    pub async fn extend_related(&self, bvid: &str) {
+        if self.lineup.active() != RELATED_PLAYLIST {
+            return;
+        }
+        let more = self.related.related(bvid).await;
+        if more.is_empty() {
+            return;
+        }
+        let mut items = self.lineup.items(RELATED_PLAYLIST).unwrap_or_default();
+        items.extend(more);
+        self.lineup.put(RELATED_PLAYLIST, "相关推荐", items);
     }
 
     /// How many videos are left to hear after the current one when following 相关推荐;
@@ -102,5 +128,15 @@ impl<S: PlaylistRepo + KvRepo + Send + Sync> Listening<S> {
 
     fn queue(&self) -> MutexGuard<'_, ListenQueue> {
         self.queue.lock().unwrap_or_else(|e| e.into_inner())
+    }
+}
+
+/// Nothing follows: what a queue hears when no source of 相关推荐 is given.
+pub(crate) struct NoRelated;
+
+#[async_trait::async_trait]
+impl RelatedSource for NoRelated {
+    async fn related(&self, _bvid: &str) -> Vec<VideoCard> {
+        Vec::new()
     }
 }

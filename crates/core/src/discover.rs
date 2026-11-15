@@ -11,6 +11,7 @@ use crate::ports::{FeedbackSink, RuleSource, keep_cards};
 use crate::social::filter_hot_words;
 use crate::videos::CardCache;
 
+#[derive(Clone)]
 pub struct Discover {
     feed: Arc<dyn FeedApi>,
     search: Arc<dyn SearchApi>,

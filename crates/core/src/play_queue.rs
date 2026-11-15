@@ -112,7 +112,7 @@ mod tests {
     #[tokio::test]
     async fn listening_follows_related_and_shares_the_lineup() {
         let shared = lineup();
-        let (q, l) = (PlayQueue::new(shared.clone()), Listening::new(shared));
+        let (q, l) = (PlayQueue::new(shared.clone()), Listening::new(shared, None));
         l.start_related("a").await.unwrap();
         l.append(&["b".into(), "c".into()]).await;
         assert_eq!(q.playing().unwrap().0, RELATED_PLAYLIST, "the video page follows what is heard");

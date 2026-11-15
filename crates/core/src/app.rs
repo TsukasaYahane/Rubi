@@ -11,6 +11,7 @@ use rubi_api::{
     WebEsports, WebFeed, WebLive, WebMedia, WebMessages, WebPgc, WebSearch, WebSeasons, WebSpace, WebStein, WebVideo,
 };
 use rubi_recommend::Source;
+use rubi_model::VideoCard;
 use rubi_store::{KvRepo, SqliteStore};
 
 use crate::account::Account;
@@ -135,18 +136,20 @@ impl Services {
         let downloads =
             Downloads::new(videos.clone(), Arc::new(WebMedia::new(http.clone())), store, data_dir.join("downloads"));
 
+        // One 发现, shared with the listening queue, which reads 相关推荐 through it.
+        let discover_value = Discover::new(
+            feed_api.clone(),
+            Arc::new(WebSearch::new(http.clone())),
+            rules.clone(),
+            feedback.clone(),
+            cards.clone(),
+        );
         Ok(Self {
             home: Home::new(home_feed, feedback.clone(), videos.clone(), cards.clone()),
             danmaku: Danmakus::new(Arc::new(WebDanmaku::new(http.clone())), rules.clone()),
             stein: Stein::new(Arc::new(WebStein::new(http.clone()))),
             comments: Comments::new(Arc::new(WebComment::new(http.clone())), rules.clone()),
-            discover: Discover::new(
-                feed_api.clone(),
-                Arc::new(WebSearch::new(http.clone())),
-                rules.clone(),
-                feedback.clone(),
-                cards.clone(),
-            ),
+            discover: discover_value.clone(),
             following: Following::new(
                 feed_api,
                 Arc::new(WebDynamic::new(http.clone())),
@@ -163,7 +166,7 @@ impl Services {
             messages: Messages::new(notices, chat, rules.clone(), videos.clone()),
             playlists: Playlists::new(playlist, lineup.clone(), videos.clone()),
             play_queue: PlayQueue::new(lineup.clone()),
-            listening: Listening::new(lineup),
+            listening: Listening::new(lineup, Some(Arc::new(RelatedOf(discover_value.clone())))),
             preferences: Preferences::new(settings_port, profile, playlist_backup),
             reading: Reading::new(Arc::new(WebArticle::new(http.clone())), rules.clone()),
             downloads,
@@ -176,5 +179,15 @@ impl Services {
             account,
             videos,
         })
+    }
+}
+
+/// 相关推荐, as the narrow source the listening queue asks for them through.
+struct RelatedOf(Discover);
+
+#[async_trait::async_trait]
+impl crate::ports::RelatedSource for RelatedOf {
+    async fn related(&self, bvid: &str) -> Vec<VideoCard> {
+        self.0.related(bvid).await.unwrap_or_default()
     }
 }
