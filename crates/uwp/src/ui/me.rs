@@ -189,11 +189,6 @@ pub fn show() -> Result<()> {
     let root = load(&layout(class))?;
     shell.set_page(&root)?;
     SHOWN.with(|s| *s.borrow_mut() = Some(Shown { root: root.clone(), body: None, class }));
-    for (at, category) in Category::ALL.into_iter().enumerate() {
-        on_click(&root, &format!("Cat{at}"), move || {
-            let _ = open(category);
-        })?;
-    }
     show_head();
     for (at, shelf) in Shelf::ALL.into_iter().enumerate() {
         on_click(&root, &format!("Shelf{at}"), move || {
