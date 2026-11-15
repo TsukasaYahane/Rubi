@@ -327,8 +327,21 @@ fn show_head() {
     }
     if let Some(known) = WHO.with(|w| w.borrow().clone()) {
         let _ = known.paint(&page.root);
+    } else if let Some(known) = backend.services.account.last_known() {
+        // What was signed in last is drawn at once, before the network answers.
+        let cached = Who {
+            name: known.name,
+            line: known.line.clone(),
+            face: Uri::CreateUri(&known.face)
+                .and_then(|u| BitmapImage::CreateInstanceWithUriSource(&u))
+                .ok(),
+            face_url: known.face,
+        };
+        let _ = cached.paint(&page.root);
+        WHO.with(|w| *w.borrow_mut() = Some(cached));
     }
     let (dispatcher, core) = (shell.dispatcher.clone(), backend.clone());
+    let core_kept = backend.clone();
     backend.spawn(async move {
         let Ok(account) = core.services.account.whoami().await else { return };
         let profile = core.services.space.profile(account.mid).await.ok();
@@ -343,6 +356,13 @@ fn show_head() {
                 }
             }
             WHO.with(|w| *w.borrow_mut() = Some(who.clone()));
+            // Kept for the next start, so the face is there before the network is asked.
+            let kept = rubi_core::Known {
+                name: who.name.clone(),
+                line: who.line.clone(),
+                face: who.face_url.clone(),
+            };
+            let _ = core_kept.services.account.remember(&kept);
             if let Some(page) = shown() {
                 let _ = who.paint(&page.root);
             }

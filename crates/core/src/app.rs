@@ -11,7 +11,7 @@ use rubi_api::{
     WebEsports, WebFeed, WebLive, WebMedia, WebMessages, WebPgc, WebSearch, WebSeasons, WebSpace, WebStein, WebVideo,
 };
 use rubi_recommend::Source;
-use rubi_store::SqliteStore;
+use rubi_store::{KvRepo, SqliteStore};
 
 use crate::account::Account;
 use crate::actions::Actions;
@@ -123,7 +123,8 @@ impl Services {
         let notices: Arc<dyn NoticeApi> = messages.clone();
         let chat: Arc<dyn ChatApi> = messages;
 
-        let account = Arc::new(Account::new(http.clone(), Arc::new(WebAuth::new(http.clone()))));
+        let known: Arc<dyn KvRepo + Send + Sync> = store.clone();
+        let account = Arc::new(Account::new(http.clone(), Arc::new(WebAuth::new(http.clone())), known));
         let videos = Arc::new(Videos::new(Arc::new(WebVideo::new(http.clone())), cards.clone()));
         let playlist = Arc::new(Playlist::new(store.clone()));
         let playlist_backup: Arc<dyn PlaylistBackup> = playlist.clone();

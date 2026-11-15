@@ -4,13 +4,30 @@ use std::sync::Arc;
 
 use rubi_api::{AuthApi, LoginCaptcha, LoginKey, NavInfo, QrState, QrTicket, Session, SessionHolder, SolvedCaptcha};
 
+use rubi_store::KvRepo;
+use serde::{Deserialize, Serialize};
+
 use crate::error::Result;
 use crate::ports::LoginState;
 
 pub struct Account {
     http: Arc<dyn SessionHolder>,
     auth: Arc<dyn AuthApi>,
+    /// Last known identity, so the first screen has a name and a face before the network
+    /// answers; kept apart from the session, which is the caller's to store.
+    kv: Arc<dyn KvRepo + Send + Sync>,
 }
+
+/// Who was signed in last: what the first screen shows while the network is asked.
+#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub struct Known {
+    pub name: String,
+    /// The line under the name, as it read when it was last fetched.
+    pub line: String,
+    pub face: String,
+}
+
+const KNOWN_KEY: &str = "account.known";
 
 impl LoginState for Account {
     fn is_logged_in(&self) -> bool {
@@ -19,8 +36,25 @@ impl LoginState for Account {
 }
 
 impl Account {
-    pub(crate) fn new(http: Arc<dyn SessionHolder>, auth: Arc<dyn AuthApi>) -> Self {
-        Self { http, auth }
+    pub(crate) fn new(
+        http: Arc<dyn SessionHolder>,
+        auth: Arc<dyn AuthApi>,
+        kv: Arc<dyn KvRepo + Send + Sync>,
+    ) -> Self {
+        Self { http, auth, kv }
+    }
+
+    /// Who was signed in last, if anyone was.
+    pub fn last_known(&self) -> Option<Known> {
+        let raw = self.kv.get_raw(KNOWN_KEY).ok().flatten()?;
+        serde_json::from_str(&raw).ok()
+    }
+
+    /// Keeps `known` for the next start; the caller says when the identity changed.
+    pub fn remember(&self, known: &Known) -> Result<()> {
+        let raw = serde_json::to_string(known)?;
+        self.kv.put_raw(KNOWN_KEY, &raw)?;
+        Ok(())
     }
 
     /// The session to store (encrypted, by the caller).

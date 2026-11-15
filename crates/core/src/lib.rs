@@ -43,7 +43,7 @@ mod zones;
 
 pub use zones::HOME_ZONES;
 
-pub use account::Account;
+pub use account::{Account, Known};
 pub use actions::Actions;
 pub use app::Services;
 pub use comments::{Comments, CommentsPage, ThreadView};
