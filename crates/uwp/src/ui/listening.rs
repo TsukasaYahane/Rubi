@@ -466,8 +466,6 @@ thread_local! {
     static BEFORE: RefCell<Option<crate::xaml::IFrameworkElement>> = const { RefCell::new(None) };
     /// Set while the clock writes the slider's value, so that is not read as a drag.
     static SYNCING: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
-    /// The video the window was opened on; a track change makes 看视频 go elsewhere.
-    static STARTED: RefCell<Option<String>> = const { RefCell::new(None) };
     /// When the bar was last dragged: the clock leaves it alone for a while after, or it
     /// would pull the thumb back under the pointer.
     static DRAGGED: std::cell::Cell<u64> = const { std::cell::Cell::new(0) };
@@ -483,8 +481,7 @@ thread_local! {
 /// Turns the window into the player.
 pub fn open_window() -> Result<()> {
     let Some(shell) = shell() else { return Ok(()) };
-    // What was on show is put back when the window is given back.
-    STARTED.with_borrow_mut(|slot| *slot = NOW.with_borrow(Clone::clone));
+    // The page the window took the place of: 退出 puts it back.
     if let Ok(previous) = shell.current_page() {
         BEFORE.with_borrow_mut(|slot| *slot = Some(previous));
     }
@@ -494,7 +491,7 @@ pub fn open_window() -> Result<()> {
     WINDOW_ROOT.with_borrow_mut(|slot| *slot = Some(root.clone()));
     // Every button is wired, and one that cannot be says so instead of doing nothing.
     report(crate::ui::on_click(&root, "Close", close_window), "Close");
-    report(crate::ui::on_click(&root, "Watch", close_window), "Watch");
+    report(crate::ui::on_click(&root, "Watch", watch_window), "Watch");
     report(crate::ui::on_click(&root, "PlayPause", toggle), "PlayPause");
     report(crate::ui::on_click(&root, "NextSong", || step(true)), "NextSong");
     report(crate::ui::on_click(&root, "Prev", || step(false)), "Prev");
@@ -537,8 +534,19 @@ fn tick() {
     });
 }
 
-/// Gives the window back.
+/// 退出: the window goes and the page listening started from comes back as it was left.
 pub fn close_window() {
+    leave(false);
+}
+
+/// 看视频: the video being heard, on its own page.
+fn watch_window() {
+    leave(true);
+}
+
+/// Gives the window back. `to_heard` goes to what is being heard; otherwise the page the window
+/// took the place of comes back, as it was.
+fn leave(to_heard: bool) {
     let Some(shell) = shell() else { return };
     // The element lets go of the player while the window is still there: taken away holding a
     // closed player it freezes the app. This has to come before WINDOW_ROOT is cleared, or the
@@ -548,21 +556,11 @@ pub fn close_window() {
     MODE.set(None);
     let _ = shell.immersive(false);
     let heard = NOW.with_borrow(Clone::clone);
-    let started = STARTED.with_borrow_mut(|slot| slot.take());
+    let previous = BEFORE.with_borrow_mut(|slot| slot.take());
     // Leaving ends listening: the sound, the queue and where it got to all go.
     stop();
-    // A track change makes 看视频 go to what was heard instead: the page that was there plays a
-    // different video. `started` is empty when the window opened before the first track loaded,
-    // which is not a track change.
-    if started.is_some() && heard.is_some() && heard != started {
-        if let Some(bvid) = heard {
-            crate::ui::player::show(&bvid, "", "");
-        }
-        return;
-    }
-    // Otherwise the page that was there goes back as it was: its video paused where listening
-    // found it, its progress untouched.
-    if let Some(previous) = BEFORE.with_borrow_mut(|slot| slot.take()) {
+    if !to_heard && let Some(previous) = previous {
+        // Its video is paused where listening found it, its progress untouched.
         let _ = shell.set_page(&previous);
         return;
     }
