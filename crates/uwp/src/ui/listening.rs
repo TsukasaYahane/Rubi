@@ -132,6 +132,7 @@ fn play(bvid: &str, title: &str, url: &str, headers: &[(String, String)]) {
             player.Play()
         } else {
             let player = media::player(&source)?;
+            attach(&player);
             player.Play()?;
             *slot = Some(player);
             Ok(())
@@ -146,6 +147,16 @@ fn play(bvid: &str, title: &str, url: &str, headers: &[(String, String)]) {
     PAUSED.set(false);
     let _ = title;
     fill_window();
+}
+
+/// Puts the player on the window's media element, which is what makes it controllable.
+fn attach(player: &MediaPlayer) {
+    let Some(root) = WINDOW_ROOT.with_borrow(Clone::clone) else { return };
+    if let Ok(element) = crate::ui::named::<crate::xaml::MediaPlayerElement>(&root, "Sound")
+        && let Ok(host) = element.cast::<crate::xaml::IMediaPlayerElement>()
+    {
+        let _ = host.SetMediaPlayer(player);
+    }
 }
 
 /// Reads the next video of the listening queue and plays it.
@@ -333,6 +344,8 @@ const WINDOW: &str = r##"<Grid xmlns="http://schemas.microsoft.com/winfx/2006/xa
     <SolidColorBrush x:Key="ButtonBackgroundPressed" Color="Transparent" />
   </Grid.Resources>
   <Grid.RowDefinitions><RowDefinition Height="Auto" /><RowDefinition Height="*" /></Grid.RowDefinitions>
+  <MediaPlayerElement x:Name="Sound" Width="1" Height="1" Opacity="0" IsHitTestVisible="False"
+                      AreTransportControlsEnabled="False" />
   <Grid Margin="24,16,24,8">
     <Grid.ColumnDefinitions><ColumnDefinition Width="Auto" /><ColumnDefinition Width="*" /></Grid.ColumnDefinitions>
     <Button x:Name="Close" Content="‹ 退出" Background="Transparent" BorderThickness="0"
