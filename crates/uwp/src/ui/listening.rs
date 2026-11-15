@@ -7,7 +7,7 @@ use windows_core::{IInspectable, Interface, Ref, Result};
 use crate::ui::media;
 use crate::ui::shell::{shell, toast};
 use crate::ui::{keep, post};
-use crate::xaml::{IMediaPlayer, MediaPlayer};
+use crate::xaml::{IMediaPlayer, MediaPlaybackState, MediaPlayer};
 
 thread_local! {
     /// Set while the next video is being fetched, so one ending moves on once.
@@ -100,6 +100,7 @@ fn play(bvid: &str, title: &str, url: &str, headers: &[(String, String)]) {
 
     HEARD.with_borrow_mut(|slot| *slot = Some((player, bvid.to_owned())));
     let _ = title;
+    fill_window();
 }
 
 /// Reads the next video of the listening queue and plays it.
@@ -258,4 +259,199 @@ fn step(forward: bool) {
             });
         }
     });
+}
+
+
+// ---------------------------------------------------------------------------------------------
+// The listening window: the whole window becomes a player, with no navigation.
+
+const WINDOW: &str = r##"<Grid xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+      xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml" Background="#000000">
+  <Grid.RowDefinitions><RowDefinition Height="Auto" /><RowDefinition Height="*" /></Grid.RowDefinitions>
+  <Grid Margin="24,16,24,8">
+    <Grid.ColumnDefinitions><ColumnDefinition Width="Auto" /><ColumnDefinition Width="*" /></Grid.ColumnDefinitions>
+    <Button x:Name="Close" Content="‹ 退出" Background="Transparent" BorderThickness="0"
+            Foreground="#FFFFFF" FontSize="15" Padding="0" />
+    <TextBlock Grid.Column="1" Text="听视频" FontSize="15" Margin="16,0,0,0" VerticalAlignment="Center"
+               Foreground="#A6A6A6" />
+  </Grid>
+  <Grid Grid.Row="1" Margin="24,0,24,24">
+    <Grid.ColumnDefinitions><ColumnDefinition Width="*" /><ColumnDefinition Width="340" /></Grid.ColumnDefinitions>
+    <StackPanel VerticalAlignment="Center" HorizontalAlignment="Center" MaxWidth="560">
+      <Border Width="300" Height="300" HorizontalAlignment="Center" Background="#1c1c1c">
+        <Image x:Name="Cover" Stretch="UniformToFill" />
+      </Border>
+      <TextBlock x:Name="Song" Margin="0,22,0,0" FontSize="20" FontWeight="SemiBold" TextAlignment="Center"
+                 TextWrapping="Wrap" MaxLines="2" TextTrimming="CharacterEllipsis" Foreground="#FFFFFF" />
+      <TextBlock x:Name="Who" Margin="0,8,0,0" FontSize="13" TextAlignment="Center" TextTrimming="CharacterEllipsis"
+                 Foreground="#A6A6A6" />
+      <Grid Margin="0,20,0,0">
+        <Grid.ColumnDefinitions><ColumnDefinition Width="*" /><ColumnDefinition Width="Auto" /></Grid.ColumnDefinitions>
+        <Border Height="4" Background="#262626" VerticalAlignment="Center">
+          <Border x:Name="Fill" HorizontalAlignment="Left" Width="0" Background="#0050EF" />
+        </Border>
+        <TextBlock x:Name="Clock" Grid.Column="1" Margin="12,0,0,0" FontSize="11" Foreground="#A6A6A6"
+                   FontFamily="Consolas" VerticalAlignment="Center" />
+      </Grid>
+      <Grid Margin="0,22,0,0">
+        <Grid.ColumnDefinitions><ColumnDefinition Width="*" /><ColumnDefinition Width="Auto" />
+          <ColumnDefinition Width="Auto" /><ColumnDefinition Width="Auto" /><ColumnDefinition Width="*" /></Grid.ColumnDefinitions>
+        <Button x:Name="Prev" Content="上一首" Grid.Column="1" Background="Transparent" BorderThickness="0"
+                Foreground="#A6A6A6" FontSize="14" Margin="0,0,20,0" />
+        <Button x:Name="PlayPause" Grid.Column="2" Width="72" Height="72" Background="#0050EF" BorderThickness="0"
+                Foreground="#FFFFFF" FontSize="22" />
+        <Button x:Name="NextSong" Content="下一首" Grid.Column="3" Background="Transparent" BorderThickness="0"
+                Foreground="#A6A6A6" FontSize="14" Margin="20,0,0,0" />
+      </Grid>
+      <Button x:Name="Watch" Content="看视频" HorizontalAlignment="Center" Margin="0,18,0,0"
+              Background="Transparent" BorderThickness="0" Foreground="#0050EF" FontSize="14" />
+    </StackPanel>
+    <Grid Grid.Column="1" Margin="24,0,0,0">
+      <Grid.RowDefinitions><RowDefinition Height="Auto" /><RowDefinition Height="*" /></Grid.RowDefinitions>
+      <TextBlock x:Name="QueueHead" Text="接下来" FontSize="16" FontWeight="Light" Foreground="#FFFFFF"
+                 Margin="0,0,0,10" />
+      <ScrollViewer Grid.Row="1"><StackPanel x:Name="Queue" /></ScrollViewer>
+    </Grid>
+  </Grid>
+</Grid>"##;
+
+thread_local! {
+    /// The window on show, while it is.
+    static WINDOW_ROOT: RefCell<Option<crate::xaml::IFrameworkElement>> = const { RefCell::new(None) };
+}
+
+/// Turns the window into the player.
+pub fn open_window() -> Result<()> {
+    let Some(shell) = shell() else { return Ok(()) };
+    let root = crate::ui::load(WINDOW)?;
+    shell.set_page(&root)?;
+    shell.immersive(true)?;
+    WINDOW_ROOT.with_borrow_mut(|slot| *slot = Some(root.clone()));
+    crate::ui::on_click(&root, "Close", close_window).ok();
+    crate::ui::on_click(&root, "Watch", close_window).ok();
+    crate::ui::on_click(&root, "PlayPause", toggle).ok();
+    crate::ui::on_click(&root, "NextSong", || step(true)).ok();
+    crate::ui::on_click(&root, "Prev", || step(false)).ok();
+    fill_window();
+    tick();
+    Ok(())
+}
+
+/// Keeps the clock up to date while the window is on show.
+fn tick() {
+    let Some(shell) = shell() else { return };
+    let Some(backend) = shell.backend.get().cloned() else { return };
+    let dispatcher = shell.dispatcher.clone();
+    backend.spawn(async move {
+        loop {
+            tokio::time::sleep(std::time::Duration::from_millis(500)).await;
+            let alive = WINDOW_ROOT.with_borrow(|slot| slot.is_some());
+            if !alive {
+                return;
+            }
+            let _ = crate::ui::post(&dispatcher, paint);
+        }
+    });
+}
+
+/// Gives the window back.
+pub fn close_window() {
+    let Some(shell) = shell() else { return };
+    WINDOW_ROOT.with_borrow_mut(|slot| *slot = None);
+    let _ = shell.immersive(false);
+    if let Some((_, bvid)) = HEARD.with_borrow(Clone::clone) {
+        crate::ui::player::show(&bvid, "", "");
+    }
+}
+
+fn toggle() {
+    let heard = HEARD.with_borrow(Clone::clone);
+    let Some((player, _)) = heard else { return };
+    let playing = media::session_of(&player)
+        .and_then(|s| s.PlaybackState())
+        .is_ok_and(|state| state == MediaPlaybackState::Playing);
+    let _ = if playing { player.Pause() } else { player.Play() };
+    paint();
+}
+
+/// Fills the window in with what the queue says is on now, and what comes after.
+fn fill_window() {
+    let Some(shell) = shell() else { return };
+    let Some(backend) = shell.backend.get().cloned() else { return };
+    let (dispatcher, core) = (shell.dispatcher.clone(), backend.clone());
+    backend.spawn(async move {
+        let now = core.services.listening.current();
+        let queued = core.services.listening.items().unwrap_or_default();
+        crate::ui::post(&dispatcher, move || {
+            let Some(root) = WINDOW_ROOT.with_borrow(Clone::clone) else { return };
+            if let Some(card) = &now {
+                let _ = crate::ui::set_text(&root, "Song", &card.title);
+                let _ = crate::ui::set_text(&root, "Who", &card.owner.name);
+                if let Ok(image) = crate::ui::named::<crate::xaml::IImage>(&root, "Cover") {
+                    let covers = crate::ui::rows::Covers::default();
+                    let _ = covers.show(&image, &card.cover, 300);
+                }
+            }
+            paint_queue(&root, &queued, now.as_ref().map(|card| card.bvid.clone()));
+            paint();
+        });
+    });
+}
+
+/// Lists the videos after the one playing.
+fn paint_queue(root: &crate::xaml::IFrameworkElement, items: &[rubi_model::VideoCard], on: Option<String>) {
+    let Ok(panel) = crate::ui::named::<crate::xaml::IPanel>(root, "Queue") else { return };
+    let Ok(children) = panel.Children().and_then(|c| c.cast::<windows_collections::IVector<crate::xaml::UIElement>>()) else {
+        return;
+    };
+    let _ = children.Clear();
+    let _ = crate::ui::set_text(root, "QueueHead", &format!("接下来 · {} 首", items.len()));
+    for item in items.iter().take(60) {
+        let bright = on.as_deref() == Some(item.bvid.as_str());
+        let xaml = format!(
+            r##"<TextBlock xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+                  xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml" Text="{}" FontSize="13" Margin="0,0,0,8"
+                  TextTrimming="CharacterEllipsis" Foreground="{}" />"##,
+            crate::state::settings::escape(&item.title),
+            if bright { "#7EA6FF" } else { "#A6A6A6" }
+        );
+        if let Ok(line) = crate::ui::load(&xaml)
+            && let Ok(element) = line.cast::<crate::xaml::UIElement>()
+        {
+            let _ = children.Append(&element);
+        }
+    }
+}
+
+/// Keeps the clock and the progress bar up to date.
+fn paint() {
+    let Some(root) = WINDOW_ROOT.with_borrow(Clone::clone) else { return };
+    let heard = HEARD.with_borrow(Clone::clone);
+    let Some((player, _)) = heard else { return };
+    let Ok(session) = media::session_of(&player) else { return };
+    let at = session.Position().map(|p| p.duration as f64 / 10_000_000.0).unwrap_or(0.0);
+    let end = session.NaturalDuration().map(|p| p.duration as f64 / 10_000_000.0).unwrap_or(0.0);
+    let clock = format!("{} / {}", mmss(at), mmss(end));
+    let _ = crate::ui::set_text(&root, "Clock", &clock);
+    if end > 0.0
+        && let Ok(fill) = crate::ui::named::<crate::xaml::IFrameworkElement>(&root, "Fill")
+        && let Ok(track) = crate::ui::named::<crate::xaml::IFrameworkElement>(&root, "Clock")
+    {
+        let _ = fill.SetWidth((at / end * 260.0).max(0.0)).map_err(|_| ()).ok();
+        let _ = track;
+    }
+    let playing = session
+        .PlaybackState()
+        .is_ok_and(|state| state == MediaPlaybackState::Playing);
+    let label = if playing { "❚❚" } else { "▶" };
+    if let Ok(value) = crate::xaml::PropertyValue::CreateString(label) {
+        if let Ok(button) = crate::ui::named::<crate::xaml::IContentControl>(&root, "PlayPause") {
+            let _ = button.SetContent(&value);
+        }
+    }
+}
+
+fn mmss(seconds: f64) -> String {
+    let total = seconds.max(0.0) as u64;
+    format!("{:02}:{:02}", total / 60, total % 60)
 }

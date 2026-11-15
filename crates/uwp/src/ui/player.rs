@@ -1259,7 +1259,7 @@ pub fn open(feed: bool, bvid: &str, title: &str, uploader: &str) -> Result<()> {
         if let Some(page) = page() {
             let bvid = page.bvid.clone();
             crate::ui::listening::start(&bvid);
-            crate::ui::listening::open_panel();
+            let _ = crate::ui::listening::open_window();
         }
     })?;
     on_click(&root, "ActDanmaku", toggle_danmaku)?;
