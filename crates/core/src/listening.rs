@@ -8,8 +8,8 @@ use rubi_store::{KvRepo, PlaylistRepo, SqliteStore};
 
 use crate::error::Result;
 use crate::lineup::{Lineup, random_below};
+use crate::playlist::{PlaylistMode, RELATED_PLAYLIST, TEMP_PLAYLIST};
 use crate::ports::RelatedSource;
-use crate::playlist::{PlaylistMode, RELATED_PLAYLIST};
 use crate::queue::ListenQueue;
 
 pub struct Listening<S = SqliteStore> {
@@ -22,11 +22,7 @@ pub struct Listening<S = SqliteStore> {
 
 impl<S: PlaylistRepo + KvRepo + Send + Sync> Listening<S> {
     pub(crate) fn new(lineup: Arc<Lineup<S>>, related: Option<Arc<dyn RelatedSource>>) -> Self {
-        Self {
-            lineup,
-            queue: Mutex::default(),
-            related: related.unwrap_or_else(|| Arc::new(NoRelated)),
-        }
+        Self { lineup, queue: Mutex::default(), related: related.unwrap_or_else(|| Arc::new(NoRelated)) }
     }
 
     /// The mode the queue is played in; 相关推荐 is always in order.
@@ -55,6 +51,31 @@ impl<S: PlaylistRepo + KvRepo + Send + Sync> Listening<S> {
     pub async fn jump(&self, bvid: &str) -> Result<VideoCard> {
         let card = self.lineup.card(bvid).await?;
         Ok(self.queue().jump(card))
+    }
+
+    /// Whether the list being played holds `bvid`: hearing it keeps that list's order rather
+    /// than bringing 相关推荐 in.
+    pub fn holds(&self, bvid: &str) -> bool {
+        let list = self.lineup.active();
+        list != RELATED_PLAYLIST
+            && self.lineup.items(list).is_ok_and(|items| items.iter().any(|card| card.bvid == bvid))
+    }
+
+    /// Starts hearing `bvid` from the list already being played when that list holds it, and
+    /// from 相关推荐 otherwise: a 播放列表 the user put on keeps its order when listening starts.
+    pub async fn start_here(&self, bvid: &str) -> Result<VideoCard> {
+        if self.holds(bvid) {
+            return self.start(self.lineup.active(), bvid).await;
+        }
+        self.start_related(bvid).await
+    }
+
+    /// Starts hearing `bvid` out of `bvids`, the list the video page was playing under `name`:
+    /// 播放全部 hands it over, and the order it was played in is kept.
+    pub async fn start_listing(&self, name: &str, bvids: &[String], bvid: &str) -> Result<VideoCard> {
+        let cards = self.lineup.cards_of(bvids).await;
+        self.lineup.put(TEMP_PLAYLIST, name, cards);
+        self.start(TEMP_PLAYLIST, bvid).await
     }
 
     /// Starts hearing one video, to be followed by its 相关推荐 ([Self::append]).
@@ -138,5 +159,67 @@ pub(crate) struct NoRelated;
 impl RelatedSource for NoRelated {
     async fn related(&self, _bvid: &str) -> Vec<VideoCard> {
         Vec::new()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use async_trait::async_trait;
+
+    use super::*;
+    use crate::lineup::Lineup;
+    use crate::playlist::Playlist;
+    use crate::ports::VideoLookup;
+    use crate::videos::CardCache;
+
+    struct Cards;
+
+    #[async_trait]
+    impl VideoLookup for Cards {
+        async fn card(&self, bvid: &str) -> Result<VideoCard> {
+            Ok(VideoCard { bvid: bvid.into(), ..Default::default() })
+        }
+    }
+
+    fn lineup() -> Arc<Lineup<SqliteStore>> {
+        let list = Arc::new(Playlist::new(Arc::new(SqliteStore::in_memory().unwrap())));
+        Arc::new(Lineup::new(list, Arc::new(Cards), Arc::new(CardCache::default())))
+    }
+
+    fn cards(bvids: &[&str]) -> Vec<VideoCard> {
+        bvids.iter().map(|bvid| VideoCard { bvid: (*bvid).into(), ..Default::default() }).collect()
+    }
+
+    #[tokio::test]
+    async fn a_list_already_playing_keeps_its_order() {
+        let shared = lineup();
+        let heard = Listening::new(shared.clone(), None);
+        shared.put(TEMP_PLAYLIST, "收藏夹", cards(&["a", "b", "c"]));
+        shared.set_active(TEMP_PLAYLIST);
+        assert_eq!(heard.start_here("b").await.unwrap().bvid, "b");
+        assert_eq!(shared.active(), TEMP_PLAYLIST, "相关推荐 did not take the list over");
+        assert_eq!(heard.items().unwrap().len(), 3);
+    }
+
+    #[tokio::test]
+    async fn a_video_off_the_list_falls_back_to_related() {
+        let shared = lineup();
+        let heard = Listening::new(shared.clone(), None);
+        shared.put(TEMP_PLAYLIST, "收藏夹", cards(&["a"]));
+        shared.set_active(TEMP_PLAYLIST);
+        heard.start_here("z").await.unwrap();
+        assert_eq!(shared.active(), RELATED_PLAYLIST);
+    }
+
+    #[tokio::test]
+    async fn a_list_handed_over_is_the_one_heard() {
+        let shared = lineup();
+        let heard = Listening::new(shared.clone(), None);
+        let bvids: Vec<String> = ["a", "b", "c"].iter().map(|bvid| (*bvid).to_owned()).collect();
+        heard.start_listing("收藏夹", &bvids, "b").await.unwrap();
+        assert_eq!(shared.active(), TEMP_PLAYLIST);
+        assert_eq!(heard.current().unwrap().bvid, "b");
+        assert_eq!(heard.items().unwrap().len(), 3);
+        assert_eq!(heard.next(true).unwrap().unwrap().bvid, "c", "it follows the list, not 相关推荐");
     }
 }

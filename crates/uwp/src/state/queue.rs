@@ -26,6 +26,11 @@ impl Queue {
         &self.entries[self.at]
     }
 
+    /// What the list is called.
+    pub fn name(&self) -> &str {
+        &self.name
+    }
+
     pub fn at(&self) -> usize {
         self.at
     }

@@ -21,6 +21,9 @@ thread_local! {
     static SOUND: RefCell<Option<MediaPlayer>> = const { RefCell::new(None) };
     /// The video it is playing.
     static NOW: RefCell<Option<String>> = const { RefCell::new(None) };
+    /// Set as soon as listening is asked for, before its track is loaded: the video page may bring
+    /// its player up a moment later, and that one must not start sounding under this one.
+    static WANTED: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
 }
 
 fn sound() -> Option<MediaPlayer> {
@@ -29,12 +32,25 @@ fn sound() -> Option<MediaPlayer> {
 
 /// Plays `bvid`'s audio, then whatever the listening queue holds next.
 pub fn start(bvid: &str) {
+    WANTED.set(true);
     crate::ui::player::stop_video();
     let Some(shell) = shell() else { return };
     let Some(backend) = shell.backend.get().cloned() else { return };
+    // The list the video page is playing, when 播放全部 put one on: hearing follows it, in the
+    // order it was played, rather than bringing 相关推荐 in. Read here, on the UI thread, because
+    // the queue is only there.
+    let listed = crate::ui::queue::view()
+        .filter(|queue| queue.entries().iter().any(|entry| entry.bvid == bvid))
+        .map(|queue| (queue.name().to_owned(), queue.entries().iter().map(|e| e.bvid.clone()).collect::<Vec<_>>()));
     let (bvid, dispatcher, core) = (bvid.to_owned(), shell.dispatcher.clone(), backend.clone());
     backend.spawn(async move {
-        let begun = core.services.listening.start_related(&bvid).await;
+        let begun = if core.services.listening.holds(&bvid) {
+            core.services.listening.start_here(&bvid).await
+        } else if let Some((name, bvids)) = listed {
+            core.services.listening.start_listing(&name, &bvids, &bvid).await
+        } else {
+            core.services.listening.start_related(&bvid).await
+        };
         let card = match begun {
             Ok(card) => card,
             Err(problem) => {
@@ -70,6 +86,7 @@ pub fn start(bvid: &str) {
 
 /// Stops the sound, if any, and lets the queue and where it got to go with it.
 pub fn stop() {
+    WANTED.set(false);
     // The element lets go first: left holding a closed player, it brings the app down.
     detach();
     let player = SOUND.with_borrow_mut(|slot| slot.take());
@@ -222,6 +239,11 @@ pub fn playing() -> bool {
     SOUND.with_borrow(|slot| slot.is_some())
 }
 
+/// Whether listening was asked for: its track may still be on its way.
+pub fn wanted() -> bool {
+    WANTED.get()
+}
+
 /// Whether `bvid` is the one being heard: coming back to its page must not restart the queue.
 pub fn hearing(bvid: &str) -> bool {
     NOW.with_borrow(|slot| slot.as_deref() == Some(bvid))
@@ -320,8 +342,9 @@ fn show_current() {
                     let _ = crate::ui::set_text(&root, "Song", &card.title);
                     let _ = crate::ui::set_text(&root, "Who", &format!("{} · 队列 {left} 首", card.owner.name));
                     if let Ok(image) = crate::ui::named::<crate::xaml::IImage>(&root, "Cover") {
-                        let covers = crate::ui::rows::Covers::default();
-                        let _ = covers.show(&image, &card.cover, 240);
+                        COVERS.with(|covers| {
+                            let _ = covers.show(&image, &card.cover, 480);
+                        });
                     }
                 }
                 None => {
@@ -391,7 +414,7 @@ const WINDOW: &str = r##"<Grid xmlns="http://schemas.microsoft.com/winfx/2006/xa
   <Grid Grid.Row="1" Margin="24,0,24,24">
     <Grid.ColumnDefinitions><ColumnDefinition Width="*" /><ColumnDefinition x:Name="QueueColumn" Width="340" /></Grid.ColumnDefinitions>
     <StackPanel VerticalAlignment="Center" HorizontalAlignment="Center" MaxWidth="560">
-      <Border Width="300" Height="300" HorizontalAlignment="Center" Background="#1c1c1c">
+      <Border Width="340" Height="191" HorizontalAlignment="Center" Background="#1c1c1c">
         <Image x:Name="Cover" Stretch="UniformToFill" />
       </Border>
       <TextBlock x:Name="Song" Margin="0,22,0,0" FontSize="20" FontWeight="SemiBold" TextAlignment="Center"
@@ -418,9 +441,11 @@ const WINDOW: &str = r##"<Grid xmlns="http://schemas.microsoft.com/winfx/2006/xa
                 Foreground="#0050EF" FontSize="14" VerticalAlignment="Center" />
       </StackPanel>
     </StackPanel>
+    <!-- The way back sits in the main column: the queue column is what folds to nothing, and a
+         button in it would fold with it and never be hit again. -->
     <Button x:Name="Unfold" Content="‹" HorizontalAlignment="Right" VerticalAlignment="Top"
             Background="Transparent" BorderThickness="0" Foreground="#A6A6A6" FontSize="16" Padding="8,0"
-            Visibility="Collapsed" Grid.Column="1" />
+            Visibility="Collapsed" />
     <Grid x:Name="QueuePane" Grid.Column="1" Margin="24,0,0,0">
       <Grid.RowDefinitions><RowDefinition Height="Auto" /><RowDefinition Height="*" /></Grid.RowDefinitions>
       <Grid>
@@ -446,6 +471,13 @@ thread_local! {
     /// When the bar was last dragged: the clock leaves it alone for a while after, or it
     /// would pull the thumb back under the pointer.
     static DRAGGED: std::cell::Cell<u64> = const { std::cell::Cell::new(0) };
+    /// The mode the queue is in, as last read: the clock shows it without asking the store
+    /// again every half second.
+    static MODE: std::cell::Cell<Option<PlaylistMode>> = const { std::cell::Cell::new(None) };
+    /// The pictures the window and the panel show. They are held here, as on a page of their
+    /// own: dropped with the call that asked for them, the sharp copy could never be handed
+    /// over and the rough one would stay on screen.
+    static COVERS: crate::ui::rows::Covers = crate::ui::rows::Covers::default();
 }
 
 /// Turns the window into the player.
@@ -478,6 +510,8 @@ pub fn open_window() -> Result<()> {
         keep(revoker);
     }
     fill_window();
+    MODE.set(None);
+    read_mode();
     tick();
     Ok(())
 }
@@ -511,6 +545,7 @@ pub fn close_window() {
     // detach inside `stop` finds no window and does nothing.
     detach();
     WINDOW_ROOT.with_borrow_mut(|slot| *slot = None);
+    MODE.set(None);
     let _ = shell.immersive(false);
     let heard = NOW.with_borrow(Clone::clone);
     let started = STARTED.with_borrow_mut(|slot| slot.take());
@@ -566,8 +601,9 @@ fn fill_window() {
                 let _ = crate::ui::set_text(&root, "Song", &card.title);
                 let _ = crate::ui::set_text(&root, "Who", &card.owner.name);
                 if let Ok(image) = crate::ui::named::<crate::xaml::IImage>(&root, "Cover") {
-                    let covers = crate::ui::rows::Covers::default();
-                    let _ = covers.show(&image, &card.cover, 300);
+                    COVERS.with(|covers| {
+                        let _ = covers.show(&image, &card.cover, 680);
+                    });
                 }
             }
             paint_queue(&root, &queued, now.as_ref().map(|card| card.bvid.clone()));
@@ -670,10 +706,15 @@ fn cycle_mode() {
             PlaylistMode::Shuffle => PlaylistMode::Sequential,
         };
         let done = core.services.listening.set_mode(next);
+        // 相关推荐 is always in order: asking for another mode there leaves it as it was.
+        let after = core.services.listening.mode().unwrap_or(now);
         crate::ui::post(&dispatcher, move || {
             if done.is_err() {
                 toast("模式没能改");
+            } else if after == now {
+                toast("相关推荐按顺序播放");
             }
+            MODE.set(Some(after));
             paint();
         });
     });
@@ -692,7 +733,9 @@ fn mode_label(mode: PlaylistMode) -> &'static str {
 /// Keeps the clock and the progress bar up to date.
 fn paint() {
     let Some(root) = WINDOW_ROOT.with_borrow(Clone::clone) else { return };
-    show_mode();
+    if let Some(mode) = MODE.get() {
+        write_mode(&root, mode);
+    }
     let Some(player) = sound() else { return };
     let Ok(session) = media::session_of(&player) else { return };
     let at = session.Position().map(|p| p.duration as f64 / 10_000_000.0).unwrap_or(0.0);
@@ -723,16 +766,24 @@ fn paint() {
     }
 }
 
-/// Says which mode the queue is in.
-fn show_mode() {
+/// Writes the mode on its button: it is a button, so its content, not a TextBlock's text.
+fn write_mode(root: &crate::xaml::IFrameworkElement, mode: PlaylistMode) {
+    let Ok(value) = crate::xaml::PropertyValue::CreateString(mode_label(mode)) else { return };
+    if let Ok(button) = crate::ui::named::<crate::xaml::IContentControl>(root, "Mode") {
+        let _ = button.SetContent(&value);
+    }
+}
+
+/// Reads the mode once and shows it.
+fn read_mode() {
     let Some(shell) = shell() else { return };
     let Some(backend) = shell.backend.get().cloned() else { return };
     let (dispatcher, core) = (shell.dispatcher.clone(), backend.clone());
     backend.spawn(async move {
         let Ok(mode) = core.services.listening.mode() else { return };
         crate::ui::post(&dispatcher, move || {
-            let Some(root) = WINDOW_ROOT.with_borrow(Clone::clone) else { return };
-            let _ = crate::ui::set_text(&root, "Mode", mode_label(mode));
+            MODE.set(Some(mode));
+            paint();
         });
     });
 }

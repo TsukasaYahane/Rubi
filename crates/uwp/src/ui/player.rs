@@ -1856,7 +1856,11 @@ fn play(source: &MediaSource) -> Result<MediaPlaybackSession> {
     if page().is_some_and(|p| p.feed) {
         player.cast::<IMediaPlayer>()?.SetIsLoopingEnabled(true)?;
     }
-    player.cast::<IMediaPlayer>()?.Play()?;
+    // Listening is on, or on its way: the sound is its, and this one arriving later would talk
+    // over it.
+    if !crate::ui::listening::wanted() {
+        player.cast::<IMediaPlayer>()?.Play()?;
+    }
     let session = player.cast::<IMediaPlayer3>()?.PlaybackSession()?;
     apply_speed(&player);
     let start = NEXT_START.take().filter(|(bvid, _)| page().is_some_and(|p| &p.bvid == bvid));
