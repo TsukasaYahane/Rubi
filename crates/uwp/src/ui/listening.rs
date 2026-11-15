@@ -316,13 +316,18 @@ const WINDOW: &str = r##"<Grid xmlns="http://schemas.microsoft.com/winfx/2006/xa
 </Grid>"##;
 
 thread_local! {
-    /// The window on show, while it is.
+    /// The window on show, while it is, and the page it took the place of.
     static WINDOW_ROOT: RefCell<Option<crate::xaml::IFrameworkElement>> = const { RefCell::new(None) };
+    static BEFORE: RefCell<Option<crate::xaml::IFrameworkElement>> = const { RefCell::new(None) };
 }
 
 /// Turns the window into the player.
 pub fn open_window() -> Result<()> {
     let Some(shell) = shell() else { return Ok(()) };
+    // What was on show is put back when the window is given back.
+    if let Ok(previous) = shell.current_page() {
+        BEFORE.with_borrow_mut(|slot| *slot = Some(previous));
+    }
     let root = crate::ui::load(WINDOW)?;
     shell.set_page(&root)?;
     shell.immersive(true)?;
@@ -359,6 +364,12 @@ pub fn close_window() {
     let Some(shell) = shell() else { return };
     WINDOW_ROOT.with_borrow_mut(|slot| *slot = None);
     let _ = shell.immersive(false);
+    // The page that was there before comes back: showing the player again would rebuild it, and
+    // the window content would keep the listening one.
+    if let Some(previous) = BEFORE.with_borrow_mut(|slot| slot.take()) {
+        let _ = shell.set_page(&previous);
+        return;
+    }
     if let Some((_, bvid)) = HEARD.with_borrow(Clone::clone) {
         crate::ui::player::show(&bvid, "", "");
     }
