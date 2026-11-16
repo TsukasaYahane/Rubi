@@ -212,10 +212,27 @@ fn play(settings: &Value) -> Result<IFrameworkElement> {
         row("默认清晰度", "打开视频时使用；片源没有时自动降低", &picks("Quality", &labels)),
         toggle("Blur", "窗口失焦时暂停", "切到其他窗口时暂停视频，切回来继续", prefs.pause_on_blur),
         toggle("Keys", "键盘快捷键", "空格暂停，左右快进，F 全屏，D 弹幕", prefs.shortcuts),
+        row("缓存位置", "离线缓存下载完成后搬到这里；改完要重启一次", &place_row("CacheWhere", "PickCache")),
+        row("导出位置", "缓存完成后导出到这里；没选就放在缓存位置下的视频 / 音频子目录", &place_row("ExportWhere", "PickExport")),
+        row(
+            "文件系统权限",
+            "允许后 Rubi 才能读写你选的目录；不给就只能用应用自己的目录，缓存会留一份在这里",
+            &button_row("AccessWhere", "PickAccess"),
+        ),
     ]
     .concat();
     let root = load(&page(Category::Play, &rows))?;
     mark(&root, "Quality", labels.len(), picked)?;
+    let _ = set_text(&root, "CacheWhere", &place_text(Place::Cache));
+    let _ = set_text(&root, "ExportWhere", &place_text(Place::Exports));
+    let _ = set_text(
+        &root,
+        "AccessWhere",
+        if crate::state::access::granted() { "已允许" } else { "未允许" },
+    );
+    on_click(&root, "PickCache", || pick_place(Place::Cache, "CacheWhere"))?;
+    on_click(&root, "PickExport", || pick_place(Place::Exports, "ExportWhere"))?;
+    on_click(&root, "PickAccess", crate::state::access::open_settings)?;
     for (at, (qn, _)) in QUALITIES.iter().enumerate() {
         let (shown, qn) = (root.clone(), *qn);
         on_click(&root, &format!("Quality{at}"), move || {
@@ -226,6 +243,103 @@ fn play(settings: &Value) -> Result<IFrameworkElement> {
     on_toggle(&root, "Blur", |on| change_prefs(|p| p.pause_on_blur = on))?;
     on_toggle(&root, "Keys", |on| change_prefs(|p| p.shortcuts = on))?;
     Ok(root)
+}
+
+/// A row showing where something goes, with the button that changes it.
+fn place_row(text_name: &str, button_name: &str) -> String {
+    format!(
+        r##"<StackPanel Orientation="Horizontal" VerticalAlignment="Center">
+        <TextBlock x:Name="{text_name}" FontSize="12" VerticalAlignment="Center" MaxWidth="300"
+                   TextTrimming="CharacterEllipsis"
+                   Foreground="{{ThemeResource SystemControlForegroundBaseMediumBrush}}" />
+        <Button x:Name="{button_name}" Content="选择" Margin="10,0,0,0" />
+      </StackPanel>"##
+    )
+}
+
+/// A line whose note says the state of something, with a button that opens where it is set.
+fn button_row(text_name: &str, button_name: &str) -> String {
+    format!(
+        r##"<StackPanel Orientation="Horizontal" VerticalAlignment="Center">
+        <TextBlock x:Name="{text_name}" FontSize="12" VerticalAlignment="Center" MaxWidth="300"
+                   TextTrimming="CharacterEllipsis"
+                   Foreground="{{ThemeResource SystemControlForegroundBaseMediumBrush}}" />
+        <Button x:Name="{button_name}" Content="打开设置" Margin="10,0,0,0" />
+      </StackPanel>"##
+    )
+}
+
+/// Which of the two places is meant.
+#[derive(Debug, Clone, Copy)]
+enum Place {
+    /// Where 离线缓存 keeps its files.
+    Cache,
+    /// Where a finished copy is written out.
+    Exports,
+}
+
+/// Where a place is, as things stand.
+fn place_text(place: Place) -> String {
+    let path = match place {
+        Place::Cache => crate::state::exports::download_path(),
+        Place::Exports => crate::state::exports::folder_path(),
+    };
+    path.unwrap_or_else(|| "未选".to_owned())
+}
+
+/// Asks for a place, and keeps it for the next run. The picker needs the UI thread to keep
+/// running, so the answer comes back as an event: waiting on it there would stop the message
+/// pump and the window would never be answered.
+fn pick_place(place: Place, text_name: &'static str) {
+    let asked = (|| {
+        let picker = crate::xaml::FolderPicker::new()?;
+        picker.FileTypeFilter()?.Append(&windows_core::HSTRING::from("*"))?;
+        picker.PickSingleFolderAsync()
+    })();
+    let operation = match asked {
+        Ok(operation) => operation,
+        Err(problem) => {
+            crate::ui::shell::toast(&format!("选不了：{problem}"));
+            return;
+        }
+    };
+    // What the callback touches it reaches through the thread that is waiting for it: the text
+    // and the toast belong on the UI thread whichever thread Windows answers on.
+    let dispatcher = shell().map(|shell| shell.dispatcher.clone());
+    let handler = windows_future::AsyncOperationCompletedHandler::new(
+        move |operation: windows_core::Ref<windows_future::IAsyncOperation<crate::xaml::StorageFolder>>,
+              _: windows_future::AsyncStatus| {
+            let Ok(operation) = operation.ok() else { return Ok(()) };
+            let Ok(folder) = operation.GetResults() else { return Ok(()) };
+            let kept = match place {
+                Place::Cache => crate::state::exports::keep_download_folder(&folder),
+                Place::Exports => crate::state::exports::keep_folder(&folder),
+            };
+            let Some(dispatcher) = &dispatcher else { return Ok(()) };
+            match kept {
+                Ok(()) => crate::ui::post(dispatcher, move || {
+                    if let Some(shell) = shell()
+                        && let Ok(shown) = shell.current_page()
+                    {
+                        let _ = set_text(&shown, text_name, &place_text(place));
+                    }
+                    crate::ui::shell::toast(match place {
+                        // The core takes its folder when it opens: this one waits for a restart.
+                        Place::Cache => "缓存位置已改，重启 Rubi 后生效",
+                        Place::Exports => "导出位置已改",
+                    });
+                }),
+                Err(problem) => {
+                    let said = problem.message().to_string();
+                    crate::ui::post(dispatcher, move || crate::ui::shell::toast(&format!("记不住这个位置：{said}")));
+                }
+            }
+            Ok(())
+        },
+    );
+    if let Err(problem) = operation.SetCompleted(&handler) {
+        crate::ui::shell::toast(&format!("选不了：{problem}"));
+    }
 }
 
 fn rule_rows(rules: &[Rule], toggles: &Value) -> String {

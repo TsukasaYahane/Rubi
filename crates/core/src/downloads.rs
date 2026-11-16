@@ -41,10 +41,21 @@ impl ExportFormat {
     }
 }
 
+/// Which of a video's streams a copy takes.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum Streams {
+    /// Picture and sound.
+    #[default]
+    Both,
+    /// The sound alone: half the bytes, and all an audio export needs.
+    AudioOnly,
+}
+
 /// Where a finished download's streams are.
 #[derive(Debug, Clone)]
 pub struct LocalCopy {
-    pub video: PathBuf,
+    /// `None` for a copy that took the sound alone.
+    pub video: Option<PathBuf>,
     /// `None` for the rare stream that carries its own sound.
     pub audio: Option<PathBuf>,
 }
@@ -78,18 +89,28 @@ struct Inner {
     next_id: AtomicU64,
     /// Bytes written so far by running downloads (the store is updated when one stops).
     live: Mutex<HashMap<String, u64>>,
+    /// A folder outside the app that finished copies were moved to, and are looked for in:
+    /// a packaged app cannot write there itself, so the files are carried over.
+    mirror: Mutex<Option<PathBuf>>,
 }
 
 fn lock<T>(m: &Mutex<T>) -> std::sync::MutexGuard<'_, T> {
     m.lock().unwrap_or_else(|e| e.into_inner())
 }
 
+/// Copies `from` to `to`, saying which path could not be written when one cannot: an earlier
+/// attempt's file is in the way otherwise, and Windows answers that with a bare number.
+async fn copy_out(from: &Path, to: &Path) -> Result<()> {
+    let _ = tokio::fs::remove_file(to).await;
+    tokio::fs::copy(from, to).await.map_err(|e| CoreError::Invalid(format!("写不进 {}：{e}", to.display())))?;
+    Ok(())
+}
+
 /// A title as a file name: what Windows refuses becomes underscores, and a long one is cut
 /// short, so the write cannot fail on a character the title happened to hold.
 fn file_stem(title: &str) -> String {
     let refused = r#"\/:*?"<>|"#;
-    let cleaned: String =
-        title.chars().map(|c| if refused.contains(c) || c.is_control() { '_' } else { c }).collect();
+    let cleaned: String = title.chars().map(|c| if refused.contains(c) || c.is_control() { '_' } else { c }).collect();
     let name: String = cleaned.trim().trim_matches('.').chars().take(80).collect();
     if name.is_empty() { "rubi".to_owned() } else { name }
 }
@@ -110,8 +131,16 @@ impl Downloads {
                 tasks: Mutex::default(),
                 next_id: AtomicU64::new(1),
                 live: Mutex::default(),
+                mirror: Mutex::default(),
             }),
         }
+    }
+
+    /// Names a folder outside the app that finished copies are moved to, and looked for in.
+    /// A packaged app cannot write there while it downloads, so the files are carried over and
+    /// the app's own copy is dropped; this is where the rest of the app then finds them.
+    pub fn set_mirror(&self, root: Option<PathBuf>) {
+        *lock(&self.inner.mirror) = root;
     }
 
     /// Every download, newest first, with live progress for the running ones.
@@ -126,9 +155,10 @@ impl Downloads {
         Ok(all)
     }
 
-    /// Starts (or resumes) copying `bvid` at quality `qn`. Must be called inside the runtime.
-    /// Starting one that is already running (or starting) does nothing.
-    pub async fn start(&self, bvid: &str, qn: u32) -> Result<()> {
+    /// Starts (or resumes) copying `bvid` at quality `qn`, taking `streams` of it. Must be
+    /// called inside the runtime. Starting one that is already running (or starting) does
+    /// nothing.
+    pub async fn start(&self, bvid: &str, qn: u32, streams: Streams) -> Result<()> {
         let id = self.inner.next_id.fetch_add(1, Ordering::Relaxed);
         {
             let mut tasks = lock(&self.inner.tasks);
@@ -147,7 +177,7 @@ impl Downloads {
         let inner = self.inner.clone();
         let key = bvid.to_owned();
         let handle = tokio::spawn(async move {
-            let outcome = inner.run(&key, record.quality).await;
+            let outcome = inner.run(&key, record.quality, streams).await;
             inner.finish(&key, id, outcome);
         });
         if let Some(t) = lock(&self.inner.tasks).get_mut(bvid).filter(|t| t.id == id) {
@@ -197,25 +227,44 @@ impl Downloads {
     /// Stops it, waits for it to stop writing, and deletes its files and record.
     pub async fn remove(&self, bvid: &str) -> Result<()> {
         self.stop_task(bvid).await;
-        let folder = self.inner.folder(bvid);
-        match tokio::fs::remove_dir_all(&folder).await {
-            Ok(()) => {}
-            Err(e) if e.kind() == std::io::ErrorKind::NotFound => {}
-            Err(e) => return Err(e.into()),
+        let here = self.inner.folder(bvid);
+        // A finished copy may have been carried off already; it goes with the record, or the
+        // files would stay behind with nothing left to point at them.
+        let moved = lock(&self.inner.mirror).as_ref().and_then(|root| here.file_name().map(|name| root.join(name)));
+        for folder in std::iter::once(here).chain(moved) {
+            match tokio::fs::remove_dir_all(&folder).await {
+                Ok(()) => {}
+                Err(e) if e.kind() == std::io::ErrorKind::NotFound => {}
+                Err(e) => return Err(e.into()),
+            }
         }
         Ok(self.inner.store.remove_download(bvid)?)
     }
 
-    /// The files of a finished download.
+    /// The files of a finished download, here or wherever they were moved to.
     pub fn local(&self, bvid: &str) -> Result<Option<LocalCopy>> {
         let done = self.inner.store.download(bvid)?.is_some_and(|d| d.state == DownloadState::Done);
         if !done {
             return Ok(None);
         }
-        let folder = self.inner.folder(bvid);
-        let video = folder.join(VIDEO_FILE);
-        let audio = folder.join(AUDIO_FILE);
-        Ok(video.exists().then(|| LocalCopy { video, audio: audio.exists().then_some(audio) }))
+        Ok(self.files(bvid))
+    }
+
+    /// The files of a copy wherever they are, finished or not: a run that stopped one answer
+    /// short still leaves the streams on disk whole.
+    pub fn files(&self, bvid: &str) -> Option<LocalCopy> {
+        let here = self.inner.folder(bvid);
+        if let Some(copy) = self.inner.copy_in(&here) {
+            return Some(copy);
+        }
+        lock(&self.inner.mirror)
+            .as_ref()
+            .and_then(|root| here.file_name().and_then(|name| self.inner.copy_in(&root.join(name))))
+    }
+
+    /// The files still in the app's own folder, before anything has carried them off.
+    pub fn local_here(&self, bvid: &str) -> Result<Option<LocalCopy>> {
+        Ok(self.inner.copy_in(&self.inner.folder(bvid)))
     }
 
     /// Writes a finished copy out into `dir` as `format`, and says what it wrote. The streams
@@ -224,15 +273,36 @@ impl Downloads {
         if format == ExportFormat::Rubi {
             return Ok(Vec::new());
         }
-        let Some(copy) = self.local(bvid)? else {
+        let Some(copy) = self.files(bvid) else {
             return Err(CoreError::Invalid("这一条还没有缓存好".into()));
         };
+        let Some(source) = copy.video.as_ref().or(copy.audio.as_ref()).and_then(|p| p.parent()).map(Path::to_path_buf)
+        else {
+            return Err(CoreError::Invalid("这一条还没有缓存好".into()));
+        };
+        self.export_from(bvid, &source, dir, format).await
+    }
+
+    /// The same, for a copy whose streams are in `source` — a folder the caller found, rather
+    /// than one the core was told about.
+    pub async fn export_from(
+        &self,
+        bvid: &str,
+        source: &Path,
+        dir: &Path,
+        format: ExportFormat,
+    ) -> Result<Vec<PathBuf>> {
+        if format == ExportFormat::Rubi {
+            return Ok(Vec::new());
+        }
         let Some(record) = self.inner.store.download(bvid)? else {
             return Err(CoreError::Invalid("下载记录已删除".into()));
         };
+        let (picture, sound) = (source.join(VIDEO_FILE), source.join(AUDIO_FILE));
+        let video = picture.exists().then_some(picture);
+        let audio = sound.exists().then_some(sound);
         let stem = file_stem(&record.card.title);
         tokio::fs::create_dir_all(dir).await?;
-        let audio = copy.audio.clone();
         let written = match format {
             ExportFormat::Rubi => Vec::new(),
             ExportFormat::Audio => {
@@ -240,18 +310,27 @@ impl Downloads {
                     return Err(CoreError::Invalid("这一条没有音轨".into()));
                 };
                 let to = dir.join(format!("{stem}.m4a"));
-                tokio::fs::copy(from, &to).await?;
+                // The cached stream is fragmented, which ordinary players do not follow; the
+                // samples are gathered into one `moov` here, without decoding them.
+                let (from, into) = (from.to_path_buf(), to.clone());
+                tokio::task::spawn_blocking(move || crate::remux::m4a(&from, &into))
+                    .await
+                    .map_err(|e| CoreError::Invalid(e.to_string()))?
+                    .map_err(|e| CoreError::Invalid(format!("转成 m4a 失败：{e}")))?;
                 vec![to]
             }
             ExportFormat::Mp4 => {
+                let Some(picture) = video else {
+                    return Err(CoreError::Invalid("这一条只缓存了音频".into()));
+                };
                 // The streams are joined in one MP4 once the remux lands; until then each goes
                 // out on its own, named for what it holds.
                 let to = dir.join(format!("{stem}.mp4"));
-                tokio::fs::copy(&copy.video, &to).await?;
+                copy_out(&picture, &to).await?;
                 let mut written = vec![to];
                 if let Some(from) = audio {
                     let sound = dir.join(format!("{stem}.m4a"));
-                    tokio::fs::copy(from, &sound).await?;
+                    copy_out(&from, &sound).await?;
                     written.push(sound);
                 }
                 written
@@ -272,8 +351,17 @@ impl Downloads {
 }
 
 impl Inner {
-    fn folder(&self, bvid: &str) -> PathBuf {        // BV ids are letters and digits only; anything else is refused before it reaches a path.
+    fn folder(&self, bvid: &str) -> PathBuf {
+        // BV ids are letters and digits only; anything else is refused before it reaches a path.
         self.dir.join(bvid.chars().filter(char::is_ascii_alphanumeric).collect::<String>())
+    }
+
+    /// The two files in `folder`, if either is there.
+    fn copy_in(&self, folder: &Path) -> Option<LocalCopy> {
+        let (picture, sound) = (folder.join(VIDEO_FILE), folder.join(AUDIO_FILE));
+        let video = picture.exists().then_some(picture);
+        let audio = sound.exists().then_some(sound);
+        (video.is_some() || audio.is_some()).then_some(LocalCopy { video, audio })
     }
 
     /// Forgets the task reserved as `id`, unless a newer one took its place.
@@ -289,25 +377,41 @@ impl Inner {
         Ok(())
     }
 
-    async fn run(&self, bvid: &str, qn: u32) -> Result<(u64, u64)> {
+    async fn run(&self, bvid: &str, qn: u32, streams: Streams) -> Result<(u64, u64)> {
         self.set_state(bvid, DownloadState::Running)?;
+        // 412 means B站 refused the request: usually a stream address it no longer honours, so
+        // the whole attempt starts again with fresh ones rather than retrying the same urls.
+        match self.run_once(bvid, qn, streams).await {
+            Ok(done) => Ok(done),
+            Err(first) if first.to_string().contains("412") => {
+                tokio::time::sleep(std::time::Duration::from_millis(1_500)).await;
+                self.run_once(bvid, qn, streams).await
+            }
+            Err(first) => Err(first),
+        }
+    }
+
+    async fn run_once(&self, bvid: &str, qn: u32, streams: Streams) -> Result<(u64, u64)> {
         // Stream URLs expire, so every start asks for fresh ones.
         let playback = self.videos.playback(bvid, qn).await?;
         let (video, audio) = pick_streams(&playback.url);
-        let video = video.ok_or_else(|| CoreError::Invalid("这个视频没有可缓存的画面".into()))?;
+        let video = match streams {
+            Streams::Both => Some(video.ok_or_else(|| CoreError::Invalid("这个视频没有可缓存的画面".into()))?),
+            Streams::AudioOnly => None,
+        };
+        // A copy that has only a picture would be silent: the sound is always taken.
+        let audio = audio.ok_or_else(|| CoreError::Invalid("这个视频没有可缓存的音轨".into()))?;
         let seconds = playback.url.duration_ms / 1000;
         let estimate = |s: &Stream| s.bandwidth / 8 * seconds;
         let folder = self.folder(bvid);
         tokio::fs::create_dir_all(&folder).await?;
-
-        let audio_estimate = audio.map(estimate).unwrap_or_default();
-        let video_total =
-            self.fetch(bvid, video, &folder.join(VIDEO_FILE), 0, estimate(video) + audio_estimate).await?;
-        let audio_total = match audio {
-            Some(a) => self.fetch(bvid, a, &folder.join(AUDIO_FILE), video_total, video_total + audio_estimate).await?,
-            None => 0,
-        };
-        Ok((video_total + audio_total, video_total + audio_total))
+        let mut total = 0;
+        if let Some(video) = video {
+            total += self.fetch(bvid, video, &folder.join(VIDEO_FILE), 0, estimate(video) + estimate(audio)).await?;
+        }
+        let hint = total + estimate(audio);
+        total += self.fetch(bvid, audio, &folder.join(AUDIO_FILE), total, hint).await?;
+        Ok((total, total))
     }
 
     /// Copies one stream into `path`, resuming after what is there; tries the backup urls in
@@ -326,7 +430,16 @@ impl Inner {
 
     async fn fetch_from(&self, bvid: &str, url: &str, path: &Path, before: u64, total_hint: u64) -> Result<u64> {
         let have = tokio::fs::metadata(path).await.map(|m| m.len()).unwrap_or(0);
-        let mut body = self.media.open(url, have).await?;
+        let mut body = match self.media.open(url, have).await {
+            Ok(body) => body,
+            // 416: what is on disk is already all the server has. That is a finished copy, not a
+            // failure — a download asked for twice ends here.
+            Err(e) if have > 0 && e.to_string().contains("416") => {
+                self.update_total(bvid, before + have)?;
+                return Ok(have);
+            }
+            Err(e) => return Err(e.into()),
+        };
         let (mut file, mut written) = if body.resumed() {
             (tokio::fs::OpenOptions::new().append(true).open(path).await?, have)
         } else {
@@ -343,6 +456,11 @@ impl Inner {
             }
         }
         file.flush().await?;
+        // A stream that stops early is not a finished one: the file would be short, and every
+        // reader after this would take it for whole.
+        if written < size {
+            return Err(CoreError::Invalid(format!("下载不完整：{written} / {size}")));
+        }
         Ok(written)
     }
 
@@ -429,7 +547,7 @@ mod tests {
                     quality: 80,
                     accept: vec![],
                     video: vec![stream(80, "avc1", 8)],
-                    audio: vec![],
+                    audio: vec![stream(30280, "mp4a", 8)],
                 },
                 headers: vec![],
             })
@@ -471,7 +589,7 @@ mod tests {
         let dir = std::env::temp_dir().join(format!("rubi-dl-test-{}", std::process::id()));
         let d =
             Downloads::new(Arc::new(Fake), Arc::new(Fake), Arc::new(SqliteStore::in_memory().unwrap()), dir.clone());
-        let (a, b) = tokio::join!(d.start("BV1", 80), d.start("BV1", 80));
+        let (a, b) = tokio::join!(d.start("BV1", 80, Streams::Both), d.start("BV1", 80, Streams::Both));
         a.unwrap();
         b.unwrap();
         for _ in 0..200 {
@@ -481,16 +599,36 @@ mod tests {
             tokio::time::sleep(std::time::Duration::from_millis(10)).await;
         }
         let copy = d.local("BV1").unwrap().expect("finished");
-        assert_eq!(std::fs::read(&copy.video).unwrap(), b"abcdef", "written once, not twice");
+        let picture = copy.video.clone().expect("a picture");
+        assert_eq!(std::fs::read(&picture).unwrap(), b"abcdef", "written once, not twice");
         // Out it goes, as it is: no re-encoding, so the bytes are the ones on disk.
         let out = dir.join("out");
         let written = d.export("BV1", &out, ExportFormat::Mp4).await.unwrap();
-        assert_eq!(written.len(), 1, "the fake has no sound track to carry over");
+        assert_eq!(written.len(), 2, "the picture and the sound, each on its own for now");
         assert_eq!(std::fs::read(&written[0]).unwrap(), b"abcdef");
         assert!(written[0].to_string_lossy().ends_with(".mp4"));
         d.remove("BV1").await.unwrap();
-        assert!(!copy.video.exists());
+        assert!(!picture.exists());
         assert!(d.list().unwrap().is_empty());
+        let _ = std::fs::remove_dir_all(dir);
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn audio_only_takes_the_sound_alone() {
+        let dir = std::env::temp_dir().join(format!("rubi-dl-audio-{}", std::process::id()));
+        let d =
+            Downloads::new(Arc::new(Fake), Arc::new(Fake), Arc::new(SqliteStore::in_memory().unwrap()), dir.clone());
+        d.start("BV2", 80, Streams::AudioOnly).await.unwrap();
+        for _ in 0..200 {
+            if d.local("BV2").unwrap().is_some() {
+                break;
+            }
+            tokio::time::sleep(std::time::Duration::from_millis(10)).await;
+        }
+        let copy = d.local("BV2").unwrap().expect("finished");
+        assert!(copy.video.is_none(), "the picture was never asked for");
+        assert!(copy.audio.is_some());
+        d.remove("BV2").await.unwrap();
         let _ = std::fs::remove_dir_all(dir);
     }
 }

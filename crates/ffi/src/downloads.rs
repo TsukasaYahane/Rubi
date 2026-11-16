@@ -1,5 +1,6 @@
 //! 离线缓存.
 
+use rubi_core::Streams;
 use rubi_model::DownloadState;
 
 use crate::{DownloadsService, FfiDownload, FfiDownloadState, FfiLocalCopy, FfiVideoCard, Res};
@@ -35,7 +36,7 @@ impl DownloadsService {
 
     /// Starts (or resumes) copying a video at quality `qn`.
     pub async fn download_start(&self, bvid: String, qn: u32) -> Res<()> {
-        Ok(self.downloads.start(&bvid, qn).await?)
+        Ok(self.downloads.start(&bvid, qn, Streams::Both).await?)
     }
 
     /// Stops a download; returns once it has stopped writing.
@@ -51,7 +52,7 @@ impl DownloadsService {
     /// The files of a finished download, for playing offline.
     pub fn download_local(&self, bvid: String) -> Res<Option<FfiLocalCopy>> {
         Ok(self.downloads.local(&bvid)?.map(|c| FfiLocalCopy {
-            video_path: c.video.to_string_lossy().into_owned(),
+            video_path: c.video.map(|v| v.to_string_lossy().into_owned()).unwrap_or_default(),
             audio_path: c.audio.map(|a| a.to_string_lossy().into_owned()),
         }))
     }

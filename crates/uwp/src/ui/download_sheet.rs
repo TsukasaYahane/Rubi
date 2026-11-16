@@ -123,7 +123,12 @@ fn start(bvid: &str) {
     let (dispatcher, core) = (shell.dispatcher.clone(), backend.clone());
     let bvid = bvid.to_owned();
     backend.spawn(async move {
-        let outcome = core.services.downloads.start(&bvid, qn).await;
+        // The sound alone is what an audio export keeps: the picture would be wasted bytes.
+        let streams = match format {
+            ExportFormat::Audio => rubi_core::Streams::AudioOnly,
+            _ => rubi_core::Streams::Both,
+        };
+        let outcome = core.services.downloads.start(&bvid, qn, streams).await;
         let said = match outcome {
             Ok(()) => format!("已加入缓存 · {}", format.label()),
             Err(problem) => format!("缓存没动：{problem}"),

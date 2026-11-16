@@ -220,6 +220,12 @@ Windows.UI.Xaml.Controls.IControlStatics
 Windows.UI.Xaml.IDependencyObject
 Windows.UI.Xaml.DependencyProperty
 Windows.System.Launcher
+Windows.UI.Popups.IMessageDialog
+Windows.UI.Popups.IMessageDialogFactory
+Windows.UI.Popups.IUICommand
+Windows.UI.Popups.IUICommandFactory
+Windows.UI.Popups.MessageDialog
+Windows.UI.Popups.UICommand
 Windows.System.ILauncherStatics
 Windows.UI.Xaml.Controls.IBorder
 Windows.UI.Xaml.Controls.Border
@@ -340,6 +346,12 @@ Windows.UI.Xaml.Input.IDoubleTappedRoutedEventArgs
 Windows.Storage.Pickers.FileSavePicker
 Windows.Storage.Pickers.IFileSavePicker
 Windows.Storage.Pickers.PickerLocationId
+Windows.Storage.Pickers.FolderPicker
+Windows.Storage.Pickers.FolderPicker::CreateInstance
+Windows.Storage.Pickers.IFolderPicker
+Windows.Storage.AccessCache.StorageApplicationPermissions
+Windows.Storage.AccessCache.IStorageApplicationPermissionsStatics
+Windows.Storage.AccessCache.IStorageItemAccessList
 Windows.ApplicationModel.DataTransfer.Clipboard
 Windows.Storage.Pickers.FileSavePicker::CreateInstance
 Windows.UI.Xaml.Input.IHoldingRoutedEventArgs
@@ -354,6 +366,10 @@ Windows.Graphics.Imaging.IBitmapEncoderStatics
 Windows.Graphics.Imaging.BitmapPixelFormat
 Windows.Graphics.Imaging.BitmapAlphaMode
 Windows.Storage.IStorageFile
+Windows.Storage.IStorageFileStatics
+Windows.Storage.IStorageFile::CopyAsync
+Windows.Storage.IStorageFile::OpenAsync
+Windows.Storage.NameCollisionOption
 Windows.Storage.FileAccessMode
 Windows.Storage.Streams.DataReader
 Windows.Storage.Streams.IDataReader

@@ -130,6 +130,8 @@ pub struct Prefs {
     pub single_column: bool,
     /// Light, dark, or what Windows is set to.
     pub theme: Skin,
+    /// The 文件系统 permission has been asked about; it is asked once, at the first start.
+    pub access_asked: bool,
 }
 
 impl Default for Prefs {
@@ -140,6 +142,7 @@ impl Default for Prefs {
             live_filter: LiveFilter::default(),
             single_column: false,
             theme: Skin::default(),
+            access_asked: false,
         }
     }
 }
@@ -154,6 +157,7 @@ impl Prefs {
             match key {
                 "words" => prefs.words = on,
                 "theme" => prefs.theme = Skin::from_code(value),
+                "access_asked" => prefs.access_asked = on,
                 "pause_on_blur" => prefs.pause_on_blur = on,
                 "shortcuts" => prefs.shortcuts = on,
                 "volume" | "live_volume" => prefs.volume = value.parse().map_or(DEFAULT_VOLUME, |v: u8| v.min(100)),
@@ -187,7 +191,7 @@ impl Prefs {
     pub fn to_text(self) -> String {
         let dm = self.danmaku;
         format!(
-            "words={} pause_on_blur={} shortcuts={} volume={} dm_area={} dm_speed={} dm_size={} dm_opacity={} dm_kinds={} live_filter={} theme={}",
+            "words={} pause_on_blur={} shortcuts={} volume={} dm_area={} dm_speed={} dm_size={} dm_opacity={} dm_kinds={} live_filter={} theme={} access_asked={}",
             u8::from(self.words),
             u8::from(self.pause_on_blur),
             u8::from(self.shortcuts),
@@ -198,7 +202,8 @@ impl Prefs {
             dm.opacity,
             dm.kinds(),
             u8::from(self.live_filter.gifts) | u8::from(self.live_filter.popups) << 1 | u8::from(self.live_filter.effects) << 2,
-            self.theme.code()
+            self.theme.code(),
+            u8::from(self.access_asked)
         )
     }
 }
@@ -240,7 +245,7 @@ mod tests {
         let live_filter = LiveFilter { gifts: false, popups: true, effects: false };
         let prefs = Prefs {
             words: true, pause_on_blur: false, shortcuts: true, volume: 35, danmaku, live_filter,
-            single_column: false, theme: Skin::Dark,
+            single_column: false, theme: Skin::Dark, access_asked: false,
         };
         assert_eq!(Prefs::parse(&prefs.to_text()), prefs);
         assert_eq!(Prefs::parse("live_volume=250").volume, 100);

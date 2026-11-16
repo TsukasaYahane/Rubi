@@ -253,6 +253,9 @@ pub fn start() -> Result<()> {
     shell.show_home()?;
 
     splitter::attach(&root, "RailBar", drag_rail, save_widths, reset_rail)?;
+    // Offline copies are always written inside the app's own folder: a packaged app can only
+    // write elsewhere through a folder it was handed, and the core writes with plain file calls.
+    // They are moved to the folder picked in 设置 as soon as they finish.
     std::thread::spawn(move || {
         let opened = Backend::open(&data_dir, session::load()).map(Arc::new);
         post(&dispatcher, move || core_opened(opened));
@@ -319,9 +322,15 @@ fn core_opened(opened: std::result::Result<Arc<Backend>, String>) {
     let Some(shell) = shell() else { return };
     match opened {
         Ok(backend) => {
+            // Finished copies are carried to the folder picked in 设置, and found there after.
+            backend.services.downloads.set_mirror(
+                crate::state::exports::download_path().map(std::path::PathBuf::from),
+            );
             let _ = shell.backend.set(backend);
             crate::ui::emote_text::read_common();
             crate::ui::inbox::watch_unread();
+            // Asked once, at the first start: the answer changes where caches can be written.
+            crate::state::access::ask_once();
             if let Some(home) = shell.home.borrow().as_ref() {
                 home.start();
             }

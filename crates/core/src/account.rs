@@ -36,11 +36,7 @@ impl LoginState for Account {
 }
 
 impl Account {
-    pub(crate) fn new(
-        http: Arc<dyn SessionHolder>,
-        auth: Arc<dyn AuthApi>,
-        kv: Arc<dyn KvRepo + Send + Sync>,
-    ) -> Self {
+    pub(crate) fn new(http: Arc<dyn SessionHolder>, auth: Arc<dyn AuthApi>, kv: Arc<dyn KvRepo + Send + Sync>) -> Self {
         Self { http, auth, kv }
     }
 

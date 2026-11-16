@@ -10,8 +10,8 @@ use rubi_api::{
     WatchLaterApi, WebAccount, WebArticle, WebAuth, WebChannels, WebComment, WebDanmaku, WebDynamic, WebEmote,
     WebEsports, WebFeed, WebLive, WebMedia, WebMessages, WebPgc, WebSearch, WebSeasons, WebSpace, WebStein, WebVideo,
 };
-use rubi_recommend::Source;
 use rubi_model::VideoCard;
+use rubi_recommend::Source;
 use rubi_store::{KvRepo, SqliteStore};
 
 use crate::account::Account;
