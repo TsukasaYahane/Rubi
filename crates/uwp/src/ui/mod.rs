@@ -83,6 +83,38 @@ pub fn post(dispatcher: &CoreDispatcher, job: impl FnOnce() + Send + 'static) {
     let _ = dispatcher.cast::<ICoreDispatcher>().and_then(|d| d.RunAsync(CoreDispatcherPriority::Normal, &handler));
 }
 
+/// Appends a line with a millisecond stamp to `probe.log` in the app's own folder: for judging
+/// where a page spends its time. The clock starts at the first call of a run.
+pub fn trace(what: &str) {
+    use std::io::Write;
+    thread_local! {
+        static AT: std::cell::Cell<Option<std::time::Instant>> = const { std::cell::Cell::new(None) };
+        static LOG: std::cell::RefCell<Option<std::path::PathBuf>> = const { std::cell::RefCell::new(None) };
+    }
+    let start = AT.with(|slot| {
+        if slot.get().is_none() {
+            slot.set(Some(std::time::Instant::now()));
+        }
+        slot.get().unwrap_or_else(std::time::Instant::now)
+    });
+    let path = LOG.with(|slot| {
+        slot.borrow_mut()
+            .get_or_insert_with(|| {
+                let folder = crate::xaml::ApplicationData::Current()
+                    .and_then(|data| data.LocalFolder())
+                    .and_then(|folder| folder.cast::<crate::xaml::IStorageItem>())
+                    .and_then(|item| item.Path())
+                    .map(|path| std::path::PathBuf::from(path.to_string()))
+                    .unwrap_or_else(|_| std::path::PathBuf::from("."));
+                folder.join("probe.log")
+            })
+            .clone()
+    });
+    if let Ok(mut file) = std::fs::OpenOptions::new().create(true).append(true).open(path) {
+        let _ = writeln!(file, "{:>7}ms {what}", start.elapsed().as_millis());
+    }
+}
+
 /// Runs `job` once the UI thread has dealt with input and layout, however often this is called
 /// before that: a stream of size changes costs one layout pass per frame, not one per change.
 pub fn soon(pending: &Rc<Cell<bool>>, job: impl Fn() + 'static) {

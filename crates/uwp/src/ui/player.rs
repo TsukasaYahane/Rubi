@@ -1183,12 +1183,28 @@ pub fn show_comment(bvid: &str, title: &str, focus: rubi_model::CommentRef) -> R
 }
 
 /// Opens the ordinary video page.
+/// Shows `name` when `on`, hides it when not, and does nothing where the page has no such control.
+fn show_or_hide(root: &IFrameworkElement, name: &str, on: bool) {
+    if let Ok(item) = named::<IUIElement>(root, name) {
+        let _ = item.SetVisibility(if on { Visibility::Visible } else { Visibility::Collapsed });
+    }
+}
+
+/// Shows a control that a page may not have: the 竖屏 feed carries a smaller set than the
+/// ordinary page, and a missing one is not a reason to stop opening it.
+fn show_if_there(root: &IFrameworkElement, name: &str) {
+    if let Ok(item) = named::<IUIElement>(root, name) {
+        let _ = item.SetVisibility(Visibility::Visible);
+    }
+}
+
 pub fn show(bvid: &str, title: &str, uploader: &str) -> Result<()> {
     open(false, bvid, title, uploader)
 }
 
 /// Opens a video, in the 竖屏推流 layout when `feed`.
 pub fn open(feed: bool, bvid: &str, title: &str, uploader: &str) -> Result<()> {
+    crate::ui::trace(&format!("open {bvid}"));
     let Some(shell) = shell() else { return Ok(()) };
     // An opened video feeds the local recommendation, as on Android.
     if let Some(backend) = shell.backend.get().cloned() {
@@ -1209,8 +1225,9 @@ pub fn open(feed: bool, bvid: &str, title: &str, uploader: &str) -> Result<()> {
             .replace("<!--controls-->", &control_bar::markup(place))
             .replace("<!--second-->", SECOND_ELEMENT),
     )?;
+    crate::ui::trace("xaml ready");
     named::<IUIElement>(&root, "SeekRow")?.SetVisibility(Visibility::Visible)?;
-    named::<IUIElement>(&root, "PlayPause")?.SetVisibility(Visibility::Visible)?;
+    show_if_there(&root, "PlayPause");
     set_text(&root, "Title", title)?;
     let opening =
         if uploader.is_empty() { "正在打开…".to_owned() } else { format!("{uploader} · 正在打开…") };
@@ -1263,8 +1280,13 @@ pub fn open(feed: bool, bvid: &str, title: &str, uploader: &str) -> Result<()> {
         seeks: Arc::default(),
         filling: Rc::default(),
     };
+    crate::ui::trace("page built");
     PAGE.with(|p| *p.borrow_mut() = Some(opened));
-    on_click(&root, "ActListen", || {
+    // Fitting the page out is best effort: the 竖屏 layout carries a smaller set of controls, and
+    // a name that is not there must not keep the page from being shown. Only `set_page` below
+    // has to work.
+    let _ = (|| -> Result<()> {
+    let _ = on_click(&root, "ActListen", || {
         if let Some(page) = page() {
             let bvid = page.bvid.clone();
             // Already hearing this one: just bring the window back, its queue untouched.
@@ -1273,20 +1295,20 @@ pub fn open(feed: bool, bvid: &str, title: &str, uploader: &str) -> Result<()> {
             }
             let _ = crate::ui::listening::open_window();
         }
-    })?;
-    on_click(&root, "ActCache", || {
+    });
+    let _ = on_click(&root, "ActCache", || {
         if let Some(page) = page()
             && let Err(problem) = crate::ui::download_sheet::open(&page.bvid)
         {
             crate::ui::shell::toast(&format!("打不开：{problem}"));
         }
-    })?;
-    on_click(&root, "ActDanmaku", toggle_danmaku)?;
-    on_click(&root, "Full", toggle_full)?;
-    on_click(&root, "WindowFull", toggle_window_full)?;
-    named::<IUIElement>(&root, "WindowFull")?.SetVisibility(Visibility::Visible)?;
-    on_click(&root, "Quality", choose_quality)?;
-    on_click(&root, "Pip", toggle_pip)?;
+    });
+    let _ = on_click(&root, "ActDanmaku", toggle_danmaku);
+    let _ = on_click(&root, "Full", toggle_full);
+    let _ = on_click(&root, "WindowFull", toggle_window_full);
+    show_if_there(&root, "WindowFull");
+    let _ = on_click(&root, "Quality", choose_quality);
+    let _ = on_click(&root, "Pip", toggle_pip);
     if !feed {
         for name in ["Info", "ActionRow", "MainScroll"] {
             keep(named::<IFrameworkElement>(&root, name)?.SizeChanged(
@@ -1297,9 +1319,9 @@ pub fn open(feed: bool, bvid: &str, title: &str, uploader: &str) -> Result<()> {
                 },
             )?);
         }
-        on_click(&root, "ActShare", choose_share)?;
-        on_click(&root, "MoreDetail", toggle_detail)?;
-        on_click(&root, "ResumeHint", resume)?;
+        let _ = on_click(&root, "ActShare", choose_share);
+        let _ = on_click(&root, "MoreDetail", toggle_detail);
+        let _ = on_click(&root, "ResumeHint", resume);
         on_click(&root, "AutoNext", || {
             AUTO_NEXT.set(!AUTO_NEXT.get());
             if let Some(page) = page() {
@@ -1323,11 +1345,11 @@ pub fn open(feed: bool, bvid: &str, title: &str, uploader: &str) -> Result<()> {
         })?;
         on_click(&root, "SeasonSub", toggle_subscribe)?;
     }
-    on_click(&root, "Speed", choose_speed)?;
-    on_click(&root, "PlaySettings", open_settings)?;
-    on_click(&root, "SendStyle", choose_send_style)?;
+    let _ = on_click(&root, "Speed", choose_speed);
+    let _ = on_click(&root, "PlaySettings", open_settings);
+    let _ = on_click(&root, "SendStyle", choose_send_style);
     for name in ["Speed", "PlaySettings"] {
-        named::<IUIElement>(&root, name)?.SetVisibility(Visibility::Visible)?;
+        show_if_there(&root, name);
     }
     set_speed_label(&root);
     show_send_style(&root);
@@ -1335,17 +1357,17 @@ pub fn open(feed: bool, bvid: &str, title: &str, uploader: &str) -> Result<()> {
         page.video.set_stretch(FIT.get());
     }
     hold_for_speed(&named::<IUIElement>(&root, "Video")?)?;
-    named::<IUIElement>(&root, "Pip")?.SetVisibility(Visibility::Visible)?;
-    on_click(&root, "UpLink", open_up)?;
-    on_click(&root, "PlayPause", toggle_play)?;
-    on_click(&root, "Prev", || queue::step(-1))?;
-    on_click(&root, "Next", || queue::step(1))?;
+    show_if_there(&root, "Pip");
+    let _ = on_click(&root, "UpLink", open_up);
+    let _ = on_click(&root, "PlayPause", toggle_play);
+    let _ = on_click(&root, "Prev", || queue::step(-1));
+    let _ = on_click(&root, "Next", || queue::step(1));
     if let Some(queued) = queue::view() {
         let shown = |on| if on { Visibility::Visible } else { Visibility::Collapsed };
-        named::<IUIElement>(&root, "Prev")?.SetVisibility(shown(queued.has_previous()))?;
-        named::<IUIElement>(&root, "Next")?.SetVisibility(shown(queued.has_next()))?;
+        show_or_hide(&root, "Prev", queued.has_previous());
+        show_or_hide(&root, "Next", queued.has_next());
     }
-    on_click(&root, "DanmakuSwitch", toggle_danmaku)?;
+    let _ = on_click(&root, "DanmakuSwitch", toggle_danmaku);
     keep(named::<IUIElement>(&root, "Video")?.Tapped(
         |_: Ref<windows_core::IInspectable>, args: Ref<TappedRoutedEventArgs>| {
             // A finger's tap is the bar's: it shows or hides it. The click ending a held press
@@ -1355,7 +1377,8 @@ pub fn open(feed: bool, bvid: &str, title: &str, uploader: &str) -> Result<()> {
             }
         },
     )?);
-    keep(named::<IRangeBase>(&root, "Seek")?.ValueChanged(
+    if let Ok(seek) = named::<IRangeBase>(&root, "Seek") {
+        keep(seek.ValueChanged(
         |_: Ref<windows_core::IInspectable>, args: Ref<RangeBaseValueChangedEventArgs>| {
             let value = args.ok().and_then(|a| a.cast::<IRangeBaseValueChangedEventArgs>()?.NewValue());
             if let Ok(value) = value {
@@ -1363,8 +1386,9 @@ pub fn open(feed: bool, bvid: &str, title: &str, uploader: &str) -> Result<()> {
             }
         },
     )?);
-    on_click(&root, "SendButton", send_danmaku)?;
-    on_enter(&root, "SendText", send_danmaku)?;
+    }
+    let _ = on_click(&root, "SendButton", send_danmaku);
+    let _ = on_enter(&root, "SendText", send_danmaku);
     let pending = Rc::new(Cell::new(false));
     let revoker = root.SizeChanged(move |sender: Ref<windows_core::IInspectable>, _: Ref<SizeChangedEventArgs>| {
         // From the sender: a handler holding its own source would keep the page for good.
@@ -1374,7 +1398,10 @@ pub fn open(feed: bool, bvid: &str, title: &str, uploader: &str) -> Result<()> {
         });
     })?;
     keep(revoker);
+        Ok(())
+    })();
     shell.set_page(&root)?;
+    crate::ui::trace("page set");
     apply_layout(&root)?;
 
     let Some(backend) = shell.backend.get().cloned() else { return Ok(()) };

@@ -275,8 +275,9 @@ pub struct CardGrid {
     note: RefCell<Option<Note>>,
     /// That summary as text: what a later page keeps, where the working note would otherwise stay.
     summary: RefCell<String>,
-    /// A held card added the video, so the click that follows it is ignored.
-    swallowed: Cell<bool>,
+    /// When a held card added the video: the click that follows it within a moment is ignored,
+    /// one that comes later is a click the user meant.
+    held: Cell<Option<std::time::Instant>>,
     /// The cells have been set for the grid's width.
     sized: Cell<bool>,
     /// The grid width and columns the cells were last set for.
@@ -303,7 +304,7 @@ impl CardGrid {
             said: RefCell::default(),
             note: RefCell::default(),
             summary: RefCell::default(),
-            swallowed: Cell::new(false),
+            held: Cell::new(None),
             sized: Cell::new(false),
             fitted: Cell::new((0.0, 0)),
             covers: Covers::default(),
@@ -357,7 +358,7 @@ impl CardGrid {
                     Some(Target::Video { bvid, .. }) => bvid,
                     _ => return,
                 };
-                shown.swallowed.set(true);
+                shown.held.set(Some(std::time::Instant::now()));
                 card_menu::add_to_default(&bvid);
             },
         )?);
@@ -573,17 +574,25 @@ impl CardGrid {
     }
 
     fn open_row(&self, at: usize) -> Result<()> {
-        // A hold that just added the video is not also a click.
-        if self.swallowed.replace(false) {
-            return Ok(());
+        // A hold that just added the video is not also a click; one from a while ago is not
+        // holding this click back.
+        if let Some(when) = self.held.get() {
+            self.held.set(None);
+            if when.elapsed() < std::time::Duration::from_millis(800) {
+                return Ok(());
+            }
         }
         let Some(card) = self.cards.borrow().get(at).cloned() else { return Ok(()) };
         if let Some(leaving) = self.leaving.borrow().as_ref() {
             leaving();
         }
-        match card.target {
+        let result = match card.target {
             Target::Video { bvid, owner } => feed::route(&bvid, &card.title, &owner),
             Target::Room { id, owner, uid } => live_room::open(id, &card.title, &owner, uid),
+        };
+        if let Err(problem) = &result {
+            crate::ui::trace(&format!("card did not open: {problem}"));
         }
+        result
     }
 }
