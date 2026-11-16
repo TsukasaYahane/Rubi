@@ -53,17 +53,17 @@ const LAYOUT: &str = r##"
                Visibility="Collapsed"
                Foreground="{ThemeResource SystemControlForegroundBaseMediumBrush}" />
     <!--refresh-->
-    <Button x:Name="Portrait" Grid.Column="4" Background="Transparent" BorderThickness="1" BorderBrush="#0050EF"
-            Foreground="#0050EF" Padding="8,2" Margin="8,0,0,0" VerticalAlignment="Center" MinWidth="0"
-            MinHeight="0" FontSize="13">
+    <Button x:Name="Portrait" Grid.Column="4" Background="Transparent" BorderThickness="0"
+            Foreground="#0050EF" Padding="8,0" Margin="8,0,0,0" VerticalAlignment="Center" MinWidth="0"
+            MinHeight="0" Height="30" FontSize="13">
       <StackPanel Orientation="Horizontal">
         <FontIcon Glyph="&#xE8EA;" FontSize="14" />
         <TextBlock x:Name="PortraitLabel" Text="竖屏" FontSize="13" Margin="6,0,0,0" />
       </StackPanel>
     </Button>
-    <Button x:Name="Columns" Grid.Column="5" Background="Transparent" BorderThickness="1" BorderBrush="#3A3A3A"
-            Padding="8,2" Margin="8,0,0,0" VerticalAlignment="Center" FontSize="13" MinWidth="0"
-            MinHeight="0" Visibility="Collapsed" />
+    <Button x:Name="Columns" Grid.Column="5" Background="Transparent" BorderThickness="0"
+            Padding="8,0" Margin="8,0,0,0" VerticalAlignment="Center" FontSize="13" MinWidth="0"
+            MinHeight="0" Height="30" Visibility="Collapsed" />
     <Button x:Name="Search" Grid.Column="3" Visibility="Collapsed" Background="Transparent" BorderThickness="0"
             Padding="8,2" VerticalAlignment="Center"><FontIcon Glyph="&#xE721;" FontSize="14" /></Button>
   </Grid>
