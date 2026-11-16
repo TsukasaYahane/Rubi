@@ -21,6 +21,9 @@ Windows.Media.Core.IMediaSourceStatics2
 Windows.Media.Core.MediaSource
 Windows.Media.Playback.IMediaPlaybackItem
 Windows.Media.Playback.IMediaPlaybackItemFactory
+Windows.Media.Playback.IMediaPlaybackItem2
+Windows.Media.Playback.IMediaItemDisplayProperties
+Windows.Media.Playback.MediaItemDisplayProperties
 Windows.Media.Playback.IMediaPlaybackSession
 Windows.Media.Playback.IMediaPlaybackSource
 Windows.Media.IMusicDisplayProperties

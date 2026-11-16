@@ -24,7 +24,10 @@ pub fn refresh() {
 }
 
 fn push(title: &str, artist: &str) {
-    let Ok(smtc) = SystemMediaTransportControls::GetForCurrentView() else { return };
+    let Ok(smtc) = SystemMediaTransportControls::GetForCurrentView() else {
+        crate::ui::trace("smtc: no controls");
+        return;
+    };
     let _ = smtc.SetIsEnabled(true);
     let Ok(updater) = smtc.DisplayUpdater() else { return };
     let _ = updater.SetType(MediaPlaybackType::Music);
@@ -32,7 +35,8 @@ fn push(title: &str, artist: &str) {
         let _ = props.SetTitle(title);
         let _ = props.SetArtist(artist);
     }
-    let _ = updater.Update();
+    let updated = updater.Update();
+    crate::ui::trace(&format!("smtc: {title} / {artist} -> {:?}", updated.is_ok()));
 }
 
 /// Playing or not, for the same panel.

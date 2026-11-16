@@ -71,6 +71,32 @@ pub fn player(source: &MediaSource) -> Result<MediaPlayer> {
     Ok(player)
 }
 
+/// As [`player`], with a title and artist for the system media panel. The panel reads them off
+/// the playback item, not off the view's own transport controls, so the item has to carry them.
+pub fn player_titled(source: &MediaSource, title: &str, artist: &str) -> Result<MediaPlayer> {
+    let player = MediaPlayer::new()?;
+    let item = crate::xaml::MediaPlaybackItem::Create(source)?;
+    if let Ok(display) = item.cast::<crate::xaml::IMediaPlaybackItem2>()
+        && let Ok(props) = display.GetDisplayProperties()
+        && let Ok(meta) = props.cast::<crate::xaml::IMediaItemDisplayProperties>()
+    {
+        // Type and properties have to agree, or the panel drops what was set.
+        let _ = meta.SetType(crate::xaml::MediaPlaybackType::Music);
+        if let Ok(music) = meta.MusicProperties() {
+            let _ = music.SetTitle(title);
+            let _ = music.SetArtist(artist);
+        }
+        let _ = display.ApplyDisplayProperties(&props);
+    }
+    player.cast::<IMediaPlayerSource2>()?.SetSource(&item.cast::<IMediaPlaybackSource>()?)?;
+    let revoker =
+        player.cast::<IMediaPlayer>()?.MediaOpened(|_: Ref<MediaPlayer>, _: Ref<IInspectable>| {
+            crate::ui::smtc::refresh();
+        })?;
+    crate::ui::keep(revoker);
+    Ok(player)
+}
+
 /// A silent player on `source`, not on screen, to take over from another. It plays by itself when
 /// `plays`.
 pub fn standby(source: &MediaSource, plays: bool) -> Result<MediaPlayer> {

@@ -1482,8 +1482,10 @@ pub fn open(feed: bool, bvid: &str, title: &str, uploader: &str) -> Result<()> {
 fn settle_buttons(root: &IFrameworkElement) -> Result<()> {
     let words = shell().is_some_and(|s| s.prefs().words);
     let plain = ["Back", "Full", "SendButton", "Prev", "Next", "Normal", "TabComments", "TabRelated", "TabQueue"];
-    let acting =
-        ["ActLike", "ActCoin", "ActFav", "ActShare", "ActLater", "ActDanmaku", "ActFollow", "ActComment", "ActListen"];
+    let acting = [
+        "ActLike", "ActCoin", "ActFav", "ActShare", "ActLater", "ActDanmaku", "ActFollow", "ActComment", "ActListen",
+        "ActCache",
+    ];
     for name in plain.into_iter().chain(acting) {
         if let Ok(button) = named::<IFrameworkElement4>(root, name) {
             button.SetAllowFocusOnInteraction(false)?;
@@ -1880,8 +1882,10 @@ fn report_failures(player: &MediaPlayer) -> Result<()> {
 }
 
 fn play(source: &MediaSource) -> Result<MediaPlaybackSession> {
-    let player = media::player(source)?;
-    if let Some(page) = page() {
+    let shown = page();
+    let (title, artist) = shown.as_ref().map(|p| (p.title.clone(), p.uploader.clone())).unwrap_or_default();
+    let player = media::player_titled(source, &title, &artist)?;
+    if let Some(page) = &shown {
         page.video.show(&player)?;
     }
     report_failures(&player)?;
