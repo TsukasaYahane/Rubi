@@ -1,6 +1,6 @@
 //! Building and letting go of a media source: what the video page and the live room share.
 
-use windows_core::{Error, HRESULT, Interface, Result};
+use windows_core::{Error, HRESULT, IInspectable, Interface, Ref, Result};
 
 use crate::xaml::{
     AdaptiveMediaSource, AdaptiveMediaSourceCreationResult, AdaptiveMediaSourceCreationStatus, DataWriter, HttpClient,
@@ -62,6 +62,12 @@ pub fn manifest_source(manifest: &str, headers: &[(String, String)]) -> Result<M
 pub fn player(source: &MediaSource) -> Result<MediaPlayer> {
     let player = MediaPlayer::new()?;
     player.cast::<IMediaPlayerSource2>()?.SetSource(&source.cast::<IMediaPlaybackSource>()?)?;
+    // Opening a source clears what the system media panel shows, so it is said again here.
+    let revoker =
+        player.cast::<IMediaPlayer>()?.MediaOpened(|_: Ref<MediaPlayer>, _: Ref<IInspectable>| {
+            crate::ui::smtc::refresh();
+        })?;
+    crate::ui::keep(revoker);
     Ok(player)
 }
 

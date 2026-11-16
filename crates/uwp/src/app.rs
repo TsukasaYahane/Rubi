@@ -1,12 +1,13 @@
 //! The application object. XAML owns the process; `OnLaunched` hands over to the shell.
 
-use windows_core::{Ref, Result, implement};
+use windows_core::{Interface, Ref, Result, implement};
 
 use crate::ui::shell;
 use crate::xaml::{
     Application, ApplicationInitializationCallback, ApplicationInitializationCallbackParams,
     CachedFileUpdaterActivatedEventArgs, FileActivatedEventArgs, FileOpenPickerActivatedEventArgs,
     FileSavePickerActivatedEventArgs, IActivatedEventArgs, IApplicationOverrides, IApplicationOverrides_Impl,
+    IProtocolActivatedEventArgs,
     LaunchActivatedEventArgs, SearchActivatedEventArgs, ShareTargetActivatedEventArgs, WindowCreatedEventArgs,
 };
 
@@ -30,7 +31,19 @@ impl IApplicationOverrides_Impl for App_Impl {
         shell::start()
     }
 
-    fn OnActivated(&self, _: Ref<IActivatedEventArgs>) -> Result<()> {
+    fn OnActivated(&self, args: Ref<IActivatedEventArgs>) -> Result<()> {
+        // `rubi://` comes in here rather than in OnLaunched: the link names the video to open.
+        // Anything else that reaches this is left to OnLaunched.
+        let Ok(args) = args.ok() else { return Ok(()) };
+        crate::ui::trace("activated");
+        // Only a protocol activation is taken here. Anything else — the media panel bringing the
+        // window back, say — is left alone: starting the shell again would put 首页 over the page
+        // the user was on.
+        if let Ok(protocol) = args.cast::<IProtocolActivatedEventArgs>()
+            && let Ok(link) = protocol.Uri().and_then(|uri| uri.AbsoluteUri())
+        {
+            crate::ui::shell::open_link(&link);
+        }
         Ok(())
     }
 

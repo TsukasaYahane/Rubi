@@ -263,6 +263,41 @@ pub fn start() -> Result<()> {
     Ok(())
 }
 
+thread_local! {
+    /// A link that came in before the shell could open it: `rubi://` arrives before the core does.
+    static PENDING_LINK: RefCell<Option<String>> = RefCell::new(None);
+}
+
+/// Opens a `rubi://` link — `rubi://video/BV1...` or any address naming a video — now if the
+/// core is up, or as soon as it is.
+pub fn open_link(link: &str) {
+    crate::ui::trace(&format!("link {link}"));
+    let Some(bvid) = bvid_in(link) else { return };
+    if let Some(shell) = shell()
+        && shell.backend.get().is_some()
+    {
+        let _ = crate::ui::player::show(&bvid, &bvid, "");
+        return;
+    }
+    PENDING_LINK.with_borrow_mut(|slot| *slot = Some(bvid));
+    // When a link is what started the app, nothing is up yet.
+    if shell().is_none() {
+        let _ = start();
+    }
+}
+
+/// The video a link names: the BV id it carries.
+fn bvid_in(link: &str) -> Option<String> {
+    let at = link.find("BV")?;
+    let id: String = link[at..].chars().take(12).collect();
+    (id.len() == 12 && id.chars().all(|c| c.is_ascii_alphanumeric())).then_some(id)
+}
+
+/// The link that came in before the core was ready, once it is.
+pub fn take_pending_link() -> Option<String> {
+    PENDING_LINK.with_borrow_mut(Option::take)
+}
+
 /// No system bar: the content reaches the top of the window, the caption buttons sit on it and
 /// `DragBar` moves the window.
 fn extend_into_title_bar(window: &IWindow, root: &IFrameworkElement) -> Result<()> {
@@ -331,6 +366,9 @@ fn core_opened(opened: std::result::Result<Arc<Backend>, String>) {
             crate::ui::inbox::watch_unread();
             // Asked once, at the first start: the answer changes where caches can be written.
             crate::state::access::ask_once();
+            if let Some(bvid) = take_pending_link() {
+                let _ = crate::ui::player::show(&bvid, &bvid, "");
+            }
             if let Some(home) = shell.home.borrow().as_ref() {
                 home.start();
             }

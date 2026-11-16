@@ -22,6 +22,7 @@ use crate::state::settings::{Prefs, quality_patch};
 use crate::ui::control_bar::{self, ControlBar};
 use crate::ui::danmaku::{Host, Overlay};
 use crate::ui::feed;
+use crate::ui::playing;
 use crate::ui::filling::Filling;
 use crate::ui::keep;
 use crate::ui::media;
@@ -282,14 +283,11 @@ static RUN: AtomicU64 = AtomicU64::new(0);
 
 thread_local! {
     /// The player of the page on show; on the UI thread.
-    static PLAYING: RefCell<Option<MediaPlayer>> = const { RefCell::new(None) };
     static PAUSED_FOR_BLUR: Cell<bool> = const { Cell::new(false) };
     /// The episode the next opening plays, if it is one.
     static NEXT_EPISODE: Cell<Option<(u64, u64)>> = const { Cell::new(None) };
     /// The comment the next video opens at, from a notice.
     static NEXT_FOCUS: Cell<Option<rubi_model::CommentRef>> = const { Cell::new(None) };
-    /// What `PLAYING` plays: closing it lets go of its connections.
-    static SOURCE: RefCell<Option<MediaSource>> = const { RefCell::new(None) };
     /// Where the next opening of a video starts, in 100 ns ticks: back from the small window.
     static NEXT_START: RefCell<Option<(String, i64)>> = const { RefCell::new(None) };
     /// The speed chosen, kept from video to video this run.
@@ -499,8 +497,8 @@ fn focus_takes(key: VirtualKey) -> bool {
 }
 
 fn playing_session() -> Option<IMediaPlaybackSession> {
-    PLAYING.with(|p| {
-        let session = p.borrow().as_ref()?.cast::<IMediaPlayer3>().and_then(|m| m.PlaybackSession()).ok()?;
+    playing::player().and_then(|player| {
+        let session = player.cast::<IMediaPlayer3>().and_then(|m| m.PlaybackSession()).ok()?;
         session.cast().ok()
     })
 }
@@ -519,11 +517,10 @@ fn pause(on: bool) {
     if !on {
         crate::ui::listening::stop();
     }
-    PLAYING.with(|p| {
-        if let Some(player) = p.borrow().as_ref().and_then(|m| m.cast::<IMediaPlayer>().ok()) {
-            let _ = if on { player.Pause() } else { player.Play() };
-        }
-    });
+    if let Some(player) = playing::player().and_then(|m| m.cast::<IMediaPlayer>().ok()) {
+        let _ = if on { player.Pause() } else { player.Play() };
+    }
+    crate::ui::smtc::state(!on);
 }
 
 /// Whether the video is playing, and how far into it, in seconds.
@@ -754,7 +751,7 @@ pub fn play_part(cid: u64, start_ms: Option<u64>) {
         media::close(Some(standby.player), Some(standby.source));
     }
     page.video.clear();
-    media::close(PLAYING.with(|p| p.borrow_mut().take()), SOURCE.with(|s| s.borrow_mut().take()));
+    playing::drop_it();
     page.overlay.borrow_mut().take();
     if let Ok(canvas) = named::<IPanel>(&page.root, "Danmaku") {
         let _ = canvas.Children().and_then(|c| c.Clear());
@@ -927,11 +924,9 @@ fn apply_speed(player: &MediaPlayer) {
 }
 
 fn apply_speed_now() {
-    PLAYING.with(|p| {
-        if let Some(player) = p.borrow().as_ref() {
-            apply_speed(player);
-        }
-    });
+    if let Some(player) = playing::player() {
+        apply_speed(&player);
+    }
 }
 
 fn speed_label(rate: f64) -> String {
@@ -1098,7 +1093,7 @@ fn toggle_pip() {
         pip::back();
         return;
     }
-    if PLAYING.with(|p| p.borrow().is_none()) {
+    if !playing::holding() {
         return;
     }
     if let Some(standby) = page.standby.borrow_mut().take() {
@@ -1107,11 +1102,8 @@ fn toggle_pip() {
     }
     // The page's elements let go before the small window takes the player.
     page.video.clear();
-    let (Some(player), Some(source)) =
-        (PLAYING.with(|p| p.borrow_mut().take()), SOURCE.with(|s| s.borrow_mut().take()))
-    else {
-        return;
-    };
+    let Some(held) = playing::take() else { return };
+    let (player, source) = (held.player, held.source);
     let _ = leave_full();
     toast("在小窗播放");
     let video = pip::Video { bvid: page.bvid.clone(), title: page.title.clone(), uploader: page.uploader.clone() };
@@ -1123,11 +1115,10 @@ fn toggle_pip() {
 /// Takes the picture back from the small window, if video `bvid` is on show and has none.
 pub fn take_back(bvid: &str, player: &MediaPlayer, source: &MediaSource) -> bool {
     let Some(page) = page().filter(|p| p.bvid == bvid) else { return false };
-    if PLAYING.with(|p| p.borrow().is_some()) || page.video.show(player).is_err() {
+    if playing::holding() || page.video.show(player).is_err() {
         return false;
     }
-    PLAYING.with(|p| *p.borrow_mut() = Some(player.clone()));
-    SOURCE.with(|s| *s.borrow_mut() = Some(source.clone()));
+    playing::put(player.clone(), source.clone());
     let _ = page.bar.apply_sound();
     apply_speed(player);
     true
@@ -1162,7 +1153,13 @@ pub fn leave() {
     if let Some(standby) = waiting {
         media::close(Some(standby.player), Some(standby.source));
     }
-    media::close(PLAYING.with(|p| p.borrow_mut().take()), SOURCE.with(|s| s.borrow_mut().take()));
+    // A video lives as long as its page does: leaving the page ends it, sound and all.
+    stop_playing();
+}
+
+/// Lets the player go: the sound stops. Called when the user leaves the video for good.
+pub fn stop_playing() {
+    playing::drop_it();
 }
 
 /// The page on show, for what lives beside it.
@@ -1229,6 +1226,7 @@ pub fn open(feed: bool, bvid: &str, title: &str, uploader: &str) -> Result<()> {
     named::<IUIElement>(&root, "SeekRow")?.SetVisibility(Visibility::Visible)?;
     show_if_there(&root, "PlayPause");
     set_text(&root, "Title", title)?;
+    crate::ui::smtc::now(title, uploader);
     let opening =
         if uploader.is_empty() { "正在打开…".to_owned() } else { format!("{uploader} · 正在打开…") };
     set_text(&root, "Meta", &opening)?;
@@ -1669,9 +1667,12 @@ fn take_over(page: &Page, standby: Standby, playing: bool) -> Result<()> {
     if playing {
         control.Play()?;
     }
-    let old = PLAYING.with(|p| p.borrow_mut().replace(player));
-    let old_source = SOURCE.with(|s| s.borrow_mut().replace(source));
-    page.video.switch(old, old_source)?;
+    let old = playing::put(player, source);
+    let (old_player, old_source) = match old {
+        Some(held) => (Some(held.player), Some(held.source)),
+        None => (None, None),
+    };
+    page.video.switch(old_player, old_source)?;
     page.bar.apply_sound()?;
     quality::show(&page.root, &offer)?;
     *page.offer.borrow_mut() = offer;
@@ -1724,12 +1725,10 @@ fn toggle_danmaku() {
 }
 
 fn set_sound(level: f64, muted: bool) {
-    PLAYING.with(|p| {
-        if let Some(player) = p.borrow().as_ref().and_then(|m| m.cast::<IMediaPlayer>().ok()) {
-            let _ = player.SetVolume(level);
-            let _ = player.SetIsMuted(muted);
-        }
-    });
+    if let Some(player) = playing::player().and_then(|m| m.cast::<IMediaPlayer>().ok()) {
+        let _ = player.SetVolume(level);
+        let _ = player.SetIsMuted(muted);
+    }
 }
 
 /// The hand moved the seek bar: follows it once it rests.
@@ -1811,11 +1810,9 @@ fn send_typed() -> Result<()> {
     if text.trim().is_empty() || cid == 0 {
         return Ok(());
     }
-    let position = PLAYING.with(|p| {
-        p.borrow().as_ref().and_then(|player| {
-            let session = player.cast::<IMediaPlayer3>().and_then(|m| m.PlaybackSession()).ok()?;
-            session.cast::<IMediaPlaybackSession>().and_then(|s| s.Position()).ok()
-        })
+    let position = playing::player().and_then(|player| {
+        let session = player.cast::<IMediaPlayer3>().and_then(|m| m.PlaybackSession()).ok()?;
+        session.cast::<IMediaPlaybackSession>().and_then(|s| s.Position()).ok()
     });
     let progress_ms = position.map_or(0, |t| (t.duration / 10_000) as u32);
     field.SetText("")?;
@@ -1903,8 +1900,7 @@ fn play(source: &MediaSource) -> Result<MediaPlaybackSession> {
     if let Some((_, at)) = start {
         let _ = session.cast::<IMediaPlaybackSession>()?.SetPosition(windows_time::TimeSpan { duration: at });
     }
-    PLAYING.with(|p| *p.borrow_mut() = Some(player));
-    SOURCE.with(|s| *s.borrow_mut() = Some(source.clone()));
+    playing::put(player, source.clone());
     if let Some(page) = page() {
         page.bar.apply_sound()?;
     }

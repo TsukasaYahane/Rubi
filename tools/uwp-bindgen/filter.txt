@@ -1,3 +1,5 @@
+Windows.ApplicationModel.Activation.ActivationKind
+Windows.ApplicationModel.Activation.IProtocolActivatedEventArgs
 Windows.ApplicationModel.Activation.LaunchActivatedEventArgs
 Windows.ApplicationModel.Core.CoreApplication
 Windows.ApplicationModel.Core.CoreApplicationView
@@ -9,6 +11,7 @@ Windows.Foundation.Collections.IVector
 Windows.Foundation.IAsyncAction
 Windows.Foundation.IPropertyValue
 Windows.Foundation.IPropertyValueStatics
+Windows.Foundation.IUriRuntimeClass
 Windows.Foundation.IUriRuntimeClassFactory
 Windows.Foundation.PropertyValue
 Windows.Foundation.Uri
@@ -20,6 +23,18 @@ Windows.Media.Playback.IMediaPlaybackItem
 Windows.Media.Playback.IMediaPlaybackItemFactory
 Windows.Media.Playback.IMediaPlaybackSession
 Windows.Media.Playback.IMediaPlaybackSource
+Windows.Media.IMusicDisplayProperties
+Windows.Media.ISystemMediaTransportControls
+Windows.Media.ISystemMediaTransportControlsStatics
+Windows.Media.ISystemMediaTransportControlsDisplayUpdater
+Windows.Media.MediaPlaybackStatus
+Windows.Media.MusicDisplayProperties
+Windows.Media.SystemMediaTransportControls
+Windows.Media.SystemMediaTransportControlsButton
+Windows.Media.SystemMediaTransportControlsButtonPressedEventArgs
+Windows.Media.SystemMediaTransportControlsDisplayUpdater
+Windows.Storage.Streams.IRandomAccessStreamReference
+Windows.Storage.Streams.RandomAccessStreamReference
 Windows.Media.Playback.IMediaPlayer
 Windows.Media.Playback.IMediaPlayer3
 Windows.Media.Playback.IMediaPlayerFailedEventArgs
