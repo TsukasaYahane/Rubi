@@ -38,7 +38,7 @@ const OFF_AIR_OPACITY: f64 = 0.45;
 const COVER_DECODE_WIDTH: i32 = 480;
 
 const GRID: &str = r##"<GridView xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
-        Padding="9,0,9,12" SelectionMode="None" IsItemClickEnabled="True">
+        Padding="9,0,9,12" SelectionMode="Single" IsItemClickEnabled="True">
   <GridView.ItemContainerTransitions><TransitionCollection /></GridView.ItemContainerTransitions>
   <GridView.ItemContainerStyle>
     <Style TargetType="GridViewItem">

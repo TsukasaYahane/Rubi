@@ -6,7 +6,7 @@ use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::Duration;
 
 use rubi_core::QrState;
-use windows_core::{Interface, Result};
+use windows_core::{IInspectable, Interface, Ref, Result};
 
 use crate::session;
 use crate::state::layout::WindowClass;
@@ -28,7 +28,10 @@ const DIM: Color = Color { a: 255, r: 0x76, g: 0x76, b: 0x76 };
 static RUN: AtomicU64 = AtomicU64::new(0);
 
 const HEAD: &str = r##"
-<Grid Margin="16,14">
+<Button x:Name="HeadCard" Background="Transparent" BorderThickness="0" Padding="0" Margin="16,14"
+        HorizontalAlignment="Stretch" HorizontalContentAlignment="Stretch"
+        VerticalContentAlignment="Center">
+<Grid>
   <Grid.ColumnDefinitions><ColumnDefinition Width="56" /><ColumnDefinition Width="*" /></Grid.ColumnDefinitions>
   <Grid Width="56" Height="56" Background="#0050EF">
     <TextBlock Text="R" FontSize="22" Foreground="White" HorizontalAlignment="Center" VerticalAlignment="Center" />
@@ -39,7 +42,8 @@ const HEAD: &str = r##"
     <TextBlock x:Name="Meta" FontSize="12" TextWrapping="Wrap"
                Foreground="{ThemeResource SystemControlForegroundBaseMediumBrush}" />
   </StackPanel>
-</Grid>"##;
+</Grid>
+</Button>"##;
 
 /// Side by side; `<!--head-->`, `<!--shelves-->` and `<!--cats-->` are filled in.
 const WIDE: &str = r##"
@@ -85,9 +89,42 @@ const ACCOUNT: &str = r##"
   <TextBlock Text="账号" FontSize="20" FontWeight="Light" />
   <TextBlock x:Name="Status" Margin="0,8,0,12" FontSize="14" TextWrapping="Wrap"
              Foreground="{ThemeResource SystemControlForegroundBaseMediumBrush}" />
+  <StackPanel Orientation="Horizontal" Margin="0,0,0,10">
+    <StackPanel.Resources>
+      <Style TargetType="Button">
+        <Setter Property="Background" Value="Transparent" />
+        <Setter Property="BorderThickness" Value="0" />
+        <Setter Property="Padding" Value="0,0,0,4" />
+        <Setter Property="Margin" Value="0,0,18,0" />
+        <Setter Property="FontSize" Value="20" />
+        <Setter Property="FontWeight" Value="Light" />
+      </Style>
+    </StackPanel.Resources>
+    <Button x:Name="WayQr" Content="扫码" /><Button x:Name="WayPwd" Content="账密" /><Button x:Name="WaySms" Content="手机号" />
+  </StackPanel>
   <ContentControl x:Name="Code" IsTabStop="False" HorizontalAlignment="Left" />
-  <Button x:Name="SignOut" Content="退出登录" Visibility="Collapsed" Background="Transparent" BorderThickness="0"
-          Padding="0,4" Foreground="#0050EF" />
+  <StackPanel x:Name="WayPwdPane" Visibility="Collapsed" Margin="0,0,0,8">
+    <TextBlock Text="账号" FontSize="12" Foreground="{ThemeResource SystemControlForegroundBaseMediumBrush}" />
+    <TextBox x:Name="User" FontSize="13" Margin="0,4,0,10" />
+    <TextBlock Text="密码" FontSize="12" Foreground="{ThemeResource SystemControlForegroundBaseMediumBrush}" />
+    <PasswordBox x:Name="Pass" FontSize="13" Margin="0,4,0,12" />
+    <Button x:Name="PwdGo" Content="登录" FontSize="13" Padding="26,8" HorizontalAlignment="Left"
+            Background="#0050EF" Foreground="White" BorderThickness="0" />
+  </StackPanel>
+  <StackPanel x:Name="WaySmsPane" Visibility="Collapsed" Margin="0,0,0,8">
+    <TextBlock Text="手机号" FontSize="12" Foreground="{ThemeResource SystemControlForegroundBaseMediumBrush}" />
+    <TextBox x:Name="Tel" FontSize="13" Margin="0,4,0,10" />
+    <TextBlock Text="验证码" FontSize="12" Foreground="{ThemeResource SystemControlForegroundBaseMediumBrush}" />
+    <Grid Margin="0,4,0,12">
+      <Grid.ColumnDefinitions><ColumnDefinition Width="120" /><ColumnDefinition Width="*" /></Grid.ColumnDefinitions>
+      <TextBox x:Name="SmsCode" FontSize="13" />
+      <Button x:Name="SmsSend" Content="获取验证码" Grid.Column="1" HorizontalAlignment="Left" Margin="12,0,0,0"
+              FontSize="12" Padding="12,6" Background="Transparent" BorderThickness="1" />
+    </Grid>
+    <Button x:Name="SmsGo" Content="登录" FontSize="13" Padding="26,8" HorizontalAlignment="Left"
+            Background="#0050EF" Foreground="White" BorderThickness="0" />
+  </StackPanel>
+
 </StackPanel>"##;
 
 fn cat_buttons() -> String {
@@ -105,7 +142,7 @@ fn shelf_buttons(narrow: bool) -> String {
     } else {
         ("", r##"BorderThickness="0""##)
     };
-    Shelf::ALL
+    let mut buttons: String = Shelf::ALL
         .iter()
         .enumerate()
         .map(|(at, shelf)| {
@@ -117,7 +154,13 @@ fn shelf_buttons(narrow: bool) -> String {
                 shelf.label()
             )
         })
-        .collect()
+        .collect();
+    buttons.push_str(
+        r##"<Button x:Name="SignOut" Content="退出登录" Visibility="Collapsed" Background="Transparent"
+             BorderThickness="0" Height="44" Padding="16,0" HorizontalAlignment="Stretch"
+             HorizontalContentAlignment="Left" Foreground="#0050EF" />"##,
+    );
+    buttons
 }
 
 fn layout(class: WindowClass) -> String {
@@ -138,6 +181,8 @@ struct Who {
     line: String,
     face_url: String,
     face: Option<BitmapImage>,
+    /// Whose space 个人空间 opens.
+    mid: u64,
 }
 
 impl Who {
@@ -294,8 +339,51 @@ fn open(category: Category) -> Result<()> {
     // These calls report success as an error here; none of them is worth refusing the page.
     let _ = shelf_on(&page.root, false);
     let _ = mark();
+    // The card at the top is a button: a plain panel takes a tap only if it has a background, and
+    // the run of that was a card nobody could press.
+    let _ = on_click(&page.root, "HeadCard", move || {
+        let known = WHO.with(|w| w.borrow().as_ref().map(|who| (who.mid, who.name.clone())));
+        match known {
+            Some((mid, name)) if mid != 0 => {
+                let _ = crate::ui::up::open(mid, &name);
+            }
+            _ => {
+                // A shelf may be filling the right column (离线缓存 and the rest); the ways in are
+                // not on screen then, so come back to 账号 first and show them there.
+                if SHELF.get().is_some() {
+                    back_from_shelf();
+                }
+                if let Some(page) = shown() {
+                    let _ = ways(&page.root, 0);
+                }
+            }
+        }
+    });
     let body = match (category, shell.backend.get()) {
-        (Category::Account, _) | (_, None) => load(ACCOUNT)?,
+        (Category::Account, _) | (_, None) => {
+            let account = load(ACCOUNT)?;
+            // Wired here, once per page: the controls on a rebuilt page are new elements, and a
+            // flag kept from the last one would leave them deaf.
+            for (at, name) in ["WayQr", "WayPwd", "WaySms"].iter().enumerate() {
+                let page = account.clone();
+                let _ = on_click(&account, name, move || {
+                    let _ = ways(&page, at);
+                });
+            }
+            let page = account.clone();
+            let _ = on_click(&account, "PwdGo", move || {
+                let _ = crate::ui::login_sheet::ask_password(&page);
+            });
+            let page = account.clone();
+            let _ = on_click(&account, "SmsSend", move || {
+                let _ = crate::ui::login_sheet::send_code(&page);
+            });
+            let page = account.clone();
+            let _ = on_click(&account, "SmsGo", move || {
+                let _ = crate::ui::login_sheet::sign_in(&page);
+            });
+            account
+        }
         (_, Some(backend)) => settings::build(category, backend)?,
     };
     if let Ok(host) = named::<IContentControl>(&page.root, "Body")
@@ -309,7 +397,7 @@ fn open(category: Category) -> Result<()> {
         }
     });
     if category == Category::Account {
-        on_click(&body, "SignOut", sign_out)?;
+        on_click(&page.root, "SignOut", sign_out)?;
         run_account(&body)?;
     }
     Ok(())
@@ -330,6 +418,7 @@ fn show_head() {
     } else if let Some(known) = backend.services.account.last_known() {
         // What was signed in last is drawn at once, before the network answers.
         let cached = Who {
+            mid: 0,
             name: known.name,
             line: known.line.clone(),
             face: Uri::CreateUri(&known.face)
@@ -447,6 +536,15 @@ impl Update {
     }
 }
 
+/// Writes an account away and rebuilds what was built for the old one — the path both the QR
+/// code and the login sheet take once a session comes back.
+pub(crate) fn account_saved(session: &rubi_core::Session) {
+    let _ = session::save(session);
+    library::forget();
+    reload_home();
+    let _ = show();
+}
+
 fn reload_home() {
     follow::forget();
     live::forget();
@@ -458,10 +556,22 @@ fn reload_home() {
 fn signed_in(body: &IFrameworkElement, name: &str, mid: u64) -> Result<()> {
     set_text(body, "Status", &format!("{name} · mid {mid} · 凭证保存在系统凭据库"))?;
     named::<IContentControl>(body, "Code")?.SetContent(None::<&windows_core::IInspectable>)?;
-    named::<IUIElement>(body, "SignOut")?.SetVisibility(Visibility::Visible)
+    // Signed in: the ways in step aside for the space itself, and 退出登录 moves to the rail foot.
+    for name in ["WayQr", "WayPwd", "WaySms", "WayPwdPane", "WaySmsPane"] {
+        let _ = crate::ui::shell::visible(body, name, false);
+    }
+    if let Some(page) = shown() {
+        crate::ui::shell::visible(&page.root, "SignOut", true)?;
+    }
+    WHO.with(|w| {
+        if let Some(who) = w.borrow_mut().as_mut() {
+            who.mid = mid;
+        }
+    });
+    Ok(())
 }
 
-fn sign_out() {
+pub(crate) fn sign_out() {
     let Some(shell) = shell() else { return };
     if let Some(backend) = shell.backend.get() {
         backend.services.account.logout();
@@ -472,6 +582,14 @@ fn sign_out() {
     SHELF.set(None);
     reload_home();
     let _ = show();
+}
+
+/// Shows one of the three ways in: the QR code, or one of the two forms.
+fn ways(root: &IFrameworkElement, at: usize) -> Result<()> {
+    for (index, name) in ["Code", "WayPwdPane", "WaySmsPane"].iter().enumerate() {
+        crate::ui::shell::visible(root, name, index == at)?;
+    }
+    Ok(())
 }
 
 /// The QR code, on white with its quiet zone, whatever the theme.

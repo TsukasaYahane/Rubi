@@ -17,9 +17,13 @@ rubi-core.workspace = true
 rubi-model.workspace = true
 rubi-store.workspace = true
 serde_json.workspace = true
+reqwest.workspace = true
+rsa = "0.9"
+rand = "0.8"
+base64 = "0.22"
 
 [target.'cfg(target_vendor = "uwp")'.dependencies]
-tokio = { workspace = true, features = ["rt-multi-thread", "time"] }
+tokio = { workspace = true, features = ["rt-multi-thread", "time", "net", "io-util"] }
 windows-collections = "0.100"
 windows-core = "0.100"
 windows-future = "0.100"

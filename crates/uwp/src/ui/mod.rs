@@ -2,7 +2,8 @@
 //! through [`post`] as plain data.
 
 pub mod article;
-pub mod card_grid;
+pub mod captcha;
+mod card_grid;
 pub mod card_menu;
 pub mod clip;
 pub mod comment_list;
@@ -21,6 +22,7 @@ pub mod frames;
 pub mod home;
 pub mod inbox;
 pub mod library;
+mod login_sheet;
 pub mod listening;
 pub mod live;
 pub mod live_extras;
@@ -52,6 +54,8 @@ pub mod share_card;
 pub mod share_friend;
 pub mod sharing;
 mod playing;
+mod update;
+mod update_sheet;
 pub mod shell;
 pub mod smtc;
 pub mod splitter;

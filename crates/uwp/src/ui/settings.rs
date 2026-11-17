@@ -464,10 +464,19 @@ fn on_weight(root: &IFrameworkElement, key: &'static str, backend: &Arc<Backend>
 }
 
 fn about() -> Result<IFrameworkElement> {
+    let version = format!("{} · {}", crate::ui::update::version(), crate::ui::update::channel());
     let rows = [
-        row("版本", env!("CARGO_PKG_VERSION"), ""),
+        row("版本", &version, ""),
+        row("检查更新", "商店版去商店更新，其他版本去 GitHub 下载", &action("CheckUpdate", "检查")),
         row("Rubi", "第三方哔哩哔哩客户端：过滤广告和推广，在本机计算推荐。与哔哩哔哩官方无关。", ""),
     ]
     .concat();
-    load(&page(Category::About, &rows))
+    let root = load(&page(Category::About, &rows))?;
+    on_click(&root, "CheckUpdate", || crate::ui::update::check(false))?;
+    Ok(root)
+}
+
+/// One button in the row's control slot.
+fn action(name: &str, label: &str) -> String {
+    format!(r##"<Button x:Name="{name}" Content="{label}" Style="{{StaticResource Pick}}" />"##)
 }

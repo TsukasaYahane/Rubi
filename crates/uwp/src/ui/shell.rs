@@ -3,7 +3,7 @@
 use std::cell::{Cell, OnceCell, RefCell};
 use std::rc::Rc;
 use std::sync::Arc;
-use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::time::Duration;
 
 use windows_core::{IInspectable, Interface, Ref, Result};
@@ -46,6 +46,8 @@ pub enum Tab {
 const TOAST_FOR: Duration = Duration::from_secs(2);
 /// Bumped by each toast: only the last one takes it away.
 static TOASTS: AtomicU64 = AtomicU64::new(0);
+/// Set once the update look has been taken, so it happens one time per run.
+static CHECKED: AtomicBool = AtomicBool::new(false);
 static PAGE_TURN: AtomicU64 = AtomicU64::new(0);
 
 const TABS: [(Tab, &str); 6] =
@@ -600,7 +602,12 @@ impl Shell {
         let Some(home) = home.as_ref() else { return Ok(()) };
         home.style()?;
         self.set_page(home.root())?;
-        self.mark_tab()
+        self.mark_tab()?;
+        // One look for a newer release per run, after the window is up.
+        if !CHECKED.swap(true, Ordering::Relaxed) {
+            crate::ui::update::check(true);
+        }
+        Ok(())
     }
 
     /// Lays the navigation out for the window's width.
@@ -663,7 +670,7 @@ impl Shell {
     }
 }
 
-fn visible(root: &IFrameworkElement, name: &str, on: bool) -> Result<()> {
+pub(crate) fn visible(root: &IFrameworkElement, name: &str, on: bool) -> Result<()> {
     named::<IUIElement>(root, name)?.SetVisibility(if on { Visibility::Visible } else { Visibility::Collapsed })
 }
 

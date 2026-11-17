@@ -5,6 +5,11 @@ Windows.ApplicationModel.ExtendedExecution.ExtendedExecutionReason
 Windows.ApplicationModel.ExtendedExecution.ExtendedExecutionRevokedReason
 Windows.ApplicationModel.ExtendedExecution.ExtendedExecutionSession
 Windows.ApplicationModel.ExtendedExecution.IExtendedExecutionSession
+Windows.ApplicationModel.IPackage
+Windows.ApplicationModel.IPackageStatics
+Windows.ApplicationModel.IPackageId
+Windows.ApplicationModel.Package
+Windows.ApplicationModel.PackageId
 Windows.ApplicationModel.Core.CoreApplication
 Windows.ApplicationModel.Core.CoreApplicationView
 Windows.ApplicationModel.Core.CoreApplicationViewTitleBar
@@ -170,6 +175,13 @@ Windows.UI.Xaml.Controls.RichTextBlock::ForegroundProperty
 Windows.UI.Xaml.Controls.TextBox
 Windows.UI.Xaml.Controls.ToggleMenuFlyoutItem
 Windows.UI.Xaml.Controls.UIElementCollection
+Windows.UI.Xaml.Controls.IPasswordBox
+Windows.UI.Xaml.Controls.PasswordBox
+Windows.UI.Xaml.Controls.IWebView
+Windows.UI.Xaml.Controls.IWebView2
+Windows.UI.Xaml.Controls.INotifyEventArgs
+Windows.UI.Xaml.Controls.NotifyEventArgs
+Windows.UI.Xaml.Controls.WebView
 Windows.UI.Xaml.DataTemplate
 Windows.UI.Xaml.GridLength
 Windows.UI.Xaml.GridUnitType

@@ -76,7 +76,7 @@ pub use watch_later::WatchLater;
 pub use rubi_api::Page as VideoPart;
 pub use rubi_api::{
     ApiError, CommentArea, PgcConditions, PgcDay, PgcEpisode, PgcFilter, PgcHit, PgcRelease, PgcSeason,
-    PgcSeasonDetail, QrState, Season, SeasonEpisode, SeasonSection, SegmentRanges, SendDanmaku, Session, SolvedCaptcha,
+    LoginKey, PgcSeasonDetail, QrState, Season, SeasonEpisode, SeasonSection, SegmentRanges, SendDanmaku, Session, SolvedCaptcha,
     SteinNode, Stream, Triple, UpOrder, https_image, plain_letters,
 };
 pub use rubi_filter::danmaku::DanmakuOutput;

@@ -253,6 +253,14 @@ impl UpPage {
                 shell.back();
             }
         })?;
+        for (at, order) in [(0usize, UpOrder::Pubdate), (1, UpOrder::Click)] {
+            let weak = Rc::downgrade(&page);
+            on_click(&page.root, &format!("Order{at}"), move || {
+                if let Some(page) = weak.upgrade() {
+                    let _ = page.sort(order);
+                }
+            })?;
+        }
         for tab in 0..TAB_LABELS.len() {
             let weak = Rc::downgrade(&page);
             on_click(&page.root, &format!("Tab{tab}"), move || {
@@ -377,6 +385,16 @@ impl UpPage {
         }
         self.tint("Order0", self.order.get() == UpOrder::Pubdate)?;
         self.tint("Order1", self.order.get() == UpOrder::Click)
+    }
+
+    /// Takes the 投稿 list in the other order, and marks the button that was picked.
+    fn sort(&self, order: UpOrder) -> Result<()> {
+        if self.order.get() == order {
+            return Ok(());
+        }
+        self.order.set(order);
+        self.mark()?;
+        self.open_uploads()
     }
 
     fn tint(&self, name: &str, on: bool) -> Result<()> {
