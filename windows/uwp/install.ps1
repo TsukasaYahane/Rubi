@@ -23,7 +23,7 @@ try {
     Write-Host "导入证书到本机「受信任的人」..."
     Import-Certificate -FilePath $certificate -CertStoreLocation Cert:\LocalMachine\TrustedPeople | Out-Null
 
-    $arch = switch ($env:PROCESSOR_ARCHITECTURE) { 'ARM64' { 'arm64' } 'AMD64' { 'x64' } default { $_.ToLower() } }
+    $arch = switch ($env:PROCESSOR_ARCHITECTURE) { 'ARM64' { 'arm64' } 'AMD64' { 'x64' } default { $env:PROCESSOR_ARCHITECTURE.ToLower() } }
     $dependencies = @(Get-ChildItem (Join-Path $here "Dependencies\$arch") -Filter '*.appx' -ErrorAction SilentlyContinue |
         ForEach-Object FullName)
 
