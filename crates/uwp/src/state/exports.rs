@@ -40,12 +40,24 @@ pub fn take(bvid: &str) -> Option<ExportFormat> {
 
 /// The folder the user picked for exports, while it is still one Windows will let us open.
 pub fn folder() -> Option<StorageFolder> {
-    kept(EXPORT_TOKEN)
+    folder_for(&WHERE, EXPORT_TOKEN)
 }
 
 /// The folder the user picked for offline copies, if any.
 pub fn download_folder() -> Option<StorageFolder> {
-    kept(DOWNLOAD_TOKEN)
+    folder_for(&DOWNLOADS, DOWNLOAD_TOKEN)
+}
+
+/// Opens the folder the path says, not whichever entry the token happens to name: the two lines
+/// each show a path, and the thing a press opens has to be that path.
+fn folder_for(slot: &std::sync::Mutex<Option<String>>, token: &str) -> Option<StorageFolder> {
+    if let Some(path) = read_from(slot)
+        && let Ok(operation) = crate::xaml::StorageFolder::GetFolderFromPathAsync(&path)
+        && let Ok(folder) = operation.join()
+    {
+        return Some(folder);
+    }
+    kept(token)
 }
 
 
@@ -64,9 +76,15 @@ fn read_from(slot: &std::sync::Mutex<Option<String>>) -> Option<String> {
 fn kept(token: &str) -> Option<StorageFolder> {
     let list = StorageApplicationPermissions::FutureAccessList().ok()?;
     if !list.ContainsItem(token).ok()? {
+        crate::ui::trace(&format!("{token} is not in the list"));
         return None;
     }
-    list.GetItemAsync(token).ok()?.join().ok()?.cast().ok()
+    let folder: StorageFolder = list.GetItemAsync(token).ok()?.join().ok()?.cast().ok()?;
+    // Said out loud: the two tokens have to answer with two different folders, and the log is
+    // the only place that shows which one an entry actually holds.
+    let path = folder.cast::<IStorageItem>().ok().and_then(|item| item.Path().ok());
+    crate::ui::trace(&format!("{token} opens {:?}", path.map(|p| p.to_string())));
+    Some(folder)
 }
 
 /// Keeps `folder` as the one exports go to.
@@ -87,7 +105,9 @@ pub fn keep_download_folder(folder: &StorageFolder) -> Result<()> {
 fn keep(token: &str, folder: &StorageFolder) -> Result<String> {
     let item = folder.cast::<IStorageItem>()?;
     StorageApplicationPermissions::FutureAccessList()?.AddOrReplace(token, &item, "")?;
-    Ok(item.Path()?.to_string())
+    let path = item.Path()?.to_string();
+    crate::ui::trace(&format!("kept {token} -> {path}"));
+    Ok(path)
 }
 
 /// Where exports go, as last read; `None` while nothing has been picked.

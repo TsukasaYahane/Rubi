@@ -79,6 +79,7 @@ Windows.Security.Credentials.PasswordVault::CreateInstance
 Windows.Storage.ApplicationData
 Windows.Storage.IApplicationData
 Windows.Storage.IApplicationDataStatics
+Windows.Storage.IStorageFolderStatics
 Windows.Storage.IStorageFolder
 Windows.Storage.IStorageFile2
 Windows.Storage.IStorageItem

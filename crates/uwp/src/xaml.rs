@@ -28980,6 +28980,23 @@ pub struct IStorageFolder_Vtbl {
     pub GetItemsAsyncOverloadDefaultStartAndCount:
         unsafe extern "system" fn(*mut core::ffi::c_void, *mut *mut core::ffi::c_void) -> windows_core::HRESULT,
 }
+windows_core::imp::define_interface!(
+    IStorageFolderStatics,
+    IStorageFolderStatics_Vtbl,
+    0x08f327ff_85d5_48b9_aee9_28511e339f9f
+);
+impl windows_core::RuntimeType for IStorageFolderStatics {
+    const SIGNATURE: windows_core::imp::ConstBuffer = windows_core::imp::ConstBuffer::for_interface::<Self>();
+}
+#[repr(C)]
+pub struct IStorageFolderStatics_Vtbl {
+    pub base__: windows_core::IInspectable_Vtbl,
+    pub GetFolderFromPathAsync: unsafe extern "system" fn(
+        *mut core::ffi::c_void,
+        *mut core::ffi::c_void,
+        *mut *mut core::ffi::c_void,
+    ) -> windows_core::HRESULT,
+}
 windows_core::imp::define_interface!(IStorageItem, IStorageItem_Vtbl, 0x4207a996_ca2f_42f7_bde8_8b10457a7f30);
 impl windows_core::RuntimeType for IStorageItem {
     const SIGNATURE: windows_core::imp::ConstBuffer = windows_core::imp::ConstBuffer::for_interface::<Self>();
@@ -40636,6 +40653,26 @@ windows_core::imp::interface_hierarchy!(
     IStorageFolder
 );
 windows_core::imp::required_hierarchy!(StorageFolder, IStorageItem);
+impl StorageFolder {
+    pub fn GetFolderFromPathAsync(path: &str) -> windows_core::Result<windows_future::IAsyncOperation<Self>> {
+        Self::IStorageFolderStatics(|this| unsafe {
+            let mut result__ = core::mem::zeroed();
+            (windows_core::Interface::vtable(this).GetFolderFromPathAsync)(
+                windows_core::Interface::as_raw(this),
+                core::mem::transmute_copy(&windows_core::HSTRING::from(path)),
+                &mut result__,
+            )
+            .and_then(|| windows_core::imp::Type::from_abi(result__))
+        })
+    }
+    fn IStorageFolderStatics<R, F: FnOnce(&IStorageFolderStatics) -> windows_core::Result<R>>(
+        callback: F,
+    ) -> windows_core::Result<R> {
+        static SHARED: windows_core::imp::FactoryCache<StorageFolder, IStorageFolderStatics> =
+            windows_core::imp::FactoryCache::new();
+        SHARED.call(callback)
+    }
+}
 impl windows_core::RuntimeType for StorageFolder {
     const SIGNATURE: windows_core::imp::ConstBuffer =
         windows_core::imp::ConstBuffer::for_class::<Self, IStorageFolder>();

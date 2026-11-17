@@ -258,10 +258,11 @@ fn play(settings: &Value) -> Result<IFrameworkElement> {
 fn place_row(text_name: &str, button_name: &str) -> String {
     format!(
         r##"<StackPanel Orientation="Horizontal" VerticalAlignment="Center">
-        <HyperlinkButton x:Name="{text_name}" FontSize="12" Padding="0" VerticalAlignment="Center"
-                         MaxWidth="300" Foreground="#0050EF">
-          <TextBlock x:Name="{text_name}Text" FontSize="12" TextTrimming="CharacterEllipsis" />
-        </HyperlinkButton>
+        <Button x:Name="{text_name}" Background="Transparent" BorderThickness="0" Padding="0"
+                VerticalAlignment="Center" MaxWidth="300" HorizontalContentAlignment="Left">
+          <TextBlock x:Name="{text_name}Text" FontSize="12" Foreground="#0050EF"
+                     TextTrimming="CharacterEllipsis" />
+        </Button>
         <Button x:Name="{button_name}" Content="选择" Margin="10,0,0,0" />
       </StackPanel>"##
     )
@@ -293,25 +294,34 @@ enum Place {
 /// Writes the folder down the line, and keeps the link in step with it: `Content` on a
 /// `HyperlinkButton` is an object, so `set_text` would not reach it.
 fn set_path(root: &crate::xaml::IFrameworkElement, name: &str, path: &str) {
-    // The link holds a block rather than a bare string: a string would have to be boxed into an
-    // inspectable, and the block is what the click actually shows.
-    let _ = set_text(root, &format!("{name}Text"), path);
+    // A plain button, not a `HyperlinkButton`: that one is not a `ButtonBase`, so `Click` never
+    // reaches the handler that `on_click` installs. The block inside is what carries the text.
+    let answer = set_text(root, &format!("{name}Text"), path);
+    crate::ui::trace(&format!("{name} shows {path} ({})", if answer.is_ok() { "written" } else { "not found" }));
 }
 
 /// Opens the folder the line names, so the path is a place one can go rather than a string to
 /// copy by hand.
 fn open_folder(place: Place) {
-    // The folder itself, not a `file:///` uri: a uri into another volume is not something the
-    // launcher will take, and the brokered folder is already in hand.
-    let folder = match place {
-        Place::Cache => crate::state::exports::download_folder(),
-        Place::Exports => crate::state::exports::folder(),
+    // Straight from the path this line shows, with no fallback: whatever the answer is, it is
+    // said out loud, so "nothing happened" can no longer be mistaken for "opened the wrong one".
+    let path = match place {
+        Place::Cache => crate::state::exports::download_path(),
+        Place::Exports => crate::state::exports::folder_path(),
     };
-    let Some(folder) = folder else {
+    let Some(path) = path else {
         let _ = crate::ui::shell::toast("还没选目录");
         return;
     };
-    let _ = crate::xaml::Launcher::LaunchFolderAsync(&folder);
+    match crate::xaml::StorageFolder::GetFolderFromPathAsync(&path).and_then(|operation| operation.join()) {
+        Ok(folder) => {
+            let _ = crate::ui::shell::toast(&format!("打开 {path}"));
+            let _ = crate::xaml::Launcher::LaunchFolderAsync(&folder);
+        }
+        Err(problem) => {
+            let _ = crate::ui::shell::toast(&format!("打不开 {path}：{problem}"));
+        }
+    }
 }
 
 /// The place a copy lands when nothing was picked: the app's own folder, which needs no grant.
@@ -325,6 +335,16 @@ fn default_cache_path() -> String {
         .unwrap_or_else(|| "应用目录".to_owned())
 }
 
+/// Where a copy is written when export has a folder of its own: the video library, which is not
+/// tied to wherever 离线缓存 happens to keep its files.
+fn default_export_path() -> String {
+    crate::xaml::KnownFolders::VideosLibrary()
+        .ok()
+        .and_then(|folder| folder.cast::<crate::xaml::IStorageItem>().ok())
+        .and_then(|item| item.Path().ok())
+        .unwrap_or_else(|| "系统视频库".to_owned())
+}
+
 fn place_text(place: Place) -> String {
     let path = match place {
         Place::Cache => crate::state::exports::download_path(),
@@ -335,7 +355,7 @@ fn place_text(place: Place) -> String {
         // Nothing picked is still a place: say which one, so the line is never just 未选.
         None => match place {
             Place::Cache => default_cache_path(),
-            Place::Exports => "未选：导出放在缓存位置旁的 audio / Video".to_owned(),
+            Place::Exports => default_export_path(),
         },
     }
 }
