@@ -17,12 +17,14 @@ const DOWNLOAD_TOKEN: &str = "rubi-downloads";
 
 thread_local! {
     static WANTED: RefCell<HashMap<String, ExportFormat>> = RefCell::default();
-    /// The path of the picked folder, once it has been read: asking Windows again on every page
-    /// build is slow enough to be felt.
-    static WHERE: RefCell<Option<String>> = const { RefCell::new(None) };
-    /// The same for the folder offline copies are written into.
-    static DOWNLOADS: RefCell<Option<String>> = const { RefCell::new(None) };
 }
+
+/// The path of the picked folder, once it has been read: asking Windows again on every page build
+/// is slow enough to be felt. Both live outside the thread local block because the picker answers
+/// on whichever thread Windows chose, and the lines that read them are drawn on the ui thread.
+static WHERE: std::sync::Mutex<Option<String>> = std::sync::Mutex::new(None);
+/// The same for the folder offline copies are written into.
+static DOWNLOADS: std::sync::Mutex<Option<String>> = std::sync::Mutex::new(None);
 
 /// Notes that `bvid` is to be written out as `format` once it finishes.
 pub fn remember(bvid: &str, format: ExportFormat) {
@@ -46,6 +48,19 @@ pub fn download_folder() -> Option<StorageFolder> {
     kept(DOWNLOAD_TOKEN)
 }
 
+
+/// The picker answers on whichever thread Windows chose, so what it learned cannot live in a
+/// thread local: the line that reads it is drawn on the ui thread.
+fn keep_in(slot: &std::sync::Mutex<Option<String>>, path: String) {
+    if let Ok(mut held) = slot.lock() {
+        *held = Some(path);
+    }
+}
+
+fn read_from(slot: &std::sync::Mutex<Option<String>>) -> Option<String> {
+    slot.lock().ok().and_then(|held| held.clone())
+}
+
 fn kept(token: &str) -> Option<StorageFolder> {
     let list = StorageApplicationPermissions::FutureAccessList().ok()?;
     if !list.ContainsItem(token).ok()? {
@@ -57,7 +72,7 @@ fn kept(token: &str) -> Option<StorageFolder> {
 /// Keeps `folder` as the one exports go to.
 pub fn keep_folder(folder: &StorageFolder) -> Result<()> {
     let path = keep(EXPORT_TOKEN, folder)?;
-    WHERE.with_borrow_mut(|slot| *slot = Some(path));
+    keep_in(&WHERE, path);
     Ok(())
 }
 
@@ -65,7 +80,7 @@ pub fn keep_folder(folder: &StorageFolder) -> Result<()> {
 /// core to write there.
 pub fn keep_download_folder(folder: &StorageFolder) -> Result<()> {
     let path = keep(DOWNLOAD_TOKEN, folder)?;
-    DOWNLOADS.with_borrow_mut(|slot| *slot = Some(path));
+    keep_in(&DOWNLOADS, path);
     Ok(())
 }
 
@@ -77,20 +92,20 @@ fn keep(token: &str, folder: &StorageFolder) -> Result<String> {
 
 /// Where exports go, as last read; `None` while nothing has been picked.
 pub fn folder_path() -> Option<String> {
-    if let Some(path) = WHERE.with_borrow(Clone::clone) {
+    if let Some(path) = read_from(&WHERE) {
         return Some(path);
     }
     let path = kept(EXPORT_TOKEN)?.cast::<IStorageItem>().ok()?.Path().ok()?.to_string();
-    WHERE.with_borrow_mut(|slot| *slot = Some(path.clone()));
+    keep_in(&WHERE, path.clone());
     Some(path)
 }
 
 /// Where offline copies go, as last read; `None` keeps them in the app's own folder.
 pub fn download_path() -> Option<String> {
-    if let Some(path) = DOWNLOADS.with_borrow(Clone::clone) {
+    if let Some(path) = read_from(&DOWNLOADS) {
         return Some(path);
     }
     let path = kept(DOWNLOAD_TOKEN)?.cast::<IStorageItem>().ok()?.Path().ok()?.to_string();
-    DOWNLOADS.with_borrow_mut(|slot| *slot = Some(path.clone()));
+    keep_in(&DOWNLOADS, path.clone());
     Some(path)
 }

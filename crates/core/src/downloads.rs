@@ -136,6 +136,83 @@ impl Downloads {
         }
     }
 
+    /// Picks up a folder that was moved in from elsewhere: every `BV…` folder that holds a file
+    /// and has no record is written down as finished, so it shows in 离线缓存 again. The title is
+    /// the bvid, because nothing on disk knows what the video was called.
+    pub fn adopt(&self, dir: &Path) -> Result<usize> {
+        let entries = std::fs::read_dir(dir)?;
+        let mut adopted = 0;
+        for entry in entries.flatten() {
+            let path = entry.path();
+            if !path.is_dir() {
+                continue;
+            }
+            let Some(bvid) = path.file_name().and_then(|name| name.to_str()).map(str::to_owned) else {
+                continue;
+            };
+            if !bvid.starts_with("BV") || self.inner.store.download(&bvid)?.is_some() {
+                continue;
+            }
+            let size = |name: &str| std::fs::metadata(path.join(name)).map(|m| m.len()).unwrap_or(0);
+            let total = size(VIDEO_FILE) + size(AUDIO_FILE);
+            if total == 0 {
+                continue;
+            }
+            let record = Download {
+                card: rubi_model::VideoCard { bvid: bvid.clone(), title: bvid.clone(), ..Default::default() },
+                quality: 80,
+                state: DownloadState::Done,
+                done_bytes: total,
+                total_bytes: total,
+                created_at: std::time::SystemTime::now()
+                    .duration_since(std::time::UNIX_EPOCH)
+                    .map(|d| d.as_secs() as i64)
+                    .unwrap_or(0),
+            };
+            self.inner.store.put_download(&record)?;
+            adopted += 1;
+        }
+        Ok(adopted)
+    }
+
+    /// Moves what is on disk to a new root, so 缓存位置 can change without leaving the files
+    /// behind. The app's own copy stays where it is; this carries the user-facing one.
+    pub fn relocate(&self, from: &Path, to: &Path) -> Result<usize> {
+        if from == to {
+            return Ok(0);
+        }
+        let entries = std::fs::read_dir(from)?;
+        let mut moved = 0;
+        for entry in entries.flatten() {
+            let path = entry.path();
+            if !path.is_dir() {
+                continue;
+            }
+            let Some(name) = path.file_name() else { continue };
+            let target = to.join(name);
+            if std::fs::create_dir_all(&target).is_err() {
+                continue;
+            }
+            let mut carried = true;
+            for file in [VIDEO_FILE, AUDIO_FILE] {
+                let source = path.join(file);
+                if !source.is_file() {
+                    continue;
+                }
+                if std::fs::copy(&source, target.join(file)).is_err() {
+                    carried = false;
+                }
+            }
+            // The old folder goes only once every file reached the new one: half a moved video is
+            // worse than a copy left behind.
+            if carried {
+                let _ = std::fs::remove_dir_all(&path);
+            }
+            moved += 1;
+        }
+        Ok(moved)
+    }
+
     /// Names a folder outside the app that finished copies are moved to, and looked for in.
     /// A packaged app cannot write there while it downloads, so the files are carried over and
     /// the app's own copy is dropped; this is where the rest of the app then finds them.

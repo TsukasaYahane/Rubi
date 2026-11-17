@@ -128,6 +128,12 @@ pub fn reload() -> Result<()> {
             let Some(root) = PAGE.with_borrow(Clone::clone) else { return };
             ROWS.with_borrow_mut(|rows| *rows = list.clone());
             let _ = paint(&root, &list);
+            // A download that is being written is a reason not to be suspended.
+            if list.iter().any(|item| item.state == DownloadState::Running) {
+                crate::ui::extend::keep_awake();
+            } else {
+                crate::ui::extend::let_go();
+            }
             // Finished copies go to the folder picked in 设置, and the app's own copy with them:
             // the core can write here, and a folder it was handed can write there.
             if let Some(cache) = crate::state::exports::download_folder() {

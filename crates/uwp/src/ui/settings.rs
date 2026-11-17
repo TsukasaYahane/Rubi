@@ -162,6 +162,12 @@ fn change_prefs(change: impl Fn(&mut Prefs)) {
 }
 
 /// The rows of `category`, as saved now.
+thread_local! {
+    /// The page as it was built. It sits inside the shell's body, so a name in it is not reachable
+    /// from the shell's own root: the refresh after a pick has to start here.
+    static SHOWN: RefCell<Option<IFrameworkElement>> = const { RefCell::new(None) };
+}
+
 pub fn build(category: Category, backend: &Arc<Backend>) -> Result<IFrameworkElement> {
     let settings = serde_json::to_value(backend.services.preferences.settings()).unwrap_or_default();
     match category {
@@ -223,8 +229,11 @@ fn play(settings: &Value) -> Result<IFrameworkElement> {
     .concat();
     let root = load(&page(Category::Play, &rows))?;
     mark(&root, "Quality", labels.len(), picked)?;
-    let _ = set_text(&root, "CacheWhere", &place_text(Place::Cache));
-    let _ = set_text(&root, "ExportWhere", &place_text(Place::Exports));
+    set_path(&root, "CacheWhere", &place_text(Place::Cache));
+    set_path(&root, "ExportWhere", &place_text(Place::Exports));
+    on_click(&root, "CacheWhere", || open_folder(Place::Cache))?;
+    on_click(&root, "ExportWhere", || open_folder(Place::Exports))?;
+    SHOWN.with_borrow_mut(|slot| *slot = Some(root.clone()));
     let _ = set_text(
         &root,
         "AccessWhere",
@@ -249,9 +258,10 @@ fn play(settings: &Value) -> Result<IFrameworkElement> {
 fn place_row(text_name: &str, button_name: &str) -> String {
     format!(
         r##"<StackPanel Orientation="Horizontal" VerticalAlignment="Center">
-        <TextBlock x:Name="{text_name}" FontSize="12" VerticalAlignment="Center" MaxWidth="300"
-                   TextTrimming="CharacterEllipsis"
-                   Foreground="{{ThemeResource SystemControlForegroundBaseMediumBrush}}" />
+        <HyperlinkButton x:Name="{text_name}" FontSize="12" Padding="0" VerticalAlignment="Center"
+                         MaxWidth="300" Foreground="#0050EF">
+          <TextBlock x:Name="{text_name}Text" FontSize="12" TextTrimming="CharacterEllipsis" />
+        </HyperlinkButton>
         <Button x:Name="{button_name}" Content="选择" Margin="10,0,0,0" />
       </StackPanel>"##
     )
@@ -279,17 +289,64 @@ enum Place {
 }
 
 /// Where a place is, as things stand.
+
+/// Writes the folder down the line, and keeps the link in step with it: `Content` on a
+/// `HyperlinkButton` is an object, so `set_text` would not reach it.
+fn set_path(root: &crate::xaml::IFrameworkElement, name: &str, path: &str) {
+    // The link holds a block rather than a bare string: a string would have to be boxed into an
+    // inspectable, and the block is what the click actually shows.
+    let _ = set_text(root, &format!("{name}Text"), path);
+}
+
+/// Opens the folder the line names, so the path is a place one can go rather than a string to
+/// copy by hand.
+fn open_folder(place: Place) {
+    // The folder itself, not a `file:///` uri: a uri into another volume is not something the
+    // launcher will take, and the brokered folder is already in hand.
+    let folder = match place {
+        Place::Cache => crate::state::exports::download_folder(),
+        Place::Exports => crate::state::exports::folder(),
+    };
+    let Some(folder) = folder else {
+        let _ = crate::ui::shell::toast("还没选目录");
+        return;
+    };
+    let _ = crate::xaml::Launcher::LaunchFolderAsync(&folder);
+}
+
+/// The place a copy lands when nothing was picked: the app's own folder, which needs no grant.
+fn default_cache_path() -> String {
+    crate::xaml::ApplicationData::Current()
+        .ok()
+        .and_then(|data| data.LocalFolder().ok())
+        .and_then(|folder| folder.cast::<crate::xaml::IStorageItem>().ok())
+        .and_then(|item| item.Path().ok())
+        .map(|path| format!("{path}\\downloads"))
+        .unwrap_or_else(|| "应用目录".to_owned())
+}
+
 fn place_text(place: Place) -> String {
     let path = match place {
         Place::Cache => crate::state::exports::download_path(),
         Place::Exports => crate::state::exports::folder_path(),
     };
-    path.unwrap_or_else(|| "未选".to_owned())
+    match path {
+        Some(path) => path,
+        // Nothing picked is still a place: say which one, so the line is never just 未选.
+        None => match place {
+            Place::Cache => default_cache_path(),
+            Place::Exports => "未选：导出放在缓存位置旁的 audio / Video".to_owned(),
+        },
+    }
 }
 
-/// Asks for a place, and keeps it for the next run. The picker needs the UI thread to keep
-/// running, so the answer comes back as an event: waiting on it there would stop the message
-/// pump and the window would never be answered.
+/// The old folder cannot be walked from here: the file system api reaches only the app's own
+/// directory, and the WinRT copy that could is not in the generated bindings. Say where things
+/// stand rather than leave a step that never happens.
+fn carry_over(_from: crate::xaml::StorageFolder, _to: crate::xaml::StorageFolder) {
+    let _ = crate::ui::shell::toast("旧目录里的缓存留在原处，需要时请手动搬过来");
+}
+
 fn pick_place(place: Place, text_name: &'static str) {
     let asked = (|| {
         let picker = crate::xaml::FolderPicker::new()?;
@@ -311,24 +368,43 @@ fn pick_place(place: Place, text_name: &'static str) {
               _: windows_future::AsyncStatus| {
             let Ok(operation) = operation.ok() else { return Ok(()) };
             let Ok(folder) = operation.GetResults() else { return Ok(()) };
+            // Where 离线缓存 was keeping things, before the answer replaces it: what is already
+            // on disk follows the folder when 缓存位置 changes.
+            let before = match place {
+                Place::Cache => crate::state::exports::download_folder(),
+                Place::Exports => None,
+            };
             let kept = match place {
                 Place::Cache => crate::state::exports::keep_download_folder(&folder),
                 Place::Exports => crate::state::exports::keep_folder(&folder),
             };
             let Some(dispatcher) = &dispatcher else { return Ok(()) };
             match kept {
-                Ok(()) => crate::ui::post(dispatcher, move || {
-                    if let Some(shell) = shell()
-                        && let Ok(shown) = shell.current_page()
+                Ok(()) => {
+                    // The picker's folder keeps its own grant: the old one still opens even after
+                    // the new answer replaced it.
+                    if let Some(from) = before
+                        && let Some(to) = crate::state::exports::download_folder()
                     {
-                        let _ = set_text(&shown, text_name, &place_text(place));
+                        carry_over(from, to);
                     }
-                    crate::ui::shell::toast(match place {
-                        // The core takes its folder when it opens: this one waits for a restart.
-                        Place::Cache => "缓存位置已改，重启 Rubi 后生效",
-                        Place::Exports => "导出位置已改",
+                    crate::ui::post(dispatcher, move || {
+                    // The line lives inside the body, not under the shell's root: refresh it from
+                    // the page that was built, or the name is not found and nothing changes.
+                    if let Some(root) = SHOWN.with_borrow(Clone::clone) {
+                        set_path(&root, text_name, &place_text(place));
+                    }
+                    crate::ui::shell::toast(&match place {
+                        // The core takes its folder when it opens: this one waits for a restart,
+                        // and the files that were already there follow it in the background.
+                        Place::Cache => format!(
+                            "缓存位置已改到 {}，重启 Rubi 后生效",
+                            place_text(place)
+                        ),
+                        Place::Exports => format!("导出位置已改到 {}", place_text(place)),
                     });
-                }),
+                    })
+                }
                 Err(problem) => {
                     let said = problem.message().to_string();
                     crate::ui::post(dispatcher, move || crate::ui::shell::toast(&format!("记不住这个位置：{said}")));

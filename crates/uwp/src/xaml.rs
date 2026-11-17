@@ -703,6 +703,28 @@ impl windows_core::RuntimeType for AdaptiveMediaSourceResourceType {
 }
 #[repr(transparent)]
 #[derive(Clone, Debug, Eq, PartialEq)]
+pub struct AppInfo(windows_core::IUnknown);
+windows_core::imp::interface_hierarchy!(AppInfo, windows_core::IUnknown, windows_core::IInspectable);
+impl windows_core::RuntimeType for AppInfo {
+    const SIGNATURE: windows_core::imp::ConstBuffer = windows_core::imp::ConstBuffer::for_class::<Self, IAppInfo>();
+}
+unsafe impl windows_core::Interface for AppInfo {
+    type Vtable = <IAppInfo as windows_core::Interface>::Vtable;
+    const IID: windows_core::GUID = <IAppInfo as windows_core::Interface>::IID;
+}
+impl core::ops::Deref for AppInfo {
+    type Target = IAppInfo;
+    fn deref(&self) -> &Self::Target {
+        unsafe { core::mem::transmute(self) }
+    }
+}
+impl windows_core::RuntimeName for AppInfo {
+    const NAME: &'static str = "Windows.ApplicationModel.AppInfo";
+}
+unsafe impl Send for AppInfo {}
+unsafe impl Sync for AppInfo {}
+#[repr(transparent)]
+#[derive(Clone, Debug, Eq, PartialEq)]
 pub struct Application(windows_core::IUnknown);
 windows_core::imp::interface_hierarchy!(Application, windows_core::IUnknown, windows_core::IInspectable);
 impl Application {
@@ -4478,6 +4500,20 @@ pub struct DataReader(windows_core::IUnknown);
 windows_core::imp::interface_hierarchy!(DataReader, windows_core::IUnknown, windows_core::IInspectable, IDataReader);
 windows_core::imp::required_hierarchy!(DataReader, IClosable);
 impl DataReader {
+    pub fn CreateDataReader<P0>(inputstream: P0) -> windows_core::Result<Self>
+    where
+        P0: windows_core::Param<IInputStream>,
+    {
+        Self::IDataReaderFactory(|this| unsafe {
+            let mut result__ = core::mem::zeroed();
+            (windows_core::Interface::vtable(this).CreateDataReader)(
+                windows_core::Interface::as_raw(this),
+                inputstream.param().abi(),
+                &mut result__,
+            )
+            .and_then(|| windows_core::imp::Type::from_abi(result__))
+        })
+    }
     pub fn FromBuffer<P0>(buffer: P0) -> windows_core::Result<Self>
     where
         P0: windows_core::Param<IBuffer>,
@@ -4491,6 +4527,13 @@ impl DataReader {
             )
             .and_then(|| windows_core::imp::Type::from_abi(result__))
         })
+    }
+    fn IDataReaderFactory<R, F: FnOnce(&IDataReaderFactory) -> windows_core::Result<R>>(
+        callback: F,
+    ) -> windows_core::Result<R> {
+        static SHARED: windows_core::imp::FactoryCache<DataReader, IDataReaderFactory> =
+            windows_core::imp::FactoryCache::new();
+        SHARED.call(callback)
     }
     fn IDataReaderStatics<R, F: FnOnce(&IDataReaderStatics) -> windows_core::Result<R>>(
         callback: F,
@@ -6452,6 +6495,29 @@ impl windows_core::RuntimeType for FocusState {
     const SIGNATURE: windows_core::imp::ConstBuffer =
         windows_core::imp::ConstBuffer::from_slice(b"enum(Windows.UI.Xaml.FocusState;i4)");
 }
+#[repr(transparent)]
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct FolderLauncherOptions(windows_core::IUnknown);
+windows_core::imp::interface_hierarchy!(FolderLauncherOptions, windows_core::IUnknown, windows_core::IInspectable);
+impl windows_core::RuntimeType for FolderLauncherOptions {
+    const SIGNATURE: windows_core::imp::ConstBuffer =
+        windows_core::imp::ConstBuffer::for_class::<Self, IFolderLauncherOptions>();
+}
+unsafe impl windows_core::Interface for FolderLauncherOptions {
+    type Vtable = <IFolderLauncherOptions as windows_core::Interface>::Vtable;
+    const IID: windows_core::GUID = <IFolderLauncherOptions as windows_core::Interface>::IID;
+}
+impl core::ops::Deref for FolderLauncherOptions {
+    type Target = IFolderLauncherOptions;
+    fn deref(&self) -> &Self::Target {
+        unsafe { core::mem::transmute(self) }
+    }
+}
+impl windows_core::RuntimeName for FolderLauncherOptions {
+    const NAME: &'static str = "Windows.System.FolderLauncherOptions";
+}
+unsafe impl Send for FolderLauncherOptions {}
+unsafe impl Sync for FolderLauncherOptions {}
 #[repr(transparent)]
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct FolderPicker(windows_core::IUnknown);
@@ -8486,6 +8552,14 @@ pub struct IAdaptiveMediaSourceStatics_Vtbl {
         *mut core::ffi::c_void,
         *mut *mut core::ffi::c_void,
     ) -> windows_core::HRESULT,
+}
+windows_core::imp::define_interface!(IAppInfo, IAppInfo_Vtbl, 0xcf7f59b3_6a09_4de8_a6c0_5792d56880d1);
+impl windows_core::RuntimeType for IAppInfo {
+    const SIGNATURE: windows_core::imp::ConstBuffer = windows_core::imp::ConstBuffer::for_interface::<Self>();
+}
+#[repr(C)]
+pub struct IAppInfo_Vtbl {
+    pub base__: windows_core::IInspectable_Vtbl,
 }
 windows_core::imp::define_interface!(IApplication, IApplication_Vtbl, 0x74b861a1_7487_46a9_9a6e_c78b512726c5);
 impl windows_core::RuntimeType for IApplication {
@@ -15774,6 +15848,23 @@ pub struct IDataReader_Vtbl {
         unsafe extern "system" fn(*mut core::ffi::c_void, *mut *mut core::ffi::c_void) -> windows_core::HRESULT,
 }
 windows_core::imp::define_interface!(
+    IDataReaderFactory,
+    IDataReaderFactory_Vtbl,
+    0xd7527847_57da_4e15_914c_06806699a098
+);
+impl windows_core::RuntimeType for IDataReaderFactory {
+    const SIGNATURE: windows_core::imp::ConstBuffer = windows_core::imp::ConstBuffer::for_interface::<Self>();
+}
+#[repr(C)]
+pub struct IDataReaderFactory_Vtbl {
+    pub base__: windows_core::IInspectable_Vtbl,
+    pub CreateDataReader: unsafe extern "system" fn(
+        *mut core::ffi::c_void,
+        *mut core::ffi::c_void,
+        *mut *mut core::ffi::c_void,
+    ) -> windows_core::HRESULT,
+}
+windows_core::imp::define_interface!(
     IDataReaderStatics,
     IDataReaderStatics_Vtbl,
     0x11fcbfc8_f93a_471b_b121_f379e349313c
@@ -17329,6 +17420,18 @@ pub struct IFocusManagerStatics_Vtbl {
     pub base__: windows_core::IInspectable_Vtbl,
     pub GetFocusedElement:
         unsafe extern "system" fn(*mut core::ffi::c_void, *mut *mut core::ffi::c_void) -> windows_core::HRESULT,
+}
+windows_core::imp::define_interface!(
+    IFolderLauncherOptions,
+    IFolderLauncherOptions_Vtbl,
+    0xbb91c27d_6b87_432a_bd04_776c6f5fb2ab
+);
+impl windows_core::RuntimeType for IFolderLauncherOptions {
+    const SIGNATURE: windows_core::imp::ConstBuffer = windows_core::imp::ConstBuffer::for_interface::<Self>();
+}
+#[repr(C)]
+pub struct IFolderLauncherOptions_Vtbl {
+    pub base__: windows_core::IInspectable_Vtbl,
 }
 windows_core::imp::define_interface!(IFolderPicker, IFolderPicker_Vtbl, 0x084f7799_f3fb_400a_99b1_7b4a772fd60d);
 impl windows_core::RuntimeType for IFolderPicker {
@@ -20428,6 +20531,14 @@ windows_core::imp::interface_hierarchy!(ILaunchActivatedEventArgs, windows_core:
 pub struct ILaunchActivatedEventArgs_Vtbl {
     pub base__: windows_core::IInspectable_Vtbl,
 }
+windows_core::imp::define_interface!(ILaunchUriResult, ILaunchUriResult_Vtbl, 0xec27a8df_f6d5_45ca_913a_70a40c5c8221);
+impl windows_core::RuntimeType for ILaunchUriResult {
+    const SIGNATURE: windows_core::imp::ConstBuffer = windows_core::imp::ConstBuffer::for_interface::<Self>();
+}
+#[repr(C)]
+pub struct ILaunchUriResult_Vtbl {
+    pub base__: windows_core::IInspectable_Vtbl,
+}
 windows_core::imp::define_interface!(ILauncherOptions, ILauncherOptions_Vtbl, 0xbafa21d8_b071_4cd8_853e_341203e557d3);
 impl windows_core::RuntimeType for ILauncherOptions {
     const SIGNATURE: windows_core::imp::ConstBuffer = windows_core::imp::ConstBuffer::for_interface::<Self>();
@@ -20460,6 +20571,93 @@ pub struct ILauncherStatics_Vtbl {
         *mut *mut core::ffi::c_void,
     ) -> windows_core::HRESULT,
     pub LaunchUriWithOptionsAsync: unsafe extern "system" fn(
+        *mut core::ffi::c_void,
+        *mut core::ffi::c_void,
+        *mut core::ffi::c_void,
+        *mut *mut core::ffi::c_void,
+    ) -> windows_core::HRESULT,
+}
+windows_core::imp::define_interface!(ILauncherStatics2, ILauncherStatics2_Vtbl, 0x59ba2fbb_24cb_4c02_a4c4_8294569d54f1);
+impl windows_core::RuntimeType for ILauncherStatics2 {
+    const SIGNATURE: windows_core::imp::ConstBuffer = windows_core::imp::ConstBuffer::for_interface::<Self>();
+}
+#[repr(C)]
+pub struct ILauncherStatics2_Vtbl {
+    pub base__: windows_core::IInspectable_Vtbl,
+    pub LaunchUriForResultsAsync: unsafe extern "system" fn(
+        *mut core::ffi::c_void,
+        *mut core::ffi::c_void,
+        *mut core::ffi::c_void,
+        *mut *mut core::ffi::c_void,
+    ) -> windows_core::HRESULT,
+    pub LaunchUriForResultsWithDataAsync: unsafe extern "system" fn(
+        *mut core::ffi::c_void,
+        *mut core::ffi::c_void,
+        *mut core::ffi::c_void,
+        *mut core::ffi::c_void,
+        *mut *mut core::ffi::c_void,
+    ) -> windows_core::HRESULT,
+    pub LaunchUriWithDataAsync: unsafe extern "system" fn(
+        *mut core::ffi::c_void,
+        *mut core::ffi::c_void,
+        *mut core::ffi::c_void,
+        *mut core::ffi::c_void,
+        *mut *mut core::ffi::c_void,
+    ) -> windows_core::HRESULT,
+    pub QueryUriSupportAsync: unsafe extern "system" fn(
+        *mut core::ffi::c_void,
+        *mut core::ffi::c_void,
+        LaunchQuerySupportType,
+        *mut *mut core::ffi::c_void,
+    ) -> windows_core::HRESULT,
+    pub QueryUriSupportWithPackageFamilyNameAsync: unsafe extern "system" fn(
+        *mut core::ffi::c_void,
+        *mut core::ffi::c_void,
+        LaunchQuerySupportType,
+        *mut core::ffi::c_void,
+        *mut *mut core::ffi::c_void,
+    ) -> windows_core::HRESULT,
+    pub QueryFileSupportAsync: unsafe extern "system" fn(
+        *mut core::ffi::c_void,
+        *mut core::ffi::c_void,
+        *mut *mut core::ffi::c_void,
+    ) -> windows_core::HRESULT,
+    pub QueryFileSupportWithPackageFamilyNameAsync: unsafe extern "system" fn(
+        *mut core::ffi::c_void,
+        *mut core::ffi::c_void,
+        *mut core::ffi::c_void,
+        *mut *mut core::ffi::c_void,
+    ) -> windows_core::HRESULT,
+    pub FindUriSchemeHandlersAsync: unsafe extern "system" fn(
+        *mut core::ffi::c_void,
+        *mut core::ffi::c_void,
+        *mut *mut core::ffi::c_void,
+    ) -> windows_core::HRESULT,
+    pub FindUriSchemeHandlersWithLaunchUriTypeAsync: unsafe extern "system" fn(
+        *mut core::ffi::c_void,
+        *mut core::ffi::c_void,
+        LaunchQuerySupportType,
+        *mut *mut core::ffi::c_void,
+    ) -> windows_core::HRESULT,
+    pub FindFileHandlersAsync: unsafe extern "system" fn(
+        *mut core::ffi::c_void,
+        *mut core::ffi::c_void,
+        *mut *mut core::ffi::c_void,
+    ) -> windows_core::HRESULT,
+}
+windows_core::imp::define_interface!(ILauncherStatics3, ILauncherStatics3_Vtbl, 0x234261a8_9db3_4683_aa42_dc6f51d33847);
+impl windows_core::RuntimeType for ILauncherStatics3 {
+    const SIGNATURE: windows_core::imp::ConstBuffer = windows_core::imp::ConstBuffer::for_interface::<Self>();
+}
+#[repr(C)]
+pub struct ILauncherStatics3_Vtbl {
+    pub base__: windows_core::IInspectable_Vtbl,
+    pub LaunchFolderAsync: unsafe extern "system" fn(
+        *mut core::ffi::c_void,
+        *mut core::ffi::c_void,
+        *mut *mut core::ffi::c_void,
+    ) -> windows_core::HRESULT,
+    pub LaunchFolderWithOptionsAsync: unsafe extern "system" fn(
         *mut core::ffi::c_void,
         *mut core::ffi::c_void,
         *mut core::ffi::c_void,
@@ -28496,6 +28694,58 @@ pub struct IStorageFile_Vtbl {
         *mut *mut core::ffi::c_void,
     ) -> windows_core::HRESULT,
 }
+windows_core::imp::define_interface!(IStorageFile2, IStorageFile2_Vtbl, 0x954e4bcf_0a77_42fb_b777_c2ed58a52e44);
+impl windows_core::RuntimeType for IStorageFile2 {
+    const SIGNATURE: windows_core::imp::ConstBuffer = windows_core::imp::ConstBuffer::for_interface::<Self>();
+}
+windows_core::imp::interface_hierarchy!(IStorageFile2, windows_core::IUnknown, windows_core::IInspectable);
+impl IStorageFile2 {
+    pub fn OpenWithOptionsAsync(
+        &self,
+        accessmode: FileAccessMode,
+        options: StorageOpenOptions,
+    ) -> windows_core::Result<windows_future::IAsyncOperation<IRandomAccessStream>> {
+        unsafe {
+            let mut result__ = core::mem::zeroed();
+            (windows_core::Interface::vtable(self).OpenWithOptionsAsync)(
+                windows_core::Interface::as_raw(self),
+                accessmode,
+                options,
+                &mut result__,
+            )
+            .and_then(|| windows_core::imp::Type::from_abi(result__))
+        }
+    }
+    pub fn OpenTransactedWriteWithOptionsAsync(
+        &self,
+        options: StorageOpenOptions,
+    ) -> windows_core::Result<windows_future::IAsyncOperation<StorageStreamTransaction>> {
+        unsafe {
+            let mut result__ = core::mem::zeroed();
+            (windows_core::Interface::vtable(self).OpenTransactedWriteWithOptionsAsync)(
+                windows_core::Interface::as_raw(self),
+                options,
+                &mut result__,
+            )
+            .and_then(|| windows_core::imp::Type::from_abi(result__))
+        }
+    }
+}
+#[repr(C)]
+pub struct IStorageFile2_Vtbl {
+    pub base__: windows_core::IInspectable_Vtbl,
+    pub OpenWithOptionsAsync: unsafe extern "system" fn(
+        *mut core::ffi::c_void,
+        FileAccessMode,
+        StorageOpenOptions,
+        *mut *mut core::ffi::c_void,
+    ) -> windows_core::HRESULT,
+    pub OpenTransactedWriteWithOptionsAsync: unsafe extern "system" fn(
+        *mut core::ffi::c_void,
+        StorageOpenOptions,
+        *mut *mut core::ffi::c_void,
+    ) -> windows_core::HRESULT,
+}
 windows_core::imp::define_interface!(
     IStorageFileStatics,
     IStorageFileStatics_Vtbl,
@@ -35410,6 +35660,60 @@ impl windows_core::RuntimeName for LaunchActivatedEventArgs {
 }
 unsafe impl Send for LaunchActivatedEventArgs {}
 unsafe impl Sync for LaunchActivatedEventArgs {}
+#[repr(transparent)]
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
+pub struct LaunchQuerySupportStatus(pub i32);
+impl LaunchQuerySupportStatus {
+    pub const Available: Self = Self(0);
+    pub const AppNotInstalled: Self = Self(1);
+    pub const AppUnavailable: Self = Self(2);
+    pub const NotSupported: Self = Self(3);
+    pub const Unknown: Self = Self(4);
+}
+impl windows_core::imp::TypeKind for LaunchQuerySupportStatus {
+    type TypeKind = windows_core::imp::CopyType;
+}
+impl windows_core::RuntimeType for LaunchQuerySupportStatus {
+    const SIGNATURE: windows_core::imp::ConstBuffer =
+        windows_core::imp::ConstBuffer::from_slice(b"enum(Windows.System.LaunchQuerySupportStatus;i4)");
+}
+#[repr(transparent)]
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
+pub struct LaunchQuerySupportType(pub i32);
+impl LaunchQuerySupportType {
+    pub const Uri: Self = Self(0);
+    pub const UriForResults: Self = Self(1);
+}
+impl windows_core::imp::TypeKind for LaunchQuerySupportType {
+    type TypeKind = windows_core::imp::CopyType;
+}
+impl windows_core::RuntimeType for LaunchQuerySupportType {
+    const SIGNATURE: windows_core::imp::ConstBuffer =
+        windows_core::imp::ConstBuffer::from_slice(b"enum(Windows.System.LaunchQuerySupportType;i4)");
+}
+#[repr(transparent)]
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct LaunchUriResult(windows_core::IUnknown);
+windows_core::imp::interface_hierarchy!(LaunchUriResult, windows_core::IUnknown, windows_core::IInspectable);
+impl windows_core::RuntimeType for LaunchUriResult {
+    const SIGNATURE: windows_core::imp::ConstBuffer =
+        windows_core::imp::ConstBuffer::for_class::<Self, ILaunchUriResult>();
+}
+unsafe impl windows_core::Interface for LaunchUriResult {
+    type Vtable = <ILaunchUriResult as windows_core::Interface>::Vtable;
+    const IID: windows_core::GUID = <ILaunchUriResult as windows_core::Interface>::IID;
+}
+impl core::ops::Deref for LaunchUriResult {
+    type Target = ILaunchUriResult;
+    fn deref(&self) -> &Self::Target {
+        unsafe { core::mem::transmute(self) }
+    }
+}
+impl windows_core::RuntimeName for LaunchUriResult {
+    const NAME: &'static str = "Windows.System.LaunchUriResult";
+}
+unsafe impl Send for LaunchUriResult {}
+unsafe impl Sync for LaunchUriResult {}
 pub struct Launcher;
 impl Launcher {
     pub fn LaunchFileAsync<P0>(file: P0) -> windows_core::Result<windows_future::IAsyncOperation<bool>>
@@ -35478,10 +35782,233 @@ impl Launcher {
             .and_then(|| windows_core::imp::Type::from_abi(result__))
         })
     }
+    pub fn LaunchUriForResultsAsync<P0, P1>(
+        uri: P0,
+        options: P1,
+    ) -> windows_core::Result<windows_future::IAsyncOperation<LaunchUriResult>>
+    where
+        P0: windows_core::Param<Uri>,
+        P1: windows_core::Param<LauncherOptions>,
+    {
+        Self::ILauncherStatics2(|this| unsafe {
+            let mut result__ = core::mem::zeroed();
+            (windows_core::Interface::vtable(this).LaunchUriForResultsAsync)(
+                windows_core::Interface::as_raw(this),
+                uri.param().abi(),
+                options.param().abi(),
+                &mut result__,
+            )
+            .and_then(|| windows_core::imp::Type::from_abi(result__))
+        })
+    }
+    pub fn LaunchUriForResultsWithDataAsync<P0, P1, P2>(
+        uri: P0,
+        options: P1,
+        inputdata: P2,
+    ) -> windows_core::Result<windows_future::IAsyncOperation<LaunchUriResult>>
+    where
+        P0: windows_core::Param<Uri>,
+        P1: windows_core::Param<LauncherOptions>,
+        P2: windows_core::Param<ValueSet>,
+    {
+        Self::ILauncherStatics2(|this| unsafe {
+            let mut result__ = core::mem::zeroed();
+            (windows_core::Interface::vtable(this).LaunchUriForResultsWithDataAsync)(
+                windows_core::Interface::as_raw(this),
+                uri.param().abi(),
+                options.param().abi(),
+                inputdata.param().abi(),
+                &mut result__,
+            )
+            .and_then(|| windows_core::imp::Type::from_abi(result__))
+        })
+    }
+    pub fn LaunchUriWithDataAsync<P0, P1, P2>(
+        uri: P0,
+        options: P1,
+        inputdata: P2,
+    ) -> windows_core::Result<windows_future::IAsyncOperation<bool>>
+    where
+        P0: windows_core::Param<Uri>,
+        P1: windows_core::Param<LauncherOptions>,
+        P2: windows_core::Param<ValueSet>,
+    {
+        Self::ILauncherStatics2(|this| unsafe {
+            let mut result__ = core::mem::zeroed();
+            (windows_core::Interface::vtable(this).LaunchUriWithDataAsync)(
+                windows_core::Interface::as_raw(this),
+                uri.param().abi(),
+                options.param().abi(),
+                inputdata.param().abi(),
+                &mut result__,
+            )
+            .and_then(|| windows_core::imp::Type::from_abi(result__))
+        })
+    }
+    pub fn QueryUriSupportAsync<P0>(
+        uri: P0,
+        launchquerysupporttype: LaunchQuerySupportType,
+    ) -> windows_core::Result<windows_future::IAsyncOperation<LaunchQuerySupportStatus>>
+    where
+        P0: windows_core::Param<Uri>,
+    {
+        Self::ILauncherStatics2(|this| unsafe {
+            let mut result__ = core::mem::zeroed();
+            (windows_core::Interface::vtable(this).QueryUriSupportAsync)(
+                windows_core::Interface::as_raw(this),
+                uri.param().abi(),
+                launchquerysupporttype,
+                &mut result__,
+            )
+            .and_then(|| windows_core::imp::Type::from_abi(result__))
+        })
+    }
+    pub fn QueryUriSupportWithPackageFamilyNameAsync<P0>(
+        uri: P0,
+        launchquerysupporttype: LaunchQuerySupportType,
+        packagefamilyname: &str,
+    ) -> windows_core::Result<windows_future::IAsyncOperation<LaunchQuerySupportStatus>>
+    where
+        P0: windows_core::Param<Uri>,
+    {
+        Self::ILauncherStatics2(|this| unsafe {
+            let mut result__ = core::mem::zeroed();
+            (windows_core::Interface::vtable(this).QueryUriSupportWithPackageFamilyNameAsync)(
+                windows_core::Interface::as_raw(this),
+                uri.param().abi(),
+                launchquerysupporttype,
+                core::mem::transmute_copy(&windows_core::HSTRING::from(packagefamilyname)),
+                &mut result__,
+            )
+            .and_then(|| windows_core::imp::Type::from_abi(result__))
+        })
+    }
+    pub fn QueryFileSupportAsync<P0>(
+        file: P0,
+    ) -> windows_core::Result<windows_future::IAsyncOperation<LaunchQuerySupportStatus>>
+    where
+        P0: windows_core::Param<StorageFile>,
+    {
+        Self::ILauncherStatics2(|this| unsafe {
+            let mut result__ = core::mem::zeroed();
+            (windows_core::Interface::vtable(this).QueryFileSupportAsync)(
+                windows_core::Interface::as_raw(this),
+                file.param().abi(),
+                &mut result__,
+            )
+            .and_then(|| windows_core::imp::Type::from_abi(result__))
+        })
+    }
+    pub fn QueryFileSupportWithPackageFamilyNameAsync<P0>(
+        file: P0,
+        packagefamilyname: &str,
+    ) -> windows_core::Result<windows_future::IAsyncOperation<LaunchQuerySupportStatus>>
+    where
+        P0: windows_core::Param<StorageFile>,
+    {
+        Self::ILauncherStatics2(|this| unsafe {
+            let mut result__ = core::mem::zeroed();
+            (windows_core::Interface::vtable(this).QueryFileSupportWithPackageFamilyNameAsync)(
+                windows_core::Interface::as_raw(this),
+                file.param().abi(),
+                core::mem::transmute_copy(&windows_core::HSTRING::from(packagefamilyname)),
+                &mut result__,
+            )
+            .and_then(|| windows_core::imp::Type::from_abi(result__))
+        })
+    }
+    pub fn FindUriSchemeHandlersAsync(
+        scheme: &str,
+    ) -> windows_core::Result<windows_future::IAsyncOperation<windows_collections::IVectorView<AppInfo>>> {
+        Self::ILauncherStatics2(|this| unsafe {
+            let mut result__ = core::mem::zeroed();
+            (windows_core::Interface::vtable(this).FindUriSchemeHandlersAsync)(
+                windows_core::Interface::as_raw(this),
+                core::mem::transmute_copy(&windows_core::HSTRING::from(scheme)),
+                &mut result__,
+            )
+            .and_then(|| windows_core::imp::Type::from_abi(result__))
+        })
+    }
+    pub fn FindUriSchemeHandlersWithLaunchUriTypeAsync(
+        scheme: &str,
+        launchquerysupporttype: LaunchQuerySupportType,
+    ) -> windows_core::Result<windows_future::IAsyncOperation<windows_collections::IVectorView<AppInfo>>> {
+        Self::ILauncherStatics2(|this| unsafe {
+            let mut result__ = core::mem::zeroed();
+            (windows_core::Interface::vtable(this).FindUriSchemeHandlersWithLaunchUriTypeAsync)(
+                windows_core::Interface::as_raw(this),
+                core::mem::transmute_copy(&windows_core::HSTRING::from(scheme)),
+                launchquerysupporttype,
+                &mut result__,
+            )
+            .and_then(|| windows_core::imp::Type::from_abi(result__))
+        })
+    }
+    pub fn FindFileHandlersAsync(
+        extension: &str,
+    ) -> windows_core::Result<windows_future::IAsyncOperation<windows_collections::IVectorView<AppInfo>>> {
+        Self::ILauncherStatics2(|this| unsafe {
+            let mut result__ = core::mem::zeroed();
+            (windows_core::Interface::vtable(this).FindFileHandlersAsync)(
+                windows_core::Interface::as_raw(this),
+                core::mem::transmute_copy(&windows_core::HSTRING::from(extension)),
+                &mut result__,
+            )
+            .and_then(|| windows_core::imp::Type::from_abi(result__))
+        })
+    }
+    pub fn LaunchFolderAsync<P0>(folder: P0) -> windows_core::Result<windows_future::IAsyncOperation<bool>>
+    where
+        P0: windows_core::Param<IStorageFolder>,
+    {
+        Self::ILauncherStatics3(|this| unsafe {
+            let mut result__ = core::mem::zeroed();
+            (windows_core::Interface::vtable(this).LaunchFolderAsync)(
+                windows_core::Interface::as_raw(this),
+                folder.param().abi(),
+                &mut result__,
+            )
+            .and_then(|| windows_core::imp::Type::from_abi(result__))
+        })
+    }
+    pub fn LaunchFolderWithOptionsAsync<P0, P1>(
+        folder: P0,
+        options: P1,
+    ) -> windows_core::Result<windows_future::IAsyncOperation<bool>>
+    where
+        P0: windows_core::Param<IStorageFolder>,
+        P1: windows_core::Param<FolderLauncherOptions>,
+    {
+        Self::ILauncherStatics3(|this| unsafe {
+            let mut result__ = core::mem::zeroed();
+            (windows_core::Interface::vtable(this).LaunchFolderWithOptionsAsync)(
+                windows_core::Interface::as_raw(this),
+                folder.param().abi(),
+                options.param().abi(),
+                &mut result__,
+            )
+            .and_then(|| windows_core::imp::Type::from_abi(result__))
+        })
+    }
     fn ILauncherStatics<R, F: FnOnce(&ILauncherStatics) -> windows_core::Result<R>>(
         callback: F,
     ) -> windows_core::Result<R> {
         static SHARED: windows_core::imp::FactoryCache<Launcher, ILauncherStatics> =
+            windows_core::imp::FactoryCache::new();
+        SHARED.call(callback)
+    }
+    fn ILauncherStatics2<R, F: FnOnce(&ILauncherStatics2) -> windows_core::Result<R>>(
+        callback: F,
+    ) -> windows_core::Result<R> {
+        static SHARED: windows_core::imp::FactoryCache<Launcher, ILauncherStatics2> =
+            windows_core::imp::FactoryCache::new();
+        SHARED.call(callback)
+    }
+    fn ILauncherStatics3<R, F: FnOnce(&ILauncherStatics3) -> windows_core::Result<R>>(
+        callback: F,
+    ) -> windows_core::Result<R> {
+        static SHARED: windows_core::imp::FactoryCache<Launcher, ILauncherStatics3> =
             windows_core::imp::FactoryCache::new();
         SHARED.call(callback)
     }
@@ -39956,7 +40483,13 @@ impl windows_core::RuntimeType for StorageDeleteOption {
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct StorageFile(windows_core::IUnknown);
 windows_core::imp::interface_hierarchy!(StorageFile, windows_core::IUnknown, windows_core::IInspectable, IStorageFile);
-windows_core::imp::required_hierarchy!(StorageFile, IInputStreamReference, IRandomAccessStreamReference, IStorageItem);
+windows_core::imp::required_hierarchy!(
+    StorageFile,
+    IInputStreamReference,
+    IRandomAccessStreamReference,
+    IStorageFile2,
+    IStorageItem
+);
 impl StorageFile {
     pub fn GetFileFromPathAsync(path: &str) -> windows_core::Result<windows_future::IAsyncOperation<Self>> {
         Self::IStorageFileStatics(|this| unsafe {
@@ -40214,6 +40747,54 @@ impl core::ops::BitAndAssign for StorageItemTypes {
     }
 }
 impl core::ops::Not for StorageItemTypes {
+    type Output = Self;
+    fn not(self) -> Self {
+        Self(self.0.not())
+    }
+}
+#[repr(transparent)]
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
+pub struct StorageOpenOptions(pub u32);
+impl StorageOpenOptions {
+    pub const None: Self = Self(0);
+    pub const AllowOnlyReaders: Self = Self(1);
+    pub const AllowReadersAndWriters: Self = Self(2);
+}
+impl windows_core::imp::TypeKind for StorageOpenOptions {
+    type TypeKind = windows_core::imp::CopyType;
+}
+impl windows_core::RuntimeType for StorageOpenOptions {
+    const SIGNATURE: windows_core::imp::ConstBuffer =
+        windows_core::imp::ConstBuffer::from_slice(b"enum(Windows.Storage.StorageOpenOptions;u4)");
+}
+impl StorageOpenOptions {
+    pub const fn contains(&self, other: Self) -> bool {
+        self.0 & other.0 == other.0
+    }
+}
+impl core::ops::BitOr for StorageOpenOptions {
+    type Output = Self;
+    fn bitor(self, other: Self) -> Self {
+        Self(self.0 | other.0)
+    }
+}
+impl core::ops::BitAnd for StorageOpenOptions {
+    type Output = Self;
+    fn bitand(self, other: Self) -> Self {
+        Self(self.0 & other.0)
+    }
+}
+impl core::ops::BitOrAssign for StorageOpenOptions {
+    fn bitor_assign(&mut self, other: Self) {
+        self.0.bitor_assign(other.0);
+    }
+}
+impl core::ops::BitAndAssign for StorageOpenOptions {
+    fn bitand_assign(&mut self, other: Self) {
+        self.0.bitand_assign(other.0);
+    }
+}
+impl core::ops::Not for StorageOpenOptions {
     type Output = Self;
     fn not(self) -> Self {
         Self(self.0.not())
@@ -41651,6 +42232,28 @@ impl windows_core::RuntimeName for Uri {
 }
 unsafe impl Send for Uri {}
 unsafe impl Sync for Uri {}
+#[repr(transparent)]
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct ValueSet(windows_core::IUnknown);
+windows_core::imp::interface_hierarchy!(ValueSet, windows_core::IUnknown, windows_core::IInspectable, IPropertySet);
+impl windows_core::RuntimeType for ValueSet {
+    const SIGNATURE: windows_core::imp::ConstBuffer = windows_core::imp::ConstBuffer::for_class::<Self, IPropertySet>();
+}
+unsafe impl windows_core::Interface for ValueSet {
+    type Vtable = <IPropertySet as windows_core::Interface>::Vtable;
+    const IID: windows_core::GUID = <IPropertySet as windows_core::Interface>::IID;
+}
+impl core::ops::Deref for ValueSet {
+    type Target = IPropertySet;
+    fn deref(&self) -> &Self::Target {
+        unsafe { core::mem::transmute(self) }
+    }
+}
+impl windows_core::RuntimeName for ValueSet {
+    const NAME: &'static str = "Windows.Foundation.Collections.ValueSet";
+}
+unsafe impl Send for ValueSet {}
+unsafe impl Sync for ValueSet {}
 #[repr(transparent)]
 #[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
 pub struct VerticalAlignment(pub i32);

@@ -80,8 +80,10 @@ Windows.Storage.ApplicationData
 Windows.Storage.IApplicationData
 Windows.Storage.IApplicationDataStatics
 Windows.Storage.IStorageFolder
+Windows.Storage.IStorageFile2
 Windows.Storage.IStorageItem
 Windows.Storage.StorageFolder
+Windows.Storage.Streams.IDataReaderFactory
 Windows.Storage.Streams.DataWriter
 Windows.Storage.Streams.IDataWriter
 Windows.Storage.Streams.IDataWriterFactory
@@ -263,6 +265,8 @@ Windows.UI.Popups.IUICommand
 Windows.UI.Popups.IUICommandFactory
 Windows.UI.Popups.MessageDialog
 Windows.UI.Popups.UICommand
+Windows.System.ILauncherStatics3
+Windows.System.ILauncherStatics2
 Windows.System.ILauncherStatics
 Windows.UI.Xaml.Controls.IBorder
 Windows.UI.Xaml.Controls.Border

@@ -606,6 +606,16 @@ impl Shell {
         // One look for a newer release per run, after the window is up.
         if !CHECKED.swap(true, Ordering::Relaxed) {
             crate::ui::update::check(true);
+            // A folder that was moved in from elsewhere brings its files with it: what is on disk
+            // and has no record is written down, so 离线缓存 shows it again.
+            if let Some(dir) = crate::state::exports::download_path()
+                && let Some(backend) = self.backend.get().cloned()
+            {
+                let inner = backend.clone();
+                backend.spawn(async move {
+                    let _ = inner.services.downloads.adopt(std::path::Path::new(&dir));
+                });
+            }
         }
         Ok(())
     }
