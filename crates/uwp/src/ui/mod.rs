@@ -19,6 +19,7 @@ pub mod filling;
 pub mod filtered;
 pub mod folder_edit;
 pub mod follow;
+mod follow_all;
 pub mod frames;
 pub mod home;
 pub mod inbox;

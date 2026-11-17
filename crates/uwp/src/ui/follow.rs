@@ -5,7 +5,7 @@ use std::cell::{Cell, RefCell};
 use std::rc::Rc;
 
 use rubi_core::CommentArea;
-use rubi_model::{FollowedUp, FollowingUp};
+use rubi_model::FollowedUp;
 use windows_collections::IVector;
 use windows_core::{IInspectable, Interface, Result};
 
@@ -13,7 +13,7 @@ use crate::state::layout::WindowClass;
 use crate::ui::comment_list::{self, CommentList};
 use crate::ui::post_list::PostList;
 use crate::ui::rows::{Covers, add_rows, on_row, on_row_click};
-use crate::ui::shell::{shell, toast};
+use crate::ui::shell::shell;
 use crate::ui::{load, named, on_click, post, set_text, up};
 use crate::xaml::{
     GridLength, GridUnitType, IBorder, IColumnDefinition, IFrameworkElement, IImage, IItemsControl, IPanel,
@@ -62,26 +62,51 @@ const LAYOUT: &str = r##"
       </ListView>
     </Grid>
   </Border>
-  <ListView x:Name="Bar" Grid.ColumnSpan="2" SelectionMode="Single" IsItemClickEnabled="True" Visibility="Collapsed"
-            ScrollViewer.HorizontalScrollBarVisibility="Hidden" ScrollViewer.HorizontalScrollMode="Enabled"
-            ScrollViewer.VerticalScrollMode="Disabled" ScrollViewer.VerticalScrollBarVisibility="Disabled"
-            BorderThickness="0,0,0,1" BorderBrush="{ThemeResource SystemControlForegroundBaseLowBrush}">
-    <ListView.ItemsPanel><ItemsPanelTemplate><ItemsStackPanel Orientation="Horizontal" /></ItemsPanelTemplate></ListView.ItemsPanel>
-    <ListView.ItemContainerTransitions><TransitionCollection /></ListView.ItemContainerTransitions>
-    <ListView.ItemContainerStyle>
-      <Style TargetType="ListViewItem">
-        <Setter Property="Padding" Value="6,4" />
-        <Setter Property="MinWidth" Value="0" />
-        <Setter Property="Width" Value="62" />
-      </Style>
-    </ListView.ItemContainerStyle>
-    <ListView.ItemTemplate><DataTemplate>
-      <StackPanel>
-        <Image Width="36" Height="36" Stretch="UniformToFill" HorizontalAlignment="Center" />
-        <TextBlock FontSize="11" TextTrimming="CharacterEllipsis" TextAlignment="Center" Margin="0,3,0,0" />
-      </StackPanel>
-    </DataTemplate></ListView.ItemTemplate>
-  </ListView>
+  <StackPanel x:Name="BarHost" Grid.ColumnSpan="2" Visibility="Collapsed">
+    <ScrollViewer x:Name="BarScroll" Height="94" HorizontalScrollBarVisibility="Hidden"
+                  HorizontalScrollMode="Enabled" VerticalScrollMode="Disabled"
+                  VerticalScrollBarVisibility="Disabled">
+      <ListView x:Name="Bar" SelectionMode="Single" IsItemClickEnabled="True" Height="88"
+                BorderThickness="0,0,0,1" BorderBrush="{ThemeResource SystemControlForegroundBaseLowBrush}"
+                ScrollViewer.HorizontalScrollMode="Disabled" ScrollViewer.VerticalScrollMode="Disabled"
+                ScrollViewer.HorizontalScrollBarVisibility="Disabled" ScrollViewer.VerticalScrollBarVisibility="Disabled">
+        <ListView.ItemsPanel><ItemsPanelTemplate><ItemsStackPanel Orientation="Horizontal" /></ItemsPanelTemplate></ListView.ItemsPanel>
+        <ListView.ItemContainerTransitions><TransitionCollection /></ListView.ItemContainerTransitions>
+        <ListView.ItemContainerStyle>
+          <Style TargetType="ListViewItem">
+            <Setter Property="Padding" Value="4,6" />
+            <Setter Property="MinWidth" Value="0" />
+            <Setter Property="Width" Value="56" />
+            <Setter Property="HorizontalContentAlignment" Value="Center" />
+          </Style>
+        </ListView.ItemContainerStyle>
+        <ListView.ItemTemplate><DataTemplate>
+          <Grid Background="Transparent">
+            <Grid.RowDefinitions>
+              <RowDefinition Height="48" /><RowDefinition Height="Auto" /><RowDefinition Height="3" />
+            </Grid.RowDefinitions>
+            <Image Width="48" Height="48" Stretch="UniformToFill" HorizontalAlignment="Center" />
+            <Border x:Name="Dot" Width="8" Height="8" Background="#0050EF" HorizontalAlignment="Right"
+                    VerticalAlignment="Top" Visibility="Collapsed" />
+            <TextBlock Grid.Row="1" FontSize="11" TextTrimming="CharacterEllipsis" TextAlignment="Center"
+                       Margin="0,4,0,0" />
+            <Border x:Name="Mark" Grid.Row="2" Height="3" Background="#0050EF" Margin="4,2,4,0"
+                    Visibility="Collapsed" />
+          </Grid>
+        </DataTemplate></ListView.ItemTemplate>
+      </ListView>
+    </ScrollViewer>
+    <!-- 滑到最右端才出现: 全部关注的入口（FollowScreen.kt:151 的同一处） -->
+    <Button x:Name="SeeAll" Visibility="Collapsed" Background="#260050EF" BorderThickness="0"
+            HorizontalAlignment="Stretch" HorizontalContentAlignment="Stretch" Padding="16,0" Height="36">
+      <Grid>
+        <Grid.ColumnDefinitions><ColumnDefinition Width="*" /><ColumnDefinition Width="Auto" /></Grid.ColumnDefinitions>
+        <TextBlock Text="没找到想看的 UP？" FontSize="13" VerticalAlignment="Center" />
+        <TextBlock Grid.Column="1" Text="查看全部关注 &#x203A;" FontSize="13" Foreground="#0050EF"
+                   VerticalAlignment="Center" />
+      </Grid>
+    </Button>
+  </StackPanel>
   <TextBlock x:Name="Status" Grid.Column="1" Grid.Row="1" FontSize="13" Margin="16,12" TextWrapping="Wrap"
              IsHitTestVisible="False"
              Foreground="{ThemeResource SystemControlForegroundBaseMediumBrush}" />
@@ -143,7 +168,9 @@ impl FollowPage {
         for name in ["Ups", "Bar"] {
             let list = named::<IFrameworkElement>(&root, name)?;
             let filling = Rc::downgrade(&page);
-            on_row(&list, move |at, parts| filling.upgrade().map_or(Ok(()), |p| p.fill_up(at, parts)))?;
+            on_row(&list, move |at, parts| {
+                filling.upgrade().map_or(Ok(()), |p| p.fill_up(name, at, parts))
+            })?;
     let typing = Rc::downgrade(&page);
     crate::ui::keep(named::<crate::xaml::ITextBox>(&page.root, "UpQuery")?.TextChanged(
         move |_: windows_core::Ref<windows_core::IInspectable>, _: windows_core::Ref<crate::xaml::TextChangedEventArgs>| {
@@ -159,6 +186,20 @@ impl FollowPage {
                 }
             })?;
         }
+        let watching = Rc::downgrade(&page);
+        crate::ui::keep(named::<crate::xaml::IScrollViewer>(&root, "BarScroll")?.ViewChanged(
+            move |sender: windows_core::Ref<IInspectable>,
+                  _: windows_core::Ref<crate::xaml::ScrollViewerViewChangedEventArgs>| {
+                let (Some(page), Ok(sender)) = (watching.upgrade(), sender.ok()) else { return };
+                let Ok(scroll) = sender.cast::<crate::xaml::IScrollViewer>() else { return };
+                let offset = scroll.HorizontalOffset().unwrap_or(0.0);
+                let room = scroll.ScrollableWidth().unwrap_or(0.0);
+                let _ = page.looked(offset >= room - 1.0);
+            },
+        )?);
+        on_click(&root, "SeeAll", || {
+            let _ = crate::ui::follow_all::show();
+        })?;
         let asking = Rc::downgrade(&page);
         page.posts.on_comments(move |area, total| {
             if let Some(page) = asking.upgrade() {
@@ -251,41 +292,10 @@ impl FollowPage {
         Ok(())
     }
 
-    /// Lists every followed UP, those already shown first.
-    fn load_more_ups(&self) {
-        let Some(shell) = shell() else { return };
-        let Some(backend) = shell.backend.get().cloned() else { return };
-        toast("正在读取全部关注…");
-        let (dispatcher, core) = (shell.dispatcher.clone(), backend.clone());
-        backend.spawn(async move {
-            let all = core.services.following.all().await.map_err(|e| e.to_string());
-            post(&dispatcher, move || match all {
-                Ok(all) => {
-                    if let Some(page) = held() {
-                        let _ = page.took_all(all.ups);
-                    }
-                }
-                Err(problem) => toast(&format!("读取失败：{problem}")),
-            });
-        });
-    }
-
-    fn took_all(&self, all: Vec<FollowingUp>) -> Result<()> {
-        let mut ups = self.ups.borrow().clone();
-        ups.retain(|u| u.mid != MORE);
-        for up in all {
-            if !ups.iter().any(|u| u.mid == up.mid) {
-                ups.push(FollowedUp { mid: up.mid, name: up.name, face: up.face, has_update: up.has_update });
-            }
-        }
-        self.show_ups(ups)
-    }
-
     fn pick(&self, at: usize) -> Result<()> {
         let Some(mid) = self.ups.borrow().get(at).map(|u| u.mid) else { return Ok(()) };
         if mid == MORE {
-            self.load_more_ups();
-            return Ok(());
+            return crate::ui::follow_all::show();
         }
         for name in ["Ups", "Bar"] {
             named::<ISelector>(&self.root, name)?.SetSelectedIndex(at as i32)?;
@@ -296,10 +306,18 @@ impl FollowPage {
         } else {
             Visibility::Visible
         })?;
+        let shown_at = named::<crate::xaml::IScrollViewer>(&self.root, "BarScroll")
+            .and_then(|scroll| scroll.HorizontalOffset())
+            .unwrap_or(0.0);
+        let same = self.ups.borrow().clone();
+        self.show_ups(same)?;
+        if let Ok(scroll) = named::<crate::xaml::IScrollViewer>(&self.root, "BarScroll") {
+            let _ = scroll.ScrollToHorizontalOffset(shown_at);
+        }
         self.posts.show_up(mid)
     }
 
-    fn fill_up(&self, at: usize, parts: &IVector<UIElement>) -> Result<()> {
+    fn fill_up(&self, list: &str, at: usize, parts: &IVector<UIElement>) -> Result<()> {
         let ups = self.ups.borrow();
         let Some(up) = ups.get(at) else { return Ok(()) };
         if up.face.is_empty() {
@@ -308,7 +326,18 @@ impl FollowPage {
             shown(parts.GetAt(0), true)?;
             self.covers.show(&parts.GetAt(0)?.cast::<IImage>()?, &up.face, FACE_DECODE_WIDTH)?;
         }
-        parts.GetAt(1)?.cast::<ITextBlock>()?.SetText(&up.name)
+        if list != "Bar" {
+            return parts.GetAt(1)?.cast::<ITextBlock>()?.SetText(&up.name);
+        }
+        // 头像条: face, 未读小方块, 名字, 选中的 3dp 线.
+        shown(parts.GetAt(1), up.has_update)?;
+        parts.GetAt(2)?.cast::<ITextBlock>()?.SetText(&up.name)?;
+        shown(parts.GetAt(3), up.mid == self.mid.get())
+    }
+
+    /// The bar has been swiped to its end: the 全部关注 entry shows.
+    fn looked(&self, at_end: bool) -> Result<()> {
+        shown(named(&self.root, "SeeAll"), at_end)
     }
 
     /// Beside the posts on a wide window; a page of their own otherwise, back to here.
@@ -339,7 +368,7 @@ impl FollowPage {
         named::<IColumnDefinition>(&self.root, "UpsColumn")?.SetWidth(pixels(ups))?;
         named::<IRowDefinition>(&self.root, "BarRow")?.SetHeight(if narrow { auto } else { pixels(0.0) })?;
         shown(named(&self.root, "UpsPane"), !narrow)?;
-        shown(named(&self.root, "Bar"), narrow)
+        shown(named(&self.root, "BarHost"), narrow)
     }
 }
 
