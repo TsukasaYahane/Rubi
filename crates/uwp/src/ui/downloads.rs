@@ -78,6 +78,11 @@ struct Shown {
 /// The page of downloads.
 pub fn build() -> Result<IFrameworkElement> {
     let root = load(LAYOUT)?;
+    // A page built anew starts with nothing drawn. The rows kept from the last one belong to a
+    // tree that is no longer on screen: `paint` would take them for its own, decide the list has
+    // not changed, and fill them instead of this page's — leaving the new one empty.
+    SHOWN.with_borrow_mut(Vec::clear);
+    ROWS.with_borrow_mut(Vec::clear);
     PAGE.with_borrow_mut(|slot| *slot = Some(root.clone()));
     let turn = TURN.get().wrapping_add(1);
     TURN.set(turn);
