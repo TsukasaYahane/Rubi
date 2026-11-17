@@ -1155,8 +1155,9 @@ pub fn leave() {
     if let Some(standby) = waiting {
         media::close(Some(standby.player), Some(standby.source));
     }
-    // A video lives as long as its page does: leaving the page ends it, sound and all.
-    stop_playing();
+    // The picture belongs to the page, the sound does not: it plays on under the 正在播放 line,
+    // until the page is left for good (stop_playing) or another video takes its place.
+    playing::set_on_page(false);
 }
 
 /// Lets the player go: the sound stops. Called when the user leaves the video for good.
@@ -1947,6 +1948,10 @@ fn play(source: &MediaSource) -> Result<MediaPlaybackSession> {
     });
     let (player, item) = media::player_titled(source, &title, &artist, &cover)?;
     playing::set_item(item);
+    // Named here, where the title is: a page without the video shows this line while it plays on.
+    let line = if artist.is_empty() { title.clone() } else { format!("{title} · {artist}") };
+    playing::set_note(&line);
+    playing::set_on_page(true);
     wire_commands(&player)?;
     if let Some(page) = &shown {
         page.video.show(&player)?;

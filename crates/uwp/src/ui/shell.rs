@@ -118,6 +118,17 @@ const LAYOUT: &str = r##"
   </StackPanel>
   <ContentControl x:Name="Page" Grid.Column="2" Grid.Row="1" HorizontalContentAlignment="Stretch"
                   VerticalContentAlignment="Stretch" IsTabStop="False" />
+  <!-- What is still playing while another page is on screen. -->
+  <Border x:Name="NowPlaying" Grid.Column="2" Grid.Row="1" VerticalAlignment="Top" Height="32"
+          Background="#E60050EF" Padding="12,0" Visibility="Collapsed">
+    <Grid>
+      <Grid.ColumnDefinitions><ColumnDefinition Width="*" /><ColumnDefinition Width="Auto" /></Grid.ColumnDefinitions>
+      <TextBlock x:Name="NowPlayingText" Foreground="White" FontSize="12" VerticalAlignment="Center"
+                 TextTrimming="CharacterEllipsis" />
+      <Button x:Name="NowStop" Grid.Column="1" Content="停止" Background="Transparent" BorderThickness="0"
+              Foreground="White" FontSize="12" Padding="8,0" Height="32" />
+    </Grid>
+  </Border>
   <Grid x:Name="Viewer" Grid.Row="1" Grid.RowSpan="2" Grid.ColumnSpan="3" Visibility="Collapsed" />
   <Canvas x:Name="Preload" Width="1" Height="1" Opacity="0" IsHitTestVisible="False" />
   <Border x:Name="Toast" Grid.Column="2" Grid.Row="1" HorizontalAlignment="Center" VerticalAlignment="Bottom"
@@ -213,6 +224,11 @@ pub fn start() -> Result<()> {
     });
     SHELL.with(|s| *s.borrow_mut() = Some(shell.clone()));
 
+    let for_stop = shell.clone();
+    on_click(&root, "NowStop", move || {
+        crate::ui::player::stop_playing();
+        let _ = for_stop.refresh_now_playing();
+    })?;
     on_click(&root, "RailSearch", || show_tab(Tab::Search))?;
     for (tab, name) in TABS {
         for prefix in ["Rail", "Bar"] {
@@ -565,7 +581,18 @@ impl Shell {
         if let Ok(element) = page.cast::<IFrameworkElement2>() {
             let _ = element.SetRequestedTheme(self.theme());
         }
-        self.page.SetContent(&page.cast::<IInspectable>()?)
+        self.page.SetContent(&page.cast::<IInspectable>()?)?;
+        self.refresh_now_playing()
+    }
+
+    /// Shows what still plays while this page is on screen, and hides the line when nothing does.
+    fn refresh_now_playing(&self) -> Result<()> {
+        let bar = named::<crate::xaml::IUIElement>(&self.root, "NowPlaying")?;
+        let sound = crate::ui::playing::note().filter(|_| !crate::ui::playing::on_page());
+        if let Some(title) = &sound {
+            let _ = set_text(&self.root, "NowPlayingText", title);
+        }
+        bar.SetVisibility(if sound.is_some() { Visibility::Visible } else { Visibility::Collapsed })
     }
 
     /// The page on show.
