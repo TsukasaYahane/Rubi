@@ -172,6 +172,14 @@ pub fn shell() -> Option<Rc<Shell>> {
 
 /// Builds the window, then opens the core in the background.
 pub fn start() -> Result<()> {
+    // The media panel brings the app back by launching it again. Building the shell a second time
+    // would put 首页 over the page the user left, with the sound still playing behind it.
+    if shell().is_some() {
+        if let Ok(window) = Window::Current().and_then(|window| window.cast::<IWindow>()) {
+            let _ = window.Activate();
+        }
+        return Ok(());
+    }
     let window = Window::Current()?.cast::<IWindow>()?;
     let layout = LAYOUT
         .replace("<!--rail-badge-->", &badge("RailBadge", "12,-6,-12,0"))

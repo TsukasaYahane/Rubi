@@ -587,7 +587,11 @@ impl CardGrid {
             leaving();
         }
         let result = match card.target {
-            Target::Video { bvid, owner } => feed::route(&bvid, &card.title, &owner),
+            Target::Video { bvid, owner } => {
+                // The card already has the cover: hand it over so the media panel has one at once.
+                crate::ui::player::with_cover(&card.cover);
+                feed::route(&bvid, &card.title, &owner)
+            }
             Target::Room { id, owner, uid } => live_room::open(id, &card.title, &owner, uid),
         };
         if let Err(problem) = &result {

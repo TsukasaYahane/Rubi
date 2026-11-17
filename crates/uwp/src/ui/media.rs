@@ -73,7 +73,12 @@ pub fn player(source: &MediaSource) -> Result<MediaPlayer> {
 
 /// As [`player`], with a title and artist for the system media panel. The panel reads them off
 /// the playback item, not off the view's own transport controls, so the item has to carry them.
-pub fn player_titled(source: &MediaSource, title: &str, artist: &str, cover: &str) -> Result<MediaPlayer> {
+pub fn player_titled(
+    source: &MediaSource,
+    title: &str,
+    artist: &str,
+    cover: &str,
+) -> Result<(MediaPlayer, crate::xaml::MediaPlaybackItem)> {
     let player = MediaPlayer::new()?;
     let item = crate::xaml::MediaPlaybackItem::Create(source)?;
     if let Ok(display) = item.cast::<crate::xaml::IMediaPlaybackItem2>()
@@ -100,7 +105,7 @@ pub fn player_titled(source: &MediaSource, title: &str, artist: &str, cover: &st
             crate::ui::smtc::refresh();
         })?;
     crate::ui::keep(revoker);
-    Ok(player)
+    Ok((player, item))
 }
 
 /// A silent player on `source`, not on screen, to take over from another. It plays by itself when

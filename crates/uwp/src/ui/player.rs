@@ -286,6 +286,8 @@ thread_local! {
     static PAUSED_FOR_BLUR: Cell<bool> = const { Cell::new(false) };
     /// The episode the next opening plays, if it is one.
     static NEXT_EPISODE: Cell<Option<(u64, u64)>> = const { Cell::new(None) };
+    /// Cover of the video about to open, when the page that asked for it already had one.
+    static NEXT_COVER: RefCell<Option<String>> = const { RefCell::new(None) };
     /// The comment the next video opens at, from a notice.
     static NEXT_FOCUS: Cell<Option<rubi_model::CommentRef>> = const { Cell::new(None) };
     /// Where the next opening of a video starts, in 100 ns ticks: back from the small window.
@@ -1195,6 +1197,12 @@ fn show_if_there(root: &IFrameworkElement, name: &str) {
     }
 }
 
+/// The cover the page that opens next already knows: a card carries one, and waiting for the
+/// detail call to bring it back leaves the media panel without a picture for a second or two.
+pub fn with_cover(cover: &str) {
+    NEXT_COVER.with_borrow_mut(|slot| *slot = Some(cover.to_owned()));
+}
+
 pub fn show(bvid: &str, title: &str, uploader: &str) -> Result<()> {
     open(false, bvid, title, uploader)
 }
@@ -1428,6 +1436,7 @@ pub fn open(feed: bool, bvid: &str, title: &str, uploader: &str) -> Result<()> {
                 page.side.set_aid(card.aid, card.stats.reply);
                 page.actions.set_counts(card.stats.like, card.stats.coin, card.stats.favorite);
                 let _ = set_text(&page.root, "Title", &card.title);
+                playing::set_cover(&card.cover);
                 let _ = show_up_link(&page, card.owner.mid, &card.owner.name);
                 let _ = show_detail(&page.root, &card);
             }
@@ -1933,11 +1942,11 @@ fn step_video(forward: bool) {
 fn play(source: &MediaSource) -> Result<MediaPlaybackSession> {
     let shown = page();
     let (title, artist) = shown.as_ref().map(|p| (p.title.clone(), p.uploader.clone())).unwrap_or_default();
-    let cover = shown
-        .as_ref()
-        .and_then(|p| p.card.borrow().as_ref().map(|c| c.cover.clone()))
-        .unwrap_or_default();
-    let player = media::player_titled(source, &title, &artist, &cover)?;
+    let cover = NEXT_COVER.with_borrow_mut(Option::take).unwrap_or_else(|| {
+        shown.as_ref().and_then(|p| p.card.borrow().as_ref().map(|c| c.cover.clone())).unwrap_or_default()
+    });
+    let (player, item) = media::player_titled(source, &title, &artist, &cover)?;
+    playing::set_item(item);
     wire_commands(&player)?;
     if let Some(page) = &shown {
         page.video.show(&player)?;
