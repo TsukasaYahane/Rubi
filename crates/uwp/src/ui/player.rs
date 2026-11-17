@@ -1881,10 +1881,64 @@ fn report_failures(player: &MediaPlayer) -> Result<()> {
     Ok(())
 }
 
+/// Lets the media keys and the system panel move to another video: the play list when one is
+/// open, the feed's next suggestion when it is not.
+fn wire_commands(player: &MediaPlayer) -> Result<()> {
+    let Ok(manager) = player.cast::<IMediaPlayer3>().and_then(|p| p.CommandManager()) else { return Ok(()) };
+    let Ok(commands) = manager.cast::<crate::xaml::IMediaPlaybackCommandManager>() else { return Ok(()) };
+    let _ = commands.SetIsEnabled(true);
+    for behavior in [commands.NextBehavior(), commands.PreviousBehavior()].into_iter().flatten() {
+        if let Ok(behavior) = behavior.cast::<crate::xaml::IMediaPlaybackCommandManagerCommandBehavior>() {
+            let _ = behavior.SetEnablingRule(crate::xaml::MediaCommandEnablingRule::Always);
+        }
+    }
+    let next = commands.NextReceived(|_: Ref<crate::xaml::MediaPlaybackCommandManager>, _: Ref<crate::xaml::MediaPlaybackCommandManagerNextReceivedEventArgs>| {
+        step_video(true);
+    })?;
+    keep(next);
+    let previous = commands.PreviousReceived(|_: Ref<crate::xaml::MediaPlaybackCommandManager>, _: Ref<crate::xaml::MediaPlaybackCommandManagerPreviousReceivedEventArgs>| {
+        step_video(false);
+    })?;
+    keep(previous);
+    Ok(())
+}
+
+/// The next video: the one queued after this, or what the feed suggests when nothing is queued.
+fn step_video(forward: bool) {
+    if let Some(queued) = queue::view() {
+        if forward && queued.has_next() {
+            queue::step(1);
+            return;
+        }
+        if !forward && queued.has_previous() {
+            queue::step(-1);
+            return;
+        }
+    }
+    let Some(page) = page() else { return };
+    let Some(shell) = shell() else { return };
+    let Some(backend) = shell.backend.get().cloned() else { return };
+    let (dispatcher, core, bvid) = (shell.dispatcher.clone(), backend.clone(), page.bvid.clone());
+    backend.spawn(async move {
+        let _ = core.services.home.refresh_now(1).await;
+        let Ok(cards) = core.services.home.next_page(1) else { return };
+        let Some(ranked) = cards.into_iter().find(|ranked| ranked.card.bvid != bvid) else { return };
+        let (next, title, owner) = (ranked.card.bvid, ranked.card.title, ranked.card.owner.name);
+        post(&dispatcher, move || {
+            let _ = show(&next, &title, &owner);
+        });
+    });
+}
+
 fn play(source: &MediaSource) -> Result<MediaPlaybackSession> {
     let shown = page();
     let (title, artist) = shown.as_ref().map(|p| (p.title.clone(), p.uploader.clone())).unwrap_or_default();
-    let player = media::player_titled(source, &title, &artist)?;
+    let cover = shown
+        .as_ref()
+        .and_then(|p| p.card.borrow().as_ref().map(|c| c.cover.clone()))
+        .unwrap_or_default();
+    let player = media::player_titled(source, &title, &artist, &cover)?;
+    wire_commands(&player)?;
     if let Some(page) = &shown {
         page.video.show(&player)?;
     }

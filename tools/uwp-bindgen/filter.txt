@@ -19,6 +19,9 @@ Windows.Media.Core.AudioTrack
 Windows.Media.Core.IMediaSourceStatics
 Windows.Media.Core.IMediaSourceStatics2
 Windows.Media.Core.MediaSource
+Windows.Media.Playback.IMediaPlaybackCommandManager
+Windows.Media.Playback.IMediaPlaybackCommandManagerCommandBehavior
+Windows.Media.Playback.MediaPlaybackCommandManager
 Windows.Media.Playback.IMediaPlaybackItem
 Windows.Media.Playback.IMediaPlaybackItemFactory
 Windows.Media.Playback.IMediaPlaybackItem2

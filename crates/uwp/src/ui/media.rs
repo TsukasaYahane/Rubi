@@ -73,7 +73,7 @@ pub fn player(source: &MediaSource) -> Result<MediaPlayer> {
 
 /// As [`player`], with a title and artist for the system media panel. The panel reads them off
 /// the playback item, not off the view's own transport controls, so the item has to carry them.
-pub fn player_titled(source: &MediaSource, title: &str, artist: &str) -> Result<MediaPlayer> {
+pub fn player_titled(source: &MediaSource, title: &str, artist: &str, cover: &str) -> Result<MediaPlayer> {
     let player = MediaPlayer::new()?;
     let item = crate::xaml::MediaPlaybackItem::Create(source)?;
     if let Ok(display) = item.cast::<crate::xaml::IMediaPlaybackItem2>()
@@ -85,6 +85,12 @@ pub fn player_titled(source: &MediaSource, title: &str, artist: &str) -> Result<
         if let Ok(music) = meta.MusicProperties() {
             let _ = music.SetTitle(title);
             let _ = music.SetArtist(artist);
+        }
+        if !cover.is_empty()
+            && let Ok(uri) = crate::xaml::Uri::CreateUri(cover)
+            && let Ok(stream) = crate::xaml::RandomAccessStreamReference::CreateFromUri(&uri)
+        {
+            let _ = meta.SetThumbnail(&stream);
         }
         let _ = display.ApplyDisplayProperties(&props);
     }
