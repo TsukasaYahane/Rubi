@@ -123,8 +123,11 @@ const LAYOUT: &str = r##"
           Background="#E60050EF" Padding="12,0" Visibility="Collapsed">
     <Grid>
       <Grid.ColumnDefinitions><ColumnDefinition Width="*" /><ColumnDefinition Width="Auto" /></Grid.ColumnDefinitions>
-      <TextBlock x:Name="NowPlayingText" Foreground="White" FontSize="12" VerticalAlignment="Center"
-                 TextTrimming="CharacterEllipsis" />
+      <Button x:Name="NowGo" Grid.Column="0" Background="Transparent" BorderThickness="0" Padding="0"
+              HorizontalContentAlignment="Stretch" VerticalContentAlignment="Center" VerticalAlignment="Stretch">
+        <TextBlock x:Name="NowPlayingText" Foreground="White" FontSize="12" VerticalAlignment="Center"
+                   TextTrimming="CharacterEllipsis" />
+      </Button>
       <Button x:Name="NowStop" Grid.Column="1" Content="停止" Background="Transparent" BorderThickness="0"
               Foreground="White" FontSize="12" Padding="8,0" Height="32" />
     </Grid>
@@ -135,25 +138,16 @@ const LAYOUT: &str = r##"
           Margin="0,0,0,24" Padding="14,7" Background="#E6000000" Visibility="Collapsed" IsHitTestVisible="False">
     <TextBlock x:Name="ToastText" FontSize="13" Foreground="White" TextWrapping="Wrap" />
   </Border>
+  <!-- 窄屏底部四个纯文字标签；搜索与消息在首页顶栏，设置在「我的」里 -->
   <Grid x:Name="Bottom" Grid.Column="2" Grid.Row="2" BorderThickness="0,1,0,0"
         BorderBrush="{ThemeResource SystemControlForegroundBaseLowBrush}">
     <Grid.ColumnDefinitions>
-      <ColumnDefinition /><ColumnDefinition /><ColumnDefinition /><ColumnDefinition /><ColumnDefinition />
-      <ColumnDefinition />
+      <ColumnDefinition /><ColumnDefinition /><ColumnDefinition /><ColumnDefinition />
     </Grid.ColumnDefinitions>
-    <Button x:Name="BarHome" Style="{StaticResource Bar}"><StackPanel>
-      <FontIcon x:Name="BarIconHome" Glyph="&#xE80F;" FontSize="20" /><TextBlock Text="首页" FontSize="11" /></StackPanel></Button>
-    <Button x:Name="BarFollow" Grid.Column="1" Style="{StaticResource Bar}"><StackPanel>
-      <FontIcon x:Name="BarIconFollow" Glyph="&#xEB51;" FontSize="20" /><TextBlock Text="关注" FontSize="11" /></StackPanel></Button>
-    <Button x:Name="BarLive" Grid.Column="2" Style="{StaticResource Bar}"><StackPanel>
-      <FontIcon x:Name="BarIconLive" Glyph="&#xE93E;" FontSize="20" /><TextBlock Text="直播" FontSize="11" /></StackPanel></Button>
-    <Button x:Name="BarInbox" Grid.Column="3" Style="{StaticResource Bar}"><Grid><StackPanel>
-      <FontIcon x:Name="BarIconInbox" Glyph="&#xE715;" FontSize="20" /><TextBlock Text="消息" FontSize="11" /></StackPanel>
-      <!--bar-badge--></Grid></Button>
-    <Button x:Name="BarMe" Grid.Column="4" Style="{StaticResource Bar}"><StackPanel>
-      <FontIcon x:Name="BarIconMe" Glyph="&#xE77B;" FontSize="20" /><TextBlock Text="我的" FontSize="11" /></StackPanel></Button>
-    <Button x:Name="BarSettings" Grid.Column="5" Style="{StaticResource Bar}"><StackPanel>
-      <FontIcon x:Name="BarIconSettings" Glyph="&#xE713;" FontSize="20" /><TextBlock Text="设置" FontSize="11" /></StackPanel></Button>
+    <Button x:Name="BarHome" Style="{StaticResource Bar}"><TextBlock Text="首页" FontSize="15" /></Button>
+    <Button x:Name="BarFollow" Grid.Column="1" Style="{StaticResource Bar}"><TextBlock Text="关注" FontSize="15" /></Button>
+    <Button x:Name="BarLive" Grid.Column="2" Style="{StaticResource Bar}"><TextBlock Text="直播" FontSize="15" /></Button>
+    <Button x:Name="BarMe" Grid.Column="3" Style="{StaticResource Bar}"><TextBlock Text="我的" FontSize="15" /></Button>
   </Grid>
 </Grid>"##;
 
@@ -225,6 +219,11 @@ pub fn start() -> Result<()> {
     SHELL.with(|s| *s.borrow_mut() = Some(shell.clone()));
 
     let for_stop = shell.clone();
+    on_click(&root, "NowGo", || {
+        if let Some((bvid, title)) = crate::ui::playing::where_now() {
+            let _ = crate::ui::player::open(false, &bvid, &title, "");
+        }
+    })?;
     on_click(&root, "NowStop", move || {
         crate::ui::player::stop_playing();
         let _ = for_stop.refresh_now_playing();
@@ -700,7 +699,10 @@ impl Shell {
             let color = if tab == self.tab.get() { COBALT } else { DIM };
             let brush = SolidColorBrush::CreateInstanceWithColor(color)?;
             for prefix in ["Rail", "Bar"] {
-                named::<IControl>(&self.root, &format!("{prefix}{name}"))?.SetForeground(&brush)?;
+                // 消息 and 设置 have no place on the narrow bar any more.
+                if let Ok(control) = named::<IControl>(&self.root, &format!("{prefix}{name}")) {
+                    control.SetForeground(&brush)?;
+                }
             }
         }
         Ok(())

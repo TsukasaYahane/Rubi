@@ -17,6 +17,8 @@ thread_local! {
     static HELD: RefCell<Option<Held>> = const { RefCell::new(None) };
     /// What is playing, for the line other pages show while it goes on without them.
     static NOTE: RefCell<Option<String>> = const { RefCell::new(None) };
+    /// Which video it is, so the line can take the user back to it.
+    static WHERE: RefCell<Option<(String, String)>> = const { RefCell::new(None) };
     /// The item the player was given: the cover is put on it once the page knows it, which is
     /// after playback has already started.
     static ITEM: RefCell<Option<MediaPlaybackItem>> = const { RefCell::new(None) };
@@ -43,6 +45,15 @@ pub(crate) fn set_note(title: &str) {
 
 pub(crate) fn note() -> Option<String> {
     NOTE.with_borrow(Clone::clone)
+}
+
+/// Names the video itself (bvid, title).
+pub(crate) fn set_where(bvid: &str, title: &str) {
+    WHERE.with_borrow_mut(|slot| *slot = Some((bvid.to_owned(), title.to_owned())));
+}
+
+pub(crate) fn where_now() -> Option<(String, String)> {
+    WHERE.with_borrow(Clone::clone)
 }
 
 /// Whether the video page is the one showing.
@@ -95,6 +106,7 @@ pub(crate) fn set_cover(cover: &str) {
 pub(crate) fn drop_it() {
     ITEM.with_borrow_mut(|slot| *slot = None);
     NOTE.with_borrow_mut(|slot| *slot = None);
+    WHERE.with_borrow_mut(|slot| *slot = None);
     set_on_page(false);
     if let Some(held) = take() {
         media::close(Some(held.player), Some(held.source));

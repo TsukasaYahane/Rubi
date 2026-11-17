@@ -155,6 +155,13 @@ fn shelf_buttons(narrow: bool) -> String {
             )
         })
         .collect();
+    // 设置 lives here now that the narrow bar keeps to four tabs.
+    buttons.push_str(&format!(
+        r##"<Button x:Name="ShelfSettings" Background="Transparent" {line} Height="44" Padding="16,0"
+             HorizontalAlignment="Stretch" HorizontalContentAlignment="Stretch"><Grid>
+             <Grid.ColumnDefinitions><ColumnDefinition Width="*" /><ColumnDefinition Width="Auto" />
+             </Grid.ColumnDefinitions><TextBlock Text="设置" />{arrow}</Grid></Button>"##
+    ));
     buttons.push_str(
         r##"<Button x:Name="SignOut" Content="退出登录" Visibility="Collapsed" Background="Transparent"
              BorderThickness="0" Height="44" Padding="16,0" HorizontalAlignment="Stretch"
@@ -235,6 +242,9 @@ pub fn show() -> Result<()> {
     shell.set_page(&root)?;
     SHOWN.with(|s| *s.borrow_mut() = Some(Shown { root: root.clone(), body: None, class }));
     show_head();
+    on_click(&root, "ShelfSettings", || {
+        let _ = crate::ui::settings_page::show();
+    })?;
     for (at, shelf) in Shelf::ALL.into_iter().enumerate() {
         on_click(&root, &format!("Shelf{at}"), move || {
             if let Err(problem) = open_shelf(shelf, true) {

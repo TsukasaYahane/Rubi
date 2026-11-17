@@ -34,7 +34,7 @@ const LAYOUT: &str = r##"
     <RowDefinition Height="*" />
   </Grid.RowDefinitions>
   <Grid Margin="16,8,16,8">
-    <Grid.ColumnDefinitions><ColumnDefinition Width="Auto" /><ColumnDefinition Width="*" /><ColumnDefinition Width="Auto" /><ColumnDefinition Width="Auto" /><ColumnDefinition Width="Auto" /><ColumnDefinition Width="Auto" /></Grid.ColumnDefinitions>
+    <Grid.ColumnDefinitions><ColumnDefinition Width="Auto" /><ColumnDefinition Width="*" /><ColumnDefinition Width="Auto" /><ColumnDefinition Width="Auto" /><ColumnDefinition Width="Auto" /><ColumnDefinition Width="Auto" /><ColumnDefinition Width="Auto" /></Grid.ColumnDefinitions>
     <StackPanel Orientation="Horizontal">
       <StackPanel.Resources>
         <Style TargetType="Button">
@@ -66,6 +66,9 @@ const LAYOUT: &str = r##"
             MinHeight="0" Height="30" Visibility="Collapsed" />
     <Button x:Name="Search" Grid.Column="3" Visibility="Collapsed" Background="Transparent" BorderThickness="0"
             Padding="8,2" VerticalAlignment="Center"><FontIcon Glyph="&#xE721;" FontSize="14" /></Button>
+    <!-- A narrow window has no rail: its 消息 entry sits here. -->
+    <Button x:Name="Inbox" Grid.Column="6" Visibility="Collapsed" Background="Transparent" BorderThickness="0"
+            Padding="8,2" VerticalAlignment="Center"><FontIcon Glyph="&#xE715;" FontSize="14" /></Button>
   </Grid>
   <Grid x:Name="FeedNoteRow" Grid.Row="1" Margin="16,0,16,8" Background="Transparent">
     <TextBlock x:Name="FeedNote" FontSize="12" TextWrapping="NoWrap" TextTrimming="CharacterEllipsis"
@@ -165,6 +168,7 @@ impl HomePage {
             }
         })?;
         on_click(&page.root, "Search", || show_tab(Tab::Search))?;
+        on_click(&page.root, "Inbox", || show_tab(Tab::Inbox))?;
         // The status line doubles as the way into 被过滤内容; a missing one must not keep the page
         // from being made.
         if let Ok(status) = named::<crate::xaml::IUIElement>(&page.root, "FeedNoteRow") {
@@ -240,6 +244,7 @@ impl HomePage {
         let narrow = shell().is_some_and(|s| s.class() == WindowClass::Narrow);
         let shown = if narrow { Visibility::Visible } else { Visibility::Collapsed };
         named::<IUIElement>(&self.root, "Search")?.SetVisibility(shown)?;
+        named::<IUIElement>(&self.root, "Inbox")?.SetVisibility(shown)?;
         // A narrow window keeps 推荐, 热门 and 影视 in the row.
         let wide_only = if narrow { Visibility::Collapsed } else { Visibility::Visible };
         named::<IUIElement>(&self.root, "Tab2")?.SetVisibility(wide_only)?;

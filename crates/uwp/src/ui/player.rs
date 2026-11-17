@@ -1951,6 +1951,9 @@ fn play(source: &MediaSource) -> Result<MediaPlaybackSession> {
     // Named here, where the title is: a page without the video shows this line while it plays on.
     let line = if artist.is_empty() { title.clone() } else { format!("{title} · {artist}") };
     playing::set_note(&line);
+    if let Some(page) = page() {
+        playing::set_where(&page.bvid, &page.title);
+    }
     playing::set_on_page(true);
     wire_commands(&player)?;
     if let Some(page) = &shown {

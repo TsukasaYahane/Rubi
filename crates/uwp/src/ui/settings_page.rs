@@ -19,7 +19,10 @@ const DIM: Color = Color { a: 255, r: 0x76, g: 0x76, b: 0x76 };
 const LAYOUT: &str = r##"<Grid xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
       xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml">
   <Grid.RowDefinitions><RowDefinition Height="Auto" /><RowDefinition Height="*" /></Grid.RowDefinitions>
-  <StackPanel x:Name="Cats" Orientation="Horizontal" Margin="16,12,16,10" />
+  <ScrollViewer HorizontalScrollBarVisibility="Hidden" HorizontalScrollMode="Enabled"
+                VerticalScrollMode="Disabled" VerticalScrollBarVisibility="Disabled" Margin="16,12,16,10">
+    <StackPanel x:Name="Cats" Orientation="Horizontal" />
+  </ScrollViewer>
   <ContentControl x:Name="Body" Grid.Row="1" IsTabStop="False" HorizontalContentAlignment="Stretch"
                   VerticalContentAlignment="Stretch" />
 </Grid>"##;
