@@ -46,6 +46,12 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.blur
 import androidx.compose.ui.draw.clipToBounds
+import androidx.compose.ui.draw.drawBehind
+import androidx.compose.ui.text.AnnotatedString
+import androidx.compose.ui.text.TextStyle
+import androidx.compose.ui.text.drawText
+import androidx.compose.ui.text.rememberTextMeasurer
+import androidx.compose.ui.unit.TextUnit
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
@@ -479,7 +485,7 @@ private fun FeedPage(deps: VideoPageDeps, nav: Nav, state: VerticalFeedState, ca
         ) {
             if (!state.clean) {
                 Box(Modifier.size(44.dp).clickable { nav.pop() }, contentAlignment = Alignment.Center) { GlyphIcon(Glyph.Back, Color.White) }
-                Text("竖屏推流 · 第 ${index + 1} 条", fontSize = 12.sp, color = Color(0xD9FFFFFF), modifier = Modifier.weight(1f))
+                OutlinedText("竖屏推流 · 第 ${index + 1} 条", fontSize = 12.sp, color = Color(0xD9FFFFFF), modifier = Modifier.weight(1f))
             } else {
                 Box(Modifier.weight(1f))
             }
@@ -541,14 +547,14 @@ private fun FeedPage(deps: VideoPageDeps, nav: Nav, state: VerticalFeedState, ca
         // Bottom: who and what, the progress, and 发弹幕.
         Column(Modifier.align(Alignment.BottomStart).fillMaxWidth()) {
             Column(Modifier.padding(start = 12.dp, end = 72.dp, bottom = 8.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
-                Text(
+                OutlinedText(
                     "@${card.upName}",
                     fontSize = 14.sp,
                     fontWeight = FontWeight.SemiBold,
                     color = Color.White,
                     modifier = Modifier.clickable { nav.push(Screen.Up(card.upMid, card.upName)) },
                 )
-                Text(card.title, fontSize = 13.sp, color = Color.White, maxLines = 2, overflow = TextOverflow.Ellipsis, modifier = Modifier.clickable { panel = FeedPanel.Sheet(2) })
+                OutlinedText(card.title, fontSize = 13.sp, color = Color.White, maxLines = 2, overflow = TextOverflow.Ellipsis, modifier = Modifier.clickable { panel = FeedPanel.Sheet(2) })
                 if (note.isNotEmpty()) Text(note, fontSize = 12.sp, color = Color(0xFFFF8A8A))
             }
             if (active) FeedProgress()
@@ -607,14 +613,14 @@ private fun SideAction(icon: LineIcon, label: String, on: Boolean, name: String?
         if (LocalWordsUi.current) {
             // 文字: one character over its count, or the word alone, at one size.
             if (name != null && name != label) {
-                Text(name, fontSize = 19.sp, lineHeight = 22.sp, fontWeight = if (on) FontWeight.SemiBold else FontWeight.Light, color = tint)
-                Text(label, fontSize = 11.sp, lineHeight = 14.sp, color = tint, maxLines = 1)
+                OutlinedText(name, fontSize = 19.sp, lineHeight = 22.sp, fontWeight = if (on) FontWeight.SemiBold else FontWeight.Light, color = tint)
+                OutlinedText(label, fontSize = 11.sp, lineHeight = 14.sp, color = tint, maxLines = 1)
             } else {
-                Text(label, fontSize = 15.sp, lineHeight = 18.sp, fontWeight = if (on) FontWeight.SemiBold else FontWeight.Normal, color = tint, maxLines = 1)
+                OutlinedText(label, fontSize = 15.sp, lineHeight = 18.sp, fontWeight = if (on) FontWeight.SemiBold else FontWeight.Normal, color = tint, maxLines = 1)
             }
         } else {
             LineIconView(icon, tint, 26.dp)
-            Text(label, fontSize = 11.sp, lineHeight = 14.sp, color = tint, maxLines = 1, modifier = Modifier.padding(top = 3.dp))
+            OutlinedText(label, fontSize = 11.sp, lineHeight = 14.sp, color = tint, maxLines = 1, modifier = Modifier.padding(top = 3.dp))
         }
     }
 }
@@ -696,4 +702,37 @@ private fun FeedSheet(deps: VideoPanelDeps, nav: Nav, card: FfiVideoCard, detail
             }
         }
     }
+}
+
+/** 1pt 黑描边: a black copy is drawn under the text, eight ways round, so the edge still reads
+ *  while the picture behind it changes. Only the 竖屏 feed uses it — its titles sit on video. */
+@Composable
+private fun OutlinedText(
+    text: String,
+    modifier: Modifier = Modifier,
+    color: Color = Color.White,
+    fontSize: TextUnit = TextUnit.Unspecified,
+    fontWeight: FontWeight? = null,
+    lineHeight: TextUnit = TextUnit.Unspecified,
+    maxLines: Int = Int.MAX_VALUE,
+    overflow: TextOverflow = TextOverflow.Clip,
+) {
+    val measurer = rememberTextMeasurer()
+    val style = TextStyle(color = color, fontSize = fontSize, fontWeight = fontWeight, lineHeight = lineHeight)
+    val edge = style.copy(color = Color.Black)
+    val step = with(LocalDensity.current) { 1.dp.toPx() }
+    Text(
+        text = text,
+        style = style,
+        maxLines = maxLines,
+        overflow = overflow,
+        modifier = modifier.drawBehind {
+            val laid = measurer.measure(AnnotatedString(text), edge, maxLines = maxLines, overflow = overflow)
+            for (dx in listOf(-step, 0f, step)) {
+                for (dy in listOf(-step, 0f, step)) {
+                    if (dx != 0f || dy != 0f) drawText(laid, topLeft = Offset(dx, dy))
+                }
+            }
+        },
+    )
 }
