@@ -16,7 +16,9 @@ const REPO: &str = "https://github.com/TsukasaYahane/Rubi/releases/latest";
 /// The same releases, asked what the newest one is called.
 const API: &str = "https://api.github.com/repos/TsukasaYahane/Rubi/releases/latest";
 /// The name the store publishes this app under: a package with this name updates from there.
-const STORE_NAME: &str = "75B213EC.MetroBi";
+/// Whether this is the copy that goes to the Store. The packager says so when it builds; the
+/// store's own identifiers (reserved name, publisher) stay in a local file that is not published.
+const STORE_BUILD: bool = option_env!("RUBI_STORE_BUILD").is_some();
 /// `GetCurrentPackageFullName`'s answer when the process was not started from a package.
 const NO_PACKAGE: i32 = 15_700;
 
@@ -54,7 +56,7 @@ pub fn version() -> String {
 
 /// 微软商店 or GitHub, for the settings page to show next to the version.
 pub fn channel() -> &'static str {
-    if package_name().as_deref() == Some(STORE_NAME) {
+    if STORE_BUILD {
         "微软商店"
     } else {
         "GitHub"

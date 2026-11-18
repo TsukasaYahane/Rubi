@@ -20,3 +20,6 @@ acl-recovery/
 
 # Design work stays local too
 /design
+
+# The store's reserved identity, kept out of the published source
+/scripts/store.local.ps1

@@ -1,4 +1,4 @@
-# Builds the UWP app with the pinned nightly for each of -Arch (x64 unless told; arm64 for Surface on
+﻿# Builds the UWP app with the pinned nightly for each of -Arch (x64 unless told; arm64 for Surface on
 # ARM, which needs LLVM's clang) and lays each out as a loose package.
 #
 # With -Register it also registers the x64 layout on this PC (needs Developer Mode; no certificate is
@@ -27,11 +27,15 @@ $Arch = @($Arch -split ',' | ForEach-Object { $_.Trim() } | Where-Object { $_ } 
 foreach ($cpu in $Arch) { if ($cpu -notin 'x64', 'arm64') { throw "Unknown -Arch '$cpu'; use x64 or arm64." } }
 if ($Register -and $Arch -notcontains 'x64') { throw '-Register registers the x64 layout; add x64 to -Arch.' }
 
-# Partner Center: Product management > Product identity.
-$storeName = '75B213EC.MetroBi'
-$storePublisher = 'CN=8DE47572-E1DD-4D84-8C1F-3444FEB72C17'
-# The Store takes only a name reserved for the app.
-$storeDisplayName = 'MetroBi'
+# Partner Center: Product management > Product identity. The values live in scripts\store.local.ps1,
+# which is not part of the repository: the store reserved them for this app alone, and they are not
+# something to publish beside the source. The file defines $storeName, $storePublisher and
+# $storeDisplayName.
+$storeFile = Join-Path $PSScriptRoot 'store.local.ps1'
+if (Test-Path $storeFile) { . $storeFile }
+if ($Store -and -not $storeName) {
+    throw "打包商店版需要 $storeFile，里面写 $storeName / $storePublisher / $storeDisplayName。"
+}
 
 $root = Split-Path $PSScriptRoot -Parent
 $toolchain = 'nightly-2026-10-15'
@@ -50,6 +54,8 @@ foreach ($cpu in $Arch) {
     $target = $targets[$cpu]
     $cargoArgs = @("+$toolchain", 'build', '-p', 'rubi-uwp', '--target', $target, '-Z', 'build-std=std,panic_abort')
     if ($Profile -eq 'release') { $cargoArgs += '--release' }
+    # A store package has to know it is one; the flag is the only trace of it in the build.
+    if ($Store) { $env:RUBI_STORE_BUILD = '1' } else { Remove-Item Env:\RUBI_STORE_BUILD -ErrorAction SilentlyContinue }
     Push-Location $root
     try {
         & cargo @cargoArgs
