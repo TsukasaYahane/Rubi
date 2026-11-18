@@ -9,7 +9,7 @@
 | 平台 | 地址 | 文件 |
 |---|---|---|
 | Windows | [GitHub Releases](https://github.com/TsukasaYahane/Rubi/releases/latest) | `rubi-uwp.msixbundle`（x64 + arm64 合包） |
-| Windows | 微软商店 | <!--store-link-->（上架后补链接） |
+| Windows | [微软商店](https://apps.microsoft.com/detail/9N7MFCS6V2C2) | 商店版（`9N7MFCS6V2C2`） |
 | Android | [GitHub Releases](https://github.com/TsukasaYahane/Rubi/releases/latest) | `rubi-release.apk` |
 
 只要某一个架构时，Release 里也有单独的 `rubi-uwp-arm64.msix` / x64 包。
@@ -67,6 +67,10 @@ scripts\build-uwp.ps1 -Store   -Arch x64,arm64  # 商店包（读 scripts\store.
 | `crates/ffi` | 给 Android 与 Windows 的绑定层 |
 | `crates/uwp` | Windows 界面 |
 | `android/` | Android 界面（Kotlin / Compose） |
+
+## 隐私
+
+应用不向开发者回传任何数据，没有埋点与崩溃上报；账号与缓存都留在本机。细节见 [`PRIVACY.md`](PRIVACY.md)。
 
 ## 第三方组件
 
