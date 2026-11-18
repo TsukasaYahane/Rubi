@@ -17,3 +17,6 @@ build/
 /CLAUDE.md
 /docs/
 acl-recovery/
+
+# Design work stays local too
+/design
