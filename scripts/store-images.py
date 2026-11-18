@@ -7,7 +7,9 @@ show the R alone.
 """
 
 import importlib.util
+import os
 import random
+import re
 from pathlib import Path
 
 from PIL import Image, ImageDraw, ImageFont
@@ -17,7 +19,21 @@ _spec = importlib.util.spec_from_file_location("uwp_icons", ROOT / "scripts" / "
 icons = importlib.util.module_from_spec(_spec)
 _spec.loader.exec_module(icons)
 
-NAME = "MetroBi"
+
+def store_name() -> str:
+    """The name the Store reserved, which is not part of the repository: it comes from
+    `scripts/store.local.ps1` (or RUBI_STORE_NAME), the same file the packager reads."""
+    if os.environ.get("RUBI_STORE_NAME"):
+        return os.environ["RUBI_STORE_NAME"]
+    local = Path(__file__).resolve().with_name("store.local.ps1")
+    if local.exists():
+        found = re.search(r"\$storeDisplayName\s*=\s*'([^']+)'", local.read_text(encoding="utf-8-sig"))
+        if found:
+            return found.group(1)
+    raise SystemExit("需要 scripts/store.local.ps1（或环境变量 RUBI_STORE_NAME）里的商店名。")
+
+
+NAME = store_name()
 FONT = Path("C:/Windows/Fonts/segoeuil.ttf")
 # Tiles a little darker and lighter than cobalt, as a Start screen seen from afar.
 SHADES = [(0x00, 0x46, 0xD6), (0x00, 0x4A, 0xE0), (0x0A, 0x5C, 0xF5), (0x14, 0x66, 0xFA)]
