@@ -113,7 +113,9 @@ pub fn trace(what: &str) {
                     .and_then(|folder| folder.cast::<crate::xaml::IStorageItem>())
                     .and_then(|item| item.Path())
                     .map(|path| std::path::PathBuf::from(path.to_string()))
-                    .unwrap_or_else(|_| std::path::PathBuf::from("."));
+                    // Without the app's folder (which is the case worth logging) the temp folder is
+                // the one place a packaged app can still write.
+                .unwrap_or_else(|_| std::env::temp_dir());
                 folder.join("probe.log")
             })
             .clone()
@@ -150,7 +152,11 @@ pub fn load_object(xaml: &str) -> Result<IInspectable> {
 
 /// The element named `name` under `root`.
 pub fn named<T: Interface>(root: &IFrameworkElement, name: &str) -> Result<T> {
-    root.FindName(name)?.cast()
+    // A name the layout does not carry answers with a null and no code at all, so the name is
+    // written down here: a bare 0x00000000 says nothing about which one went missing.
+    root.FindName(name)
+        .and_then(|found| found.cast())
+        .inspect_err(|_| trace(&format!("no layout element named {name}")))
 }
 
 pub fn set_text(root: &IFrameworkElement, name: &str, text: &str) -> Result<()> {

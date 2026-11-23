@@ -50,14 +50,22 @@ static TOASTS: AtomicU64 = AtomicU64::new(0);
 static CHECKED: AtomicBool = AtomicBool::new(false);
 static PAGE_TURN: AtomicU64 = AtomicU64::new(0);
 
-const TABS: [(Tab, &str); 6] =
-    [
-    (Tab::Home, "Home"),
-    (Tab::Follow, "Follow"),
-    (Tab::Live, "Live"),
-    (Tab::Inbox, "Inbox"),
-    (Tab::Me, "Me"),
-    (Tab::Settings, "Settings"),
+/// The rail's buttons, named as the layout names them, in the order it stacks them.
+const RAIL_BUTTONS: [(Tab, &str); 6] = [
+    (Tab::Home, "RailHome"),
+    (Tab::Follow, "RailFollow"),
+    (Tab::Live, "RailLive"),
+    (Tab::Inbox, "RailInbox"),
+    (Tab::Me, "RailMe"),
+    (Tab::Settings, "RailSettings"),
+];
+/// The narrow window's bar keeps four: 消息 hangs off the home header and 设置 is a row of 我的
+/// there, so neither has a button of its own.
+const BAR_BUTTONS: [(Tab, &str); 4] = [
+    (Tab::Home, "BarHome"),
+    (Tab::Follow, "BarFollow"),
+    (Tab::Live, "BarLive"),
+    (Tab::Me, "BarMe"),
 ];
 /// The unread count on the 消息 icon.
 const BADGE: &str = r##"<Border x:Name="{}" Visibility="Collapsed" Background="#E33333" MinWidth="16" Height="16" Padding="4,0"
@@ -190,11 +198,12 @@ pub fn start() -> Result<()> {
     let window = Window::Current()?.cast::<IWindow>()?;
     let layout = LAYOUT
         .replace("<!--rail-badge-->", &badge("RailBadge", "12,-6,-12,0"))
-        .replace("<!--bar-badge-->", &badge("BarBadge", "14,-4,-14,0"));
+;
     let root = load(&splitter::fill(&layout))?;
     let page = named::<IContentControl>(&root, "Page")?;
     let dispatcher = window.Dispatcher()?;
-    let folder = ApplicationData::Current()?.cast::<IApplicationData>()?.LocalFolder()?;
+    let data = ApplicationData::Current()?;
+    let folder = data.cast::<IApplicationData>()?.LocalFolder()?;
     let data_dir = folder.cast::<IStorageItem>()?.Path()?;
     let widths = std::fs::read_to_string(panes_file(&data_dir)).map(|t| Widths::parse(&t)).unwrap_or_default();
     let prefs = std::fs::read_to_string(prefs_file(&data_dir)).map(|t| Prefs::parse(&t)).unwrap_or_default();
@@ -229,10 +238,11 @@ pub fn start() -> Result<()> {
         let _ = for_stop.refresh_now_playing();
     })?;
     on_click(&root, "RailSearch", || show_tab(Tab::Search))?;
-    for (tab, name) in TABS {
-        for prefix in ["Rail", "Bar"] {
-            on_click(&root, &format!("{prefix}{name}"), move || show_tab(tab))?;
-        }
+    for (tab, name) in RAIL_BUTTONS {
+        on_click(&root, name, move || show_tab(tab))?;
+    }
+    for (tab, name) in BAR_BUTTONS {
+        on_click(&root, name, move || show_tab(tab))?;
     }
     let revoker = window.SizeChanged(|_: Ref<IInspectable>, _: Ref<WindowSizeChangedEventArgs>| {
         let _ = window_resized();
@@ -549,11 +559,11 @@ impl Shell {
         let words = self.prefs.get().words;
         visible(&self.root, "LabelSearch", wide_enough)?;
         visible(&self.root, "RailIconSearch", !(words && wide_enough))?;
-        for (_, name) in TABS {
-            visible(&self.root, &format!("Label{name}"), wide_enough)?;
+        for (_, name) in RAIL_BUTTONS {
+            let label = name.trim_start_matches("Rail");
+            visible(&self.root, &format!("Label{label}"), wide_enough)?;
             // A narrow rail has no labels to stand in for its icons.
-            visible(&self.root, &format!("RailIcon{name}"), !(words && wide_enough))?;
-            visible(&self.root, &format!("BarIcon{name}"), !words)?;
+            visible(&self.root, &format!("RailIcon{label}"), !(words && wide_enough))?;
         }
         Ok(())
     }
@@ -561,12 +571,10 @@ impl Shell {
     /// Shows `count` unread messages on the 消息 icons; none hides them.
     pub fn set_unread(&self, count: u32) -> Result<()> {
         let label = if count > 99 { "99+".to_owned() } else { count.to_string() };
-        for name in ["RailBadge", "BarBadge"] {
-            let badge = named::<crate::xaml::IBorder>(&self.root, name)?;
-            badge.Child()?.cast::<crate::xaml::ITextBlock>()?.SetText(&label)?;
-            visible(&self.root, name, count > 0)?;
-        }
-        Ok(())
+        // Only the rail carries a 消息 button now: a narrow window has the entry in its header.
+        let badge = named::<crate::xaml::IBorder>(&self.root, "RailBadge")?;
+        badge.Child()?.cast::<crate::xaml::ITextBlock>()?.SetText(&label)?;
+        visible(&self.root, "RailBadge", count > 0)
     }
 
     /// Folds the navigation away while a page fills the screen.
@@ -679,9 +687,8 @@ impl Shell {
         let words = self.prefs().words;
         let shown = if words { Visibility::Collapsed } else { Visibility::Visible };
         let mut names: Vec<String> = vec!["RailIconSearch".to_owned()];
-        for (_, name) in TABS {
-            names.push(format!("RailIcon{name}"));
-            names.push(format!("BarIcon{name}"));
+        for (_, name) in RAIL_BUTTONS {
+            names.push(format!("RailIcon{}", name.trim_start_matches("Rail")));
         }
         for name in names {
             if let Ok(icon) = named::<IUIElement>(&self.root, &name) {
@@ -695,14 +702,11 @@ impl Shell {
         let color = if self.tab.get() == Tab::Search { COBALT } else { DIM };
         named::<IControl>(&self.root, "RailSearch")?
             .SetForeground(&SolidColorBrush::CreateInstanceWithColor(color)?)?;
-        for (tab, name) in TABS {
-            let color = if tab == self.tab.get() { COBALT } else { DIM };
+        for (tab, name) in RAIL_BUTTONS.iter().chain(BAR_BUTTONS.iter()) {
+            let color = if *tab == self.tab.get() { COBALT } else { DIM };
             let brush = SolidColorBrush::CreateInstanceWithColor(color)?;
-            for prefix in ["Rail", "Bar"] {
-                // 消息 and 设置 have no place on the narrow bar any more.
-                if let Ok(control) = named::<IControl>(&self.root, &format!("{prefix}{name}")) {
-                    control.SetForeground(&brush)?;
-                }
+            if let Ok(control) = named::<IControl>(&self.root, name) {
+                control.SetForeground(&brush)?;
             }
         }
         Ok(())
@@ -754,3 +758,38 @@ pub fn preloaded(bitmap: &windows_core::IInspectable) {
 fn badge(name: &str, margin: &str) -> String {
     BADGE.replacen("{}", name, 1).replacen("{}", margin, 1)
 }
+
+/// A name the layout does not carry answers with a plain null, and the window stops before it
+/// draws anything — the narrow bar losing two buttons that way once left the app on its splash
+/// screen. Checked while compiling, against the same tables the shell wires up.
+const _: () = {
+    const fn mentions(hay: &[u8], needle: &[u8]) -> bool {
+        let mut at = 0;
+        while at + needle.len() <= hay.len() {
+            let mut i = 0;
+            let mut same = true;
+            while i < needle.len() {
+                if hay[at + i] != needle[i] {
+                    same = false;
+                    break;
+                }
+                i += 1;
+            }
+            if same {
+                return true;
+            }
+            at += 1;
+        }
+        false
+    }
+    let mut at = 0;
+    while at < RAIL_BUTTONS.len() {
+        assert!(mentions(LAYOUT.as_bytes(), RAIL_BUTTONS[at].1.as_bytes()), "wired but not laid out");
+        at += 1;
+    }
+    let mut at = 0;
+    while at < BAR_BUTTONS.len() {
+        assert!(mentions(LAYOUT.as_bytes(), BAR_BUTTONS[at].1.as_bytes()), "wired but not laid out");
+        at += 1;
+    }
+};

@@ -28,7 +28,12 @@ struct App;
 
 impl IApplicationOverrides_Impl for App_Impl {
     fn OnLaunched(&self, _: Ref<LaunchActivatedEventArgs>) -> Result<()> {
-        shell::start()
+        let started = shell::start();
+        // A start that fails leaves the frame empty and the window black; say why in the log.
+        if let Err(problem) = &started {
+            crate::ui::trace(&format!("launch failed: {problem}"));
+        }
+        started
     }
 
     fn OnActivated(&self, args: Ref<IActivatedEventArgs>) -> Result<()> {
